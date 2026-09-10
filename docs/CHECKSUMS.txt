@@ -1,1 +1,5 @@
-SHA256  beta/vector-ppe-helper.user.js  5d16959eed93233505e382fc0c06df77b39fed32ca9b1910e8fa0ceb1043aa21
+# Expected SHA-256 checksums
+
+beta/vector-ppe-helper.user.js  f2292e65d3abd9e0ed1e009d1292d8ba50524480cc5a9a788abcbce6fa18a715  Vector PPE Helper v2.3.0-rc6
+
+The beta script is not considered published until the live raw GitHub file matches this checksum exactly.
