@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Check It - PPE Helper
 // @namespace    mission-ppe
-// @version      2.3.0-rc6
+// @version      2.3.0-rc15
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -18,7 +18,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '2.3.0-rc6';
+    const VERSION = '2.3.0-rc15';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -34,6 +34,11 @@
     const LAST_DIAGNOSTIC_KEY = 'vectorPpeLastDiagnostic_v3';
     const STOPPED_RUN_KEY = 'vectorPpeStoppedRun_v3';
     const MIGRATION_NOTICE_KEY = 'vectorPpeMigrationNotice_v3';
+    const PANEL_MINIMIZED_KEY = 'vectorPpePanelMinimized_v1';
+
+    // Page-session identity is used only to ensure post-submit dwell never carries
+    // across a full reload/navigation. It is not a signature or inspection identifier.
+    const PAGE_SESSION_ID = `${Date.now()}:${Math.round(performance.timeOrigin || Date.now())}:${Math.random().toString(36).slice(2, 10)}`;
 
     // Managed updater. Code updates are delivered by Tampermonkey from a static
     // GitHub raw URL. The manifest is advisory/safety metadata only; it never
@@ -48,6 +53,8 @@
     const UPDATE_FAILURE_INTERVAL_MS = 10 * 60 * 1000;
     const UPDATE_FETCH_TIMEOUT_MS = 5000;
     const REMOTE_HOLD_CACHE_MS = 24 * 60 * 60 * 1000;
+    const POST_SUBMIT_RETURN_DWELL_MS = 1500;
+    const FAILED_RETURN_EVIDENCE_FLOOR_MS = 10000;
 
     // Built-in mappings belong to this department/profile scope only. A profile
     // declaring a different scope must provide its own complete mappings.
@@ -265,8 +272,9 @@
             } else if (an !== bn) {
                 return an ? -1 : 1;
             } else {
-                const d = aa[i].localeCompare(bb[i]);
-                if (d) return d < 0 ? -1 : 1;
+                // Release tags are lowercase ASCII by policy. Compare code units
+                // directly so ordering is deterministic across browser locales.
+                if (aa[i] !== bb[i]) return aa[i] < bb[i] ? -1 : 1;
             }
         }
         return 0;
@@ -334,14 +342,19 @@
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const manifest = validateUpdateManifest(await response.json());
             const successfulAt = new Date().toISOString();
+            const currentIsHold = ['hold', 'disabled'].includes(manifest.status);
+            const priorWasHold = ['hold', 'disabled'].includes(clean(state?.manifest?.status).toLowerCase());
             const next = {
                 checkedAt: successfulAt,
                 successfulAt,
                 manifest,
                 error: '',
-                lastHoldSeenAt: ['hold', 'disabled'].includes(manifest.status)
+                lastHoldSeenAt: currentIsHold
                     ? successfulAt
-                    : ''
+                    : (state.lastHoldSeenAt || ''),
+                lastHoldClearedAt: !currentIsHold && priorWasHold && state.lastHoldSeenAt
+                    ? successfulAt
+                    : (state.lastHoldClearedAt || '')
             };
             saveJSON(UPDATE_STATE_KEY, next);
             refreshPanelInfo();
@@ -372,9 +385,13 @@
             }
             return { allowed: true, severity: 'unknown', message: 'Update status has not been checked yet.' };
         }
+
         const successfulAt = Date.parse(state.successfulAt || 0) || 0;
         const age = successfulAt ? Date.now() - successfulAt : Infinity;
+        const lastHoldSeenAt = Date.parse(state.lastHoldSeenAt || 0) || 0;
         const cmpMinimum = compareVersions(VERSION, manifest.minimumSupportedVersion);
+        const cmpLatest = compareVersions(VERSION, manifest.latestVersion);
+
         if (cmpMinimum != null && cmpMinimum < 0) {
             return {
                 allowed: false,
@@ -382,6 +399,7 @@
                 message: `Installed v${VERSION} is below required v${manifest.minimumSupportedVersion}. Open PPE Helper → UPDATES → OPEN UPDATE before starting another automated PPE run.`
             };
         }
+
         if (['hold', 'disabled'].includes(manifest.status)) {
             if (age <= REMOTE_HOLD_CACHE_MS) {
                 return {
@@ -390,13 +408,47 @@
                     message: manifest.message || 'Automation is temporarily held because the current Vector compatibility is not approved.'
                 };
             }
+
+            const holdSeen = lastHoldSeenAt
+                ? ` Last confirmed hold was received ${new Date(lastHoldSeenAt).toLocaleString()}.`
+                : '';
+            const updateHint = cmpLatest != null && cmpLatest < 0
+                ? ` Update v${manifest.latestVersion} is also available and should be installed before continuing if possible.`
+                : '';
+
             return {
                 allowed: true,
                 severity: 'warning',
-                message: `A previously received compatibility hold is older than ${Math.round(REMOTE_HOLD_CACHE_MS / 3600000)} hours and could not be reverified. Remote safety status is uncertain.${state.error ? ` ${state.error}` : ''}`
+                message: `A previously received compatibility hold is older than ${Math.round(REMOTE_HOLD_CACHE_MS / 3600000)} hours and could not be reverified. Remote safety status is uncertain.${holdSeen}${updateHint}${state.error ? ` ${state.error}` : ''}`
             };
         }
-        const cmpLatest = compareVersions(VERSION, manifest.latestVersion);
+
+        if (state.error) {
+            const ageHours = successfulAt ? Math.floor(age / 3600000) : null;
+            const updateHint = cmpLatest != null && cmpLatest < 0
+                ? ` Update v${manifest.latestVersion} is available (installed v${VERSION}).`
+                : '';
+            if (age > REMOTE_HOLD_CACHE_MS) {
+                return {
+                    allowed: true,
+                    severity: 'warning',
+                    message: `${state.error} Last successful compatibility check was about ${ageHours ?? 'unknown'} hour(s) ago, so remote safety status is stale.${updateHint}`
+                };
+            }
+            if (cmpLatest != null && cmpLatest < 0) {
+                return {
+                    allowed: true,
+                    severity: 'update',
+                    message: `Update available: v${manifest.latestVersion} (installed v${VERSION}). Latest compatibility refresh also failed, but the cached successful check is still within the ${Math.round(REMOTE_HOLD_CACHE_MS / 3600000)}-hour verification window. ${state.error}`
+                };
+            }
+            return {
+                allowed: true,
+                severity: 'warning',
+                message: `${state.error} Using the last successful compatibility result from ${state.successfulAt}.`
+            };
+        }
+
         if (cmpLatest != null && cmpLatest < 0) {
             return {
                 allowed: true,
@@ -404,24 +456,59 @@
                 message: `Update available: v${manifest.latestVersion} (installed v${VERSION}).`
             };
         }
-        if (state.error) {
-            return { allowed: true, severity: 'warning', message: state.error };
-        }
+
         return {
             allowed: true,
             severity: manifest.status === 'testing' ? 'testing' : 'ok',
-            message: manifest.message || `v${VERSION} is current on the ${UPDATE_CHANNEL.toUpperCase()} channel.`
+            message: manifest.message || `v${VERSION} is current for the ${UPDATE_CHANNEL} channel.`
         };
+    }
+
+    function compatibilityNeedsAcknowledgement(state, gate) {
+        if (!gate?.allowed) return false;
+        if (gate.severity === 'unknown') return true;
+
+        const successfulAt = Date.parse(state?.successfulAt || 0) || 0;
+        if (!successfulAt) return true;
+
+        const age = Date.now() - successfulAt;
+        const stale = age > REMOTE_HOLD_CACHE_MS;
+        const expiredHold = stale && ['hold', 'disabled'].includes(clean(state?.manifest?.status).toLowerCase());
+
+        // A transient refresh failure over a still-fresh successful manifest is
+        // visible in the panel but should not train users to dismiss a modal on
+        // every run. Require acknowledgement only when verification is actually
+        // absent/stale or a previously received hold has expired unverified.
+        return stale || expiredHold;
     }
 
     async function ensureRemoteCompatibilityBeforeRun() {
         const state = await fetchUpdateManifest(false, UPDATE_GATE_INTERVAL_MS);
         const gate = evaluateRemoteCompatibility(state);
+
         if (!gate.allowed) {
             setStatus(`UPDATE / COMPATIBILITY HOLD: ${gate.message}`, false);
             alert(`Vector PPE Helper cannot start a new automated run.\n\n${gate.message}\n\nTo update: PPE Helper → UPDATES → OPEN UPDATE.\n\nYou can still use Vector manually.`);
             return false;
         }
+
+        // GitHub/CSP/network uncertainty is intentionally fail-open so required
+        // PPE work is not prevented solely by updater reachability. Acknowledge
+        // only genuinely unverified/stale states; fresh cached status with a
+        // transient refresh error remains a visible, non-modal panel warning.
+        if (compatibilityNeedsAcknowledgement(state, gate)) {
+            const proceed = confirm(
+                `Vector PPE Helper could not fully verify remote compatibility status.\n\n` +
+                `${gate.message}\n\n` +
+                `Continue with this automated PPE run anyway?\n\n` +
+                `Choose Cancel if you want to troubleshoot/update first.`
+            );
+            if (!proceed) {
+                setStatus(`Run cancelled: ${gate.message}`, false);
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -456,6 +543,8 @@
                     <b>Minimum supported:</b> ${escapeHtml(manifest.minimumSupportedVersion || 'unknown')}<br>
                     <b>Remote status:</b> ${escapeHtml(manifest.status || 'unknown')}<br>
                     <b>Last successful check:</b> ${escapeHtml(state.successfulAt || 'never')}<br>
+                    <b>Last compatibility hold seen:</b> ${escapeHtml(state.lastHoldSeenAt || 'never')}<br>
+                    <b>Last compatibility hold cleared:</b> ${escapeHtml(state.lastHoldClearedAt || 'never')}<br>
                     <b>Current result:</b> ${escapeHtml(gate.message)}
                 </div>
                 ${manifest.releaseNotes ? `<div style="background:#f4f6f8;padding:9px;border-radius:5px;margin-bottom:10px"><b>Release notes:</b><br>${escapeHtml(manifest.releaseNotes)}</div>` : ''}
@@ -784,6 +873,9 @@
 
     window.addEventListener('storage', event => {
         if (event.key === CONFIG_KEY) configCache = null;
+        if (event.key === PANEL_MINIMIZED_KEY) {
+            applyPanelMinimizedState(event.newValue === '1', false);
+        }
     });
 
     function getRun() {
@@ -802,9 +894,175 @@
 
     function setStatus(message, ok = true) {
         const el = document.getElementById('vector-ppe-status-v2');
-        if (!el) return;
-        el.textContent = message;
-        el.style.color = ok ? '#174f2a' : '#9f1d1d';
+        if (el) {
+            el.textContent = message;
+            el.style.color = ok ? '#174f2a' : '#9f1d1d';
+        }
+        if (!ok) {
+            const badge = document.getElementById('vector-ppe-mini-badge-v1');
+            if (badge) {
+                badge.textContent = '!';
+                badge.style.display = 'block';
+            }
+        }
+    }
+
+    function diagnosticPrivateNames(item = null) {
+        const config = getConfig();
+        return [
+            config.inspectorName,
+            item?.ownerName,
+            ...(config.peopleDirectory || []).map(p => p.name)
+        ].map(clean).filter(Boolean);
+    }
+
+    function redactDiagnosticText(value, item = null) {
+        let text = clean(value);
+        for (const name of diagnosticPrivateNames(item)) {
+            text = text.replace(new RegExp(escapeRegex(name), 'gi'), '[REDACTED_NAME]');
+        }
+        return text;
+    }
+
+    function safeDiagnosticTableStructure(item = null) {
+        return [...document.querySelectorAll('table,[role="table"],[role="grid"]')]
+            .filter(visible)
+            .filter(el => !el.closest(`#${PANEL_ID}, #${OVERLAY_ID}`))
+            .slice(0, 20)
+            .map(container => {
+                const headers = [...container.querySelectorAll('th,[role="columnheader"]')]
+                    .filter(visible)
+                    .map(el => redactDiagnosticText(el.textContent, item))
+                    .filter(Boolean)
+                    .slice(0, 20);
+                const rowCount = container.matches('table')
+                    ? [...container.querySelectorAll('tbody tr')].filter(visible).length
+                    : [...container.querySelectorAll('[role="row"]')]
+                        .filter(row => visible(row) && !row.querySelector('[role="columnheader"]')).length;
+                return {
+                    tag: container.tagName.toLowerCase(),
+                    role: clean(container.getAttribute('role') || ''),
+                    classes: [...container.classList].slice(0, 12),
+                    dataTestId: clean(container.getAttribute('data-testid') || ''),
+                    headers,
+                    rowCount
+                };
+            });
+    }
+
+    function diagnosticTextHash(value) {
+        // Non-cryptographic diagnostic fingerprint only. Never used as completion evidence.
+        let hash = 2166136261;
+        const input = String(value || '');
+        for (let i = 0; i < input.length; i++) {
+            hash ^= input.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
+        }
+        return (hash >>> 0).toString(16).padStart(8, '0');
+    }
+
+    function diagnosticCandidateLines(item) {
+        if (!item || !isAssetPageFor(item)) return [];
+        const selector = 'h1,h2,h3,h4,h5,h6,p,li,dt,dd,label,time,strong,b,span,div';
+        const pattern = /\b(?:due|last|complete(?:d)?|inspect(?:ion|ed)?|next)\b|(?:\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i;
+        const candidates = [];
+
+        for (const el of document.querySelectorAll(selector)) {
+            if (!visible(el)) continue;
+            if (el.closest(`#${PANEL_ID}, #${OVERLAY_ID}, table, [role="table"], [role="grid"]`)) continue;
+
+            const raw = clean(el.innerText || el.textContent || '');
+            if (!raw || raw.length > 80 || !pattern.test(raw)) continue;
+            const redacted = redactDiagnosticText(raw, item);
+            if (!redacted) continue;
+
+            // Prefer leaf/specific text over wrapper text so the 20-line budget
+            // is more likely to retain a concrete "Next Due ..." / "Last inspected ..."
+            // line instead of nested layout containers.
+            const hasMatchingDescendant = [...el.querySelectorAll(selector)].some(child => {
+                if (!visible(child)) return false;
+                if (child.closest('table, [role="table"], [role="grid"]')) return false;
+                const childText = clean(child.innerText || child.textContent || '');
+                return !!childText && childText.length <= 80 && pattern.test(childText);
+            });
+            candidates.push({
+                text: redacted,
+                // Date-bearing lines are the most useful part of the field
+                // experiment because they can reveal Last/Next/Due changes.
+                datePenalty: /\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}/.test(redacted) ? 0 : 1,
+                wrapperPenalty: hasMatchingDescendant ? 1 : 0,
+                length: redacted.length
+            });
+        }
+
+        candidates.sort((a, b) =>
+            a.datePenalty - b.datePenalty ||
+            a.wrapperPenalty - b.wrapperPenalty ||
+            a.length - b.length ||
+            (a.text < b.text ? -1 : a.text > b.text ? 1 : 0)
+        );
+
+        const seen = new Set();
+        const lines = [];
+        for (const candidate of candidates) {
+            if (seen.has(candidate.text)) continue;
+            seen.add(candidate.text);
+            lines.push(candidate.text);
+            if (lines.length >= 20) break;
+        }
+        return lines;
+    }
+
+    function assetPageDiagnosticFingerprint(item) {
+        if (!item || !isAssetPageFor(item)) return null;
+        const clone = document.body.cloneNode(true);
+        clone.querySelectorAll(`#${PANEL_ID}, #${OVERLAY_ID}, script, style, noscript`).forEach(el => el.remove());
+
+        const bodyText = redactDiagnosticText(uiText(clone.textContent || ''), item);
+
+        return {
+            itemKey: `${item.pool}:${item.itemId}`,
+            capturedAt: new Date().toISOString(),
+            urlPath: location.pathname,
+            textHash: diagnosticTextHash(bodyText),
+            textLength: bodyText.length,
+            candidateLines: diagnosticCandidateLines(item)
+        };
+    }
+
+    function capturePostSubmitFingerprintOnce(run, item) {
+        if (!run || !item || run.postSubmitAssetFingerprint) return false;
+        try {
+            run.postSubmitAssetFingerprint = assetPageDiagnosticFingerprint(item);
+            return !!run.postSubmitAssetFingerprint;
+        } catch (error) {
+            console.warn('Vector PPE Helper: first-contact fingerprint capture failed:', error);
+            return false;
+        }
+    }
+
+    function capturePostSubmitSettledFingerprintOnce(run, item) {
+        if (!run || !item || run.postSubmitSettledFingerprint) return false;
+        try {
+            run.postSubmitSettledFingerprint = assetPageDiagnosticFingerprint(item);
+            return !!run.postSubmitSettledFingerprint;
+        } catch (error) {
+            console.warn('Vector PPE Helper: settled fingerprint capture failed:', error);
+            return false;
+        }
+    }
+
+    function persistDiagnosticRunState(run) {
+        // Diagnostics are never allowed to stop a run that may already have
+        // submitted an official inspection. Best-effort persistence only.
+        try {
+            saveJSON(RUN_KEY, run);
+            try { refreshPanelInfo(); } catch {}
+            return true;
+        } catch (error) {
+            console.warn('Vector PPE Helper: diagnostic state could not be persisted:', error);
+            return false;
+        }
     }
 
     function buildDiagnostic(message, run = getRun()) {
@@ -853,8 +1111,19 @@
                 submitInspectionVisible: !!exactButton('Submit Inspection'),
                 passedButtons: exactButtons('Passed').length,
                 failedButtons: exactButtons('Failed').length,
-                visibleButtons
-            }
+                visibleButtons,
+                historyFallbackEnabled: run?.historyFallbackEnabled ?? null
+            },
+            verificationDiagnostics: item ? {
+                visibleTableStructures: isAssetPageFor(item) ? safeDiagnosticTableStructure(item) : [],
+                capturedHistoryStructure: run?.historyStructureCapture || [],
+                preSubmitAssetFingerprint: run?.preSubmitAssetFingerprint || null,
+                postSubmitAssetFingerprint: run?.postSubmitAssetFingerprint || null,
+                postSubmitSettledFingerprint: run?.postSubmitSettledFingerprint || null,
+                postSubmitReturnFirstSeenAt: run?.postSubmitReturnFirstSeenAt || null,
+                postSubmitReturnPageSessionId: run?.postSubmitReturnPageSessionId || null,
+                inspectionItemKey: run?.inspectionItemKey || null
+            } : null
         };
     }
 
@@ -896,6 +1165,12 @@
             saveRun(run);
         }
         setStatus('STOPPED: ' + message + ' Open DIAGNOSTICS for a shareable report.', false);
+
+        // A stopped run must never remain hidden behind a healthy-looking
+        // minimized progress badge. Expand for the stop without changing the
+        // inspector's saved minimize preference for the next normal page load.
+        applyPanelMinimizedState(false, false);
+        updateMinimizedPanelBadge(run ? { ...run, phase: 'stopped' } : getRun());
     }
 
     function removeOverlay() {
@@ -1163,13 +1438,16 @@
             groups[owner].total += 1;
             const failed = item.q1 === 'fail' || item.q2 === 'fail';
             if (failed) groups[owner].failed += 1;
+            const completion = (run.completed || []).find(c => c.assetId === item.assetId);
             groups[owner].items.push({
                 assetId: item.assetId,
                 type: item.type,
                 q1: item.q1,
                 q2: item.q2,
                 failureNote: item.failureNote || '',
-                signatureLabel: (run.completed || []).find(c => c.assetId === item.assetId)?.signatureLabel || ''
+                signatureLabel: completion?.signatureLabel || '',
+                evidence: completion?.evidence || '',
+                verificationDiagnostics: completion?.verificationDiagnostics || null
             });
         }
         return {
@@ -1183,6 +1461,9 @@
             completedAt: new Date().toISOString(),
             total: (run.items || []).length,
             failures: (run.items || []).filter(i => i.q1 === 'fail' || i.q2 === 'fail').length,
+            inferredCompletions: (run.completed || []).filter(
+                c => String(c?.evidence || '').startsWith('post-submit-return-')
+            ).length,
             groups
         };
     }
@@ -1192,15 +1473,64 @@
         return Array.isArray(history) ? history : [];
     }
 
+    function stripVerificationDiagnosticsFromSummary(summary) {
+        const copy = deepClone(summary);
+        for (const group of Object.values(copy?.groups || {})) {
+            for (const item of group?.items || []) {
+                if ('verificationDiagnostics' in item) item.verificationDiagnostics = null;
+            }
+        }
+        copy.diagnosticsCompacted = true;
+        return copy;
+    }
+
+    function compactRunHistoryDiagnostics(history, fullCount = 3) {
+        return (Array.isArray(history) ? history : []).slice(0, 20).map(
+            (summary, index) => index < fullCount ? summary : stripVerificationDiagnosticsFromSummary(summary)
+        );
+    }
+
     function saveRunHistory(history) {
         saveJSON(RUN_HISTORY_KEY, (Array.isArray(history) ? history : []).slice(0, 20));
     }
 
     function recordCompletedRun(summary) {
-        saveJSON(LAST_SUMMARY_KEY, summary);
+        const warnings = [];
+
+        // LAST RUN is the authoritative local export target and keeps full
+        // verification diagnostics for the just-finished run.
+        try {
+            saveJSON(LAST_SUMMARY_KEY, summary);
+        } catch (error) {
+            // Free space by compacting older history, then retry the critical
+            // last-summary write once.
+            try {
+                saveRunHistory(compactRunHistoryDiagnostics(getRunHistory(), 0));
+                saveJSON(LAST_SUMMARY_KEY, summary);
+            } catch (retryError) {
+                warnings.push(`LAST RUN could not be stored: ${retryError.message}`);
+            }
+        }
+
         const history = getRunHistory().filter(x => x?.runId !== summary.runId);
         history.unshift(summary);
-        saveRunHistory(history);
+
+        // Keep full field diagnostics only for the newest three history entries;
+        // evidence/failure/signature metadata remains in all 20 entries.
+        try {
+            saveRunHistory(compactRunHistoryDiagnostics(history, 3));
+        } catch (error) {
+            try {
+                // Emergency compact form preserves the run list even if the
+                // origin is near its localStorage quota.
+                saveRunHistory(compactRunHistoryDiagnostics(history, 0));
+                warnings.push('Older run diagnostics were compacted because browser storage was near its limit.');
+            } catch (retryError) {
+                warnings.push(`Run history could not be stored: ${retryError.message}`);
+            }
+        }
+
+        return warnings;
     }
 
     function migrateLegacyRunHistory() {
@@ -1231,6 +1561,15 @@
             </div>
         `;
 
+        if (Number(summary.inferredCompletions || 0) > 0) {
+            const inferred = document.createElement('div');
+            inferred.style.cssText = 'background:#fff4e5;border:2px solid #d49b42;padding:10px;margin:0 0 12px;border-radius:5px;line-height:1.45;';
+            inferred.innerHTML =
+                `<b>VERIFY IN VECTOR:</b> ${escapeHtml(String(summary.inferredCompletions))} item(s) used post-submit return-to-asset completion evidence. ` +
+                'The helper did not click Submit again; confirm those item(s) in Vector\'s own inspection history.';
+            box.appendChild(inferred);
+        }
+
         for (const [owner, group] of Object.entries(summary.groups || {})) {
             const header = document.createElement('div');
             header.style.cssText = 'margin:12px 0 5px;padding:8px 10px;background:#eaf0f7;border-left:4px solid #173f70;font-weight:700;';
@@ -1246,14 +1585,37 @@
                     `Age/label: <b>${escapeHtml((item.q1 || '').toUpperCase())}</b> — ` +
                     `Damage: <b>${escapeHtml((item.q2 || '').toUpperCase())}</b>` +
                     (item.failureNote ? `<br><span style="font-size:12px"><b>Failure note:</b> ${escapeHtml(item.failureNote)}</span>` : '') +
-                    (item.signatureLabel ? `<br><span style="font-size:11px;color:#666">Signature variant: ${escapeHtml(item.signatureLabel)}</span>` : '');
+                    (item.signatureLabel ? `<br><span style="font-size:11px;color:#666">Signature variant: ${escapeHtml(item.signatureLabel)}</span>` : '') +
+                    (String(item.evidence || '').startsWith('post-submit-return-')
+                        ? '<br><span style="font-size:12px;color:#8a5b00"><b>Completion verification:</b> inferred from a stable return to the exact asset page after one Submit — verify this item in Vector history.</span>'
+                        : '') +
+                    (item.evidence ? `<br><span style="font-size:10px;color:#777">Evidence: ${escapeHtml(item.evidence)}</span>` : '');
                 box.appendChild(row);
             }
         }
 
+        const exportNote = document.createElement('div');
+        exportNote.style.cssText = 'font-size:11px;color:#666;margin-top:12px;line-height:1.35;';
+        exportNote.textContent =
+            'Run-summary JSON includes the stored run record, which may contain inspector/owner names and failure notes. Share it only where appropriate.';
+        box.appendChild(exportNote);
+
+        const summaryJson = JSON.stringify(summary, null, 2);
+        const copy = makeButton('COPY RUN SUMMARY');
+        copy.onclick = async () => {
+            const ok = await copyText(summaryJson);
+            setStatus(ok ? 'Run summary copied.' : 'Could not copy run summary.', ok);
+        };
+
+        const download = makeButton('DOWNLOAD RUN SUMMARY (JSON)');
+        download.onclick = () => downloadTextFile(
+            `vector-ppe-run-${clean(summary.runId || 'summary')}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
+            summaryJson
+        );
+
         const close = makeButton('Close');
         close.onclick = () => overlay.remove();
-        box.appendChild(close);
+        box.append(copy, download, close);
     }
 
     function showRunHistory() {
@@ -1341,6 +1703,8 @@
             report.checks.historyHeaderText = history ? historyContainerHeaderText(history) : '';
             report.checks.historySortDirection = history ? historySortDirection() : 'unknown';
             report.checks.historyRowCount = history ? historyRows(history).length : 0;
+            report.checks.visibleTableStructures = safeDiagnosticTableStructure(item);
+            report.checks.assetPageFingerprint = item ? assetPageDiagnosticFingerprint(item) : null;
             return report;
         }
 
@@ -1393,7 +1757,7 @@
         box.innerHTML = `
             <div style="font-size:22px;font-weight:700;margin-bottom:6px">PPE Helper Diagnostics</div>
             <div style="font-size:12px;line-height:1.45;background:#fff4e5;padding:9px;margin-bottom:8px">
-                Stop diagnostics intentionally exclude signatures and local failure-note content. The Live DOM Preflight is read-only and can be run before sandbox tests.
+                Diagnostics intentionally exclude signatures and local failure-note content. Structural captures may also be saved when history verification is unavailable. The Live DOM Preflight is read-only.
             </div>
         `;
 
@@ -1411,19 +1775,19 @@
             ta.style.cssText = 'width:100%;height:380px;box-sizing:border-box;font-family:Consolas,monospace;font-size:12px;padding:8px;margin-top:8px;';
             box.appendChild(ta);
 
-            const copy = makeButton('COPY LAST STOP REPORT');
+            const copy = makeButton('COPY LAST DIAGNOSTIC');
             copy.onclick = async () => {
                 const ok = await copyText(ta.value);
                 setStatus(ok ? 'Diagnostic copied.' : 'Could not copy diagnostic.', ok);
             };
 
-            const download = makeButton('DOWNLOAD LAST STOP REPORT');
+            const download = makeButton('DOWNLOAD LAST DIAGNOSTIC');
             download.onclick = () => downloadTextFile(
                 `vector-ppe-diagnostic-${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
                 ta.value
             );
 
-            const clear = makeButton('CLEAR STOP DIAGNOSTIC', { background: '#fff0f0', color: '#8b1e1e' });
+            const clear = makeButton('CLEAR DIAGNOSTIC', { background: '#fff0f0', color: '#8b1e1e' });
             clear.onclick = () => {
                 localStorage.removeItem(LAST_DIAGNOSTIC_KEY);
                 overlay.remove();
@@ -2571,6 +2935,9 @@
         run.phase = 'submitted';
         run.submittedAt = Date.now();
         run.inspectionUrl = location.href;
+        run.inspectionItemKey = `${item.pool}:${item.itemId}`;
+        run.postSubmitReturnFirstSeenAt = null;
+        run.postSubmitReturnPageSessionId = null;
         saveRun(run);
 
         setStatus(`${run.index + 1}/${run.items.length} — submitting Failure Details for ${item.assetId} exactly once...`);
@@ -2581,6 +2948,124 @@
     // ============================================================
     // COMPLETION EVIDENCE
     // ============================================================
+
+    function clearPostSubmitReturnCandidate(run) {
+        if (!run) return;
+        if (!run.postSubmitReturnFirstSeenAt && !run.postSubmitReturnPageSessionId) return;
+        run.postSubmitReturnFirstSeenAt = null;
+        run.postSubmitReturnPageSessionId = null;
+        persistDiagnosticRunState(run);
+    }
+
+    function evaluatePostSubmitReturnCandidate(run, item) {
+        // Live Vector behavior observed 2026-09-10: after a successful Submit,
+        // Vector may navigate directly back to the exact PPE asset page.
+        //
+        // This remains weaker than a completed-instance view or a verified
+        // history +1 row. To reduce render-race and delayed Failure Details risk,
+        // the qualifying asset-page state must remain continuously true for at
+        // least POST_SUBMIT_RETURN_DWELL_MS within THIS page session. Failed
+        // inspections do not even start this dwell until
+        // FAILED_RETURN_EVIDENCE_FLOOR_MS after the main Submit, giving Vector's
+        // Failure Details modal first priority.
+        //
+        // This evaluator mutates only the dwell/fingerprint diagnostic state.
+        // It never clicks Submit.
+        if (!run || !item) return null;
+        if (!['submitted', 'failed-main-submitted'].includes(run.phase)) {
+            clearPostSubmitReturnCandidate(run);
+            return null;
+        }
+
+        const submittedAt = Number(run.submittedAt);
+        if (!Number.isFinite(submittedAt)) {
+            clearPostSubmitReturnCandidate(run);
+            return null;
+        }
+        const age = Date.now() - submittedAt;
+        if (age < 0 || age > 120000) {
+            clearPostSubmitReturnCandidate(run);
+            return null;
+        }
+
+        const itemKey = `${item.pool}:${item.itemId}`;
+        if (run.inspectionItemKey !== itemKey) {
+            clearPostSubmitReturnCandidate(run);
+            return null;
+        }
+
+        // Diagnostic capture happens as soon as the exact asset page is reachable
+        // after Submit, even if the page never satisfies the weak completion guard.
+        // This is observational only and is never itself completion evidence.
+        if (isAssetPageFor(item) && !run.postSubmitAssetFingerprint) {
+            capturePostSubmitFingerprintOnce(run, item);
+            persistDiagnosticRunState(run);
+        }
+
+        // Also capture the first visibly settled/idle asset-page state. This is
+        // the fingerprint that should be compared with the settled pre-submit
+        // fingerprint during the field experiment. It is diagnostic only.
+        if (
+            isAssetPageFor(item) &&
+            !!exactButton('Start Inspection') &&
+            !run.postSubmitSettledFingerprint
+        ) {
+            capturePostSubmitSettledFingerprintOnce(run, item);
+            persistDiagnosticRunState(run);
+        }
+
+        if (run.phase === 'failed-main-submitted' && age < FAILED_RETURN_EVIDENCE_FLOOR_MS) {
+            clearPostSubmitReturnCandidate(run);
+            return null;
+        }
+
+        const prior = inspectionFromUrl(run.inspectionUrl);
+        const qualifies = !!(
+            prior &&
+            prior.template === item.template &&
+            prior.instance &&
+            isAssetPageFor(item) &&
+            !currentInspection() &&
+            !findChooserRoot() &&
+            !exactButton('Submit Inspection') &&
+            exactButtons('Passed').length === 0 &&
+            exactButtons('Failed').length === 0 &&
+            !!exactButton('Start Inspection')
+        );
+
+        if (!qualifies) {
+            clearPostSubmitReturnCandidate(run);
+            return null;
+        }
+
+        // A dwell candidate never survives a full page reload. A newly loaded
+        // page must provide a fresh 1.5-second continuous observation window.
+        if (
+            !run.postSubmitReturnFirstSeenAt ||
+            run.postSubmitReturnPageSessionId !== PAGE_SESSION_ID
+        ) {
+            run.postSubmitReturnFirstSeenAt = Date.now();
+            run.postSubmitReturnPageSessionId = PAGE_SESSION_ID;
+            persistDiagnosticRunState(run);
+            return null;
+        }
+
+        const dwell = Date.now() - Number(run.postSubmitReturnFirstSeenAt);
+        if (!Number.isFinite(dwell) || dwell < 0) {
+            run.postSubmitReturnFirstSeenAt = Date.now();
+            run.postSubmitReturnPageSessionId = PAGE_SESSION_ID;
+            capturePostSubmitFingerprintOnce(run, item);
+            persistDiagnosticRunState(run);
+            return null;
+        }
+        if (dwell < POST_SUBMIT_RETURN_DWELL_MS) return null;
+
+        saveDiagnostic(
+            `${item.assetId}: post-submit return evidence satisfied after ${Math.round(dwell)} ms dwell.`,
+            run
+        );
+        return `post-submit-return-to-exact-asset-instance-${prior.instance}-dwell-${Math.round(dwell)}ms`;
+    }
 
     function completionEvidence(run, item) {
         const mode = getMode(run.modeKey);
@@ -2597,6 +3082,9 @@
                 return `completed-inspection-view-instance-${current.instance}`;
             }
         }
+
+        const returnEvidence = evaluatePostSubmitReturnCandidate(run, item);
+        if (returnEvidence) return returnEvidence;
 
         if (run.historyFallbackEnabled === true && isAssetPageFor(item) && assetPageContainsExpectedId(item)) {
             if (!clean(run.inspectorName)) return null;
@@ -2634,13 +3122,33 @@
             failureNote: item.failureNote || '',
             signatureLabel: run.signatureUsed || '',
             evidence,
+            verificationDiagnostics: (
+                String(evidence || '').startsWith('post-submit-return-') ||
+                run.historyFallbackEnabled === false ||
+                (run.historyStructureCapture || []).length > 0 ||
+                !!run.preSubmitAssetFingerprint ||
+                !!run.postSubmitAssetFingerprint ||
+                !!run.postSubmitSettledFingerprint
+            ) ? {
+                historyStructureCapture: run.historyStructureCapture || [],
+                preSubmitAssetFingerprint: run.preSubmitAssetFingerprint || null,
+                postSubmitAssetFingerprint: run.postSubmitAssetFingerprint || null,
+                postSubmitSettledFingerprint: run.postSubmitSettledFingerprint || null
+            } : null,
             at: new Date().toISOString()
         });
 
         run.index += 1;
         run.phase = 'asset';
         run.inspectionUrl = null;
+        run.inspectionItemKey = null;
         run.submittedAt = null;
+        run.postSubmitReturnFirstSeenAt = null;
+        run.postSubmitReturnPageSessionId = null;
+        run.preSubmitAssetFingerprint = null;
+        run.postSubmitAssetFingerprint = null;
+        run.postSubmitSettledFingerprint = null;
+        run.historyStructureCapture = [];
         run.baselineCompleteCount = null;
         run.historyFallbackEnabled = null;
         run.historyBaselineWarning = '';
@@ -2654,12 +3162,18 @@
             const summary = summarizeCompletedRun(run);
 
             commitGearSnapshotsFromRun(run);
-            recordCompletedRun(summary);
+            const archiveWarnings = recordCompletedRun(summary);
             const stopped = loadJSON(STOPPED_RUN_KEY, null);
             if (stopped?.modeKey === run.modeKey) localStorage.removeItem(STOPPED_RUN_KEY);
             clearRun();
 
-            setStatus(`RUN COMPLETE — ${total}/${total} ${mode.short} inspection(s) recorded for ${owner}.`);
+            const archiveNote = archiveWarnings.length
+                ? ` Local archive warning: ${archiveWarnings.join(' ')} Download this run summary now.`
+                : '';
+            setStatus(
+                `RUN COMPLETE — ${total}/${total} ${mode.short} inspection(s) recorded for ${owner}.${archiveNote}`,
+                archiveWarnings.length === 0
+            );
             setTimeout(() => showRunSummary(summary), 350);
             return;
         }
@@ -2691,7 +3205,7 @@
         const item = run.items[run.index];
         const start = Date.now();
 
-        while (Date.now() - start < 25000) {
+        while (Date.now() - start < 30000) {
             const modal = findFailureModalRoot(item.assetId);
             if (modal) {
                 setStatus(`${run.index + 1}/${run.items.length} — Failure Details detected for ${item.assetId}...`);
@@ -2708,7 +3222,7 @@
             await sleep(200);
         }
 
-        stopRun(`${item.assetId}: Submit was clicked once, but neither Failure Details nor verified completion appeared within 25 seconds.`);
+        stopRun(`${item.assetId}: Submit was clicked once, but neither Failure Details nor verified completion appeared within 30 seconds.`);
     }
 
     // ============================================================
@@ -2750,7 +3264,10 @@
             if (anyFailure) {
                 run.phase = 'failed-main-submitted';
                 run.inspectionUrl = location.href;
+                run.inspectionItemKey = `${item.pool}:${item.itemId}`;
                 run.submittedAt = Date.now();
+                run.postSubmitReturnFirstSeenAt = null;
+                run.postSubmitReturnPageSessionId = null;
                 saveRun(run);
 
                 setStatus(`${run.index + 1}/${run.items.length} — submitting ${item.assetId} once and waiting for failure handling...`);
@@ -2761,7 +3278,10 @@
 
             run.phase = 'submitted';
             run.inspectionUrl = location.href;
+            run.inspectionItemKey = `${item.pool}:${item.itemId}`;
             run.submittedAt = Date.now();
+            run.postSubmitReturnFirstSeenAt = null;
+            run.postSubmitReturnPageSessionId = null;
             saveRun(run);
 
             setStatus(`${run.index + 1}/${run.items.length} — submitting ${item.assetId} exactly once...`);
@@ -2794,6 +3314,17 @@
             return;
         }
 
+        const itemKey = `${item.pool}:${item.itemId}`;
+        if (run.preSubmitAssetFingerprint?.itemKey !== itemKey) {
+            run.preSubmitAssetFingerprint = assetPageDiagnosticFingerprint(item);
+            run.postSubmitAssetFingerprint = null;
+            run.postSubmitSettledFingerprint = null;
+            run.postSubmitReturnFirstSeenAt = null;
+            run.postSubmitReturnPageSessionId = null;
+            run.inspectionItemKey = null;
+            saveRun(run);
+        }
+
         if (run.historyFallbackEnabled !== true && run.historyFallbackEnabled !== false) {
             try {
                 run.baselineCompleteCount = await waitForStableHistoryBaseline(item, mode.title);
@@ -2801,20 +3332,27 @@
                 run.historyBaselineWarning = '';
             } catch (error) {
                 // A Vector markup change must not force us to guess a baseline or
-                // make the whole helper unusable. Continue with the stronger
-                // inspection-instance completion evidence only; history fallback
-                // is explicitly disabled for this item.
+                // make the whole helper unusable. Continue with stronger evidence
+                // paths only; capture the safe table structure so the selector can
+                // be repaired from a legitimate inspection without collecting row text.
                 run.baselineCompleteCount = null;
                 run.historyFallbackEnabled = false;
                 run.historyBaselineWarning = error.message;
+                run.historyStructureCapture = safeDiagnosticTableStructure(item);
             }
             saveRun(run);
+            if (run.historyFallbackEnabled === false) {
+                saveDiagnostic(
+                    `${item.assetId}: history completion fallback unavailable; captured visible table/grid structure for selector repair.`,
+                    run
+                );
+            }
         }
 
         if (run.historyFallbackEnabled === false) {
             setStatus(
                 `${run.index + 1}/${run.items.length} — ${item.assetId}: history fallback unavailable; ` +
-                'continuing with inspection-instance completion verification only.'
+                'continuing with stronger instance evidence first; post-submit return evidence remains a flagged fallback.'
             );
         } else {
             setStatus(`${run.index + 1}/${run.items.length} — opening ${mode.short} chooser for ${item.assetId}...`);
@@ -3260,13 +3798,21 @@
             if (start.disabled) return;
             start.disabled = true;
             let committed = false;
+            let createdRunId = null;
             try {
+                // fatalIssue normally disables START, so this is not expected to
+                // fire from an ordinary click. Keep it as a defensive assertion
+                // in case the handler is invoked programmatically in the future.
                 if (fatalIssue) {
                     alert('This run is blocked by a discovery or mapping error.');
                     return;
                 }
 
                 if (!(await ensureRemoteCompatibilityBeforeRun())) return;
+
+                // The update check is asynchronous. If the user closed/cancelled
+                // this preview while it was running, do not launch a stale run.
+                if (!document.contains(start) || !document.contains(overlay)) return;
 
                 const selected = [];
                 for (const row of rows) {
@@ -3311,9 +3857,10 @@
                     }))
                 }));
 
+                createdRunId = 'ppe-' + Date.now();
                 const run = {
                     version: VERSION,
-                    runId: 'ppe-' + Date.now(),
+                    runId: createdRunId,
                     startedAt: new Date().toISOString(),
                     modeKey,
                     ownerName: owners.length === 1 ? owners[0].name : ownerLabel,
@@ -3329,7 +3876,14 @@
                     historyFallbackEnabled: null,
                     historyBaselineWarning: '',
                     inspectionUrl: null,
+                    inspectionItemKey: null,
                     submittedAt: null,
+                    postSubmitReturnFirstSeenAt: null,
+                    postSubmitReturnPageSessionId: null,
+                    preSubmitAssetFingerprint: null,
+                    postSubmitAssetFingerprint: null,
+                    postSubmitSettledFingerprint: null,
+                    historyStructureCapture: [],
                     chooserOpenedAt: null,
                     completed: [],
                     signatureUsed: null
@@ -3340,6 +3894,32 @@
                 overlay.remove();
                 setStatus(`Starting ${selected.length}-item ${mode.short} run for ${ownerLabel}...`);
                 location.href = selected[0].url;
+            } catch (error) {
+                let persistedRun = null;
+                try { persistedRun = getRun(); } catch {}
+
+                const runWasPersisted = !!(
+                    createdRunId &&
+                    persistedRun &&
+                    persistedRun.runId === createdRunId
+                );
+
+                const message = runWasPersisted
+                    ? `PPE run ${createdRunId} was created, but startup did not finish cleanly: ${error?.message || error}. Do NOT press START again. Use ABORT ACTIVE RUN, or resume the existing run only after confirming it is the intended inspection.`
+                    : `Unable to start PPE run: ${error?.message || error}`;
+
+                // If localStorage itself is the failure (for example quota exceeded),
+                // diagnostic persistence may fail too. Never let that hide the error.
+                try { saveDiagnostic(message, runWasPersisted ? persistedRun : null); } catch {}
+                setStatus(message, false);
+
+                if (runWasPersisted) {
+                    committed = true;
+                    if (document.contains(overlay)) overlay.remove();
+                    alert(message);
+                } else if (document.contains(overlay)) {
+                    alert(message);
+                }
             } finally {
                 if (!committed && document.contains(start)) start.disabled = false;
             }
@@ -3995,6 +4575,87 @@
         setStatus('Run aborted. A stopped-run recovery record was kept so retry preview can avoid likely duplicates.', false);
     }
 
+
+    function isPanelMinimized() {
+        return localStorage.getItem(PANEL_MINIMIZED_KEY) === '1';
+    }
+
+    function rebelStarbirdSvg() {
+        // Inline Star Wars Rebel Alliance starbird for the user's private minimized control.
+        // No external image/network request is used.
+        return `
+            <svg viewBox="0 0 64 64" width="38" height="38" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M32 4l-5.4 16.2 5.4-3.5 5.4 3.5L32 4zm-4.5 19.4C19.9 15.7 11.7 14 4 16.2c1.7 12.4 6.4 22.5 17.9 30.1l-4.4 9.4c5.2-1.1 10-3.5 14.5-7.2-5.5-5.1-8.4-11-8.8-17.8 2.3 2.4 4.1 5.2 5.5 8.4.3-6.2-.1-11.5-1.2-15.7zm9 0c-1.1 4.2-1.5 9.5-1.2 15.7 1.4-3.2 3.2-6 5.5-8.4-.4 6.8-3.3 12.7-8.8 17.8 4.5 3.7 9.3 6.1 14.5 7.2l-4.4-9.4C53.6 38.7 58.3 28.6 60 16.2c-7.7-2.2-15.9-.5-23.5 7.2z"/>
+            </svg>`;
+    }
+
+    function applyPanelMinimizedState(minimized, persist = true) {
+        const panel = document.getElementById(PANEL_ID);
+        if (!panel) return;
+        const full = panel.querySelector('[data-vector-ppe-panel-full]');
+        const mini = panel.querySelector('[data-vector-ppe-panel-mini]');
+        if (!full || !mini) return;
+
+        if (persist) localStorage.setItem(PANEL_MINIMIZED_KEY, minimized ? '1' : '0');
+        full.style.display = minimized ? 'none' : 'block';
+        mini.style.display = minimized ? 'flex' : 'none';
+
+        if (minimized) {
+            panel.style.width = '56px';
+            panel.style.maxWidth = '56px';
+            panel.style.padding = '0';
+            panel.style.background = 'transparent';
+            panel.style.border = '0';
+            panel.style.boxShadow = 'none';
+        } else {
+            panel.style.width = '540px';
+            panel.style.maxWidth = 'calc(100vw - 36px)';
+            panel.style.padding = '10px';
+            panel.style.background = '#fff';
+            panel.style.border = '2px solid #173f70';
+            panel.style.boxShadow = '0 4px 18px rgba(0,0,0,.25)';
+        }
+    }
+
+    function updateMinimizedPanelBadge(run = getRun()) {
+        const badge = document.getElementById('vector-ppe-mini-badge-v1');
+        const mini = document.querySelector(`#${PANEL_ID} [data-vector-ppe-panel-mini]`);
+        if (!badge || !mini) return;
+
+        // Stopped state outranks ordinary run progress and survives navigation.
+        if (run?.phase === 'stopped') {
+            badge.textContent = '!';
+            badge.style.display = 'block';
+            mini.setAttribute(
+                'aria-label',
+                'Expand Vector PPE Helper. PPE run stopped — attention required.'
+            );
+            return;
+        }
+
+        if (run?.items?.length && Number.isInteger(run.index)) {
+            badge.textContent = `${Math.min(run.index + 1, run.items.length)}/${run.items.length}`;
+            badge.style.display = 'block';
+            mini.setAttribute(
+                'aria-label',
+                `Expand Vector PPE Helper. Active PPE run ${Math.min(run.index + 1, run.items.length)} of ${run.items.length}.`
+            );
+            return;
+        }
+
+        const gate = evaluateRemoteCompatibility(getUpdateState());
+        if (!gate.allowed || ['warning', 'unknown'].includes(gate.severity)) {
+            badge.textContent = '!';
+            badge.style.display = 'block';
+            mini.setAttribute('aria-label', 'Expand Vector PPE Helper. Attention required.');
+            return;
+        }
+
+        badge.textContent = '';
+        badge.style.display = 'none';
+        mini.setAttribute('aria-label', 'Expand Vector PPE Helper.');
+    }
+
     function refreshPanelInfo() {
         const info = document.getElementById('vector-ppe-info-v2');
         if (!info) return;
@@ -4025,6 +4686,8 @@
                 `<b>Signature variants:</b> ${sigCount} &nbsp; <b>Stored runs:</b> ${historyCount}/20<br>` +
                 'Ready. Start from Equipment → PPE table/list.';
         }
+
+        updateMinimizedPanelBadge(run);
     }
 
     function installPanel() {
@@ -4046,9 +4709,23 @@
             'box-shadow:0 4px 18px rgba(0,0,0,.25);' +
             'font-family:Arial,sans-serif;';
 
+        const full = document.createElement('div');
+        full.setAttribute('data-vector-ppe-panel-full', '1');
+
+        const titleRow = document.createElement('div');
+        titleRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:5px;';
+
         const title = document.createElement('div');
-        title.style.cssText = 'font-size:16px;font-weight:700;margin-bottom:5px;';
+        title.style.cssText = 'font-size:16px;font-weight:700;flex:1;min-width:0;';
         title.textContent = `Vector PPE Helper v${VERSION} — BETA / FINAL CANDIDATE`;
+
+        const minimize = makeButton('−');
+        minimize.title = 'Minimize to Rebel Alliance icon';
+        minimize.setAttribute('aria-label', 'Minimize Vector PPE Helper');
+        minimize.style.cssText += 'margin:0;padding:2px 9px;font-size:20px;line-height:1;';
+        minimize.onclick = () => applyPanelMinimizedState(true);
+
+        titleRow.append(title, minimize);
 
         const info = document.createElement('div');
         info.id = 'vector-ppe-info-v2';
@@ -4096,14 +4773,46 @@
         statusBox.style.cssText = 'margin-top:8px;padding:7px;background:#f3f5f7;font-size:12px;line-height:1.4;';
         statusBox.textContent = 'Ready.';
 
-        panel.append(
-            title, info,
+        full.append(
+            titleRow, info,
             tour, fire, captain,
             people, signatures, settings,
             lastRun, history, diagnostics, updates,
             abort, updateBox, statusBox
         );
+
+        const mini = document.createElement('button');
+        mini.type = 'button';
+        mini.setAttribute('data-vector-ppe-panel-mini', '1');
+        mini.title = 'Expand Vector PPE Helper';
+        mini.setAttribute('aria-label', 'Expand Vector PPE Helper');
+        mini.style.cssText =
+            'position:relative;' +
+            'width:56px;height:56px;' +
+            'display:none;' +
+            'align-items:center;justify-content:center;' +
+            'padding:0;margin:0;' +
+            'border:2px solid #fff;' +
+            'border-radius:50%;' +
+            'background:#173f70;' +
+            'color:#fff;' +
+            'box-shadow:0 4px 16px rgba(0,0,0,.35);' +
+            'cursor:pointer;';
+        mini.innerHTML = rebelStarbirdSvg();
+        mini.onclick = () => applyPanelMinimizedState(false);
+
+        const badge = document.createElement('span');
+        badge.id = 'vector-ppe-mini-badge-v1';
+        badge.style.cssText =
+            'display:none;position:absolute;right:-5px;top:-6px;' +
+            'min-width:18px;height:18px;padding:0 4px;box-sizing:border-box;' +
+            'border-radius:9px;background:#fff;color:#173f70;border:1px solid #173f70;' +
+            'font:700 10px/16px Arial,sans-serif;text-align:center;';
+        mini.appendChild(badge);
+
+        panel.append(full, mini);
         document.body.appendChild(panel);
+        applyPanelMinimizedState(isPanelMinimized(), false);
         refreshPanelInfo();
     }
 
