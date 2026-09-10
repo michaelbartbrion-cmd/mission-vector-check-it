@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "project": "Mission Vector Check It",
+  "channel": "beta",
+  "latestVersion": "2.3.0-rc5",
+  "minimumSupportedVersion": "2.3.0-rc5",
+  "status": "testing",
+  "message": "Beta/final-candidate channel. Use for the approved live field test only; stable remains v2.2.0 until promotion.",
+  "releaseNotes": "Adds managed GitHub/Tampermonkey updates with zero GitHub Actions, an Updates panel, version checks, and a compatibility hold without changing the proven PPE form/submission engine.",
+  "installUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
+  "repoUrl": "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
+  "publishedAt": "2026-09-10"
+}
