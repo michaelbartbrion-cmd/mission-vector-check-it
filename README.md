@@ -14,8 +14,11 @@ Personal/local data such as signatures, inspector identity, local PPE prefix, Ca
 
 ## Current state
 
-- Beta candidate: `2.3.0-rc6` is published for live field validation.
-- Stable: v2.2.0 remains the known-good fallback; managed stable promotion is held pending live field validation and final review.
+- Published Beta code: `2.3.0-rc6`, currently **HOLD** after a legitimate live inspection exposed a post-submit completion-verification false stop in the hardened RC line.
+- Review candidate: `2.3.0-rc10`, not published yet. It adds delayed/stable return-to-asset evidence plus diagnostic capture and audit visibility; it must clear independent review before Beta publication.
+- Stable: v2.2.0 remains the known-good fallback; managed stable promotion is held pending legitimate live validation and final review.
+
+Do not create duplicate compliance inspections solely to test the helper.
 
 ## No Actions
 
