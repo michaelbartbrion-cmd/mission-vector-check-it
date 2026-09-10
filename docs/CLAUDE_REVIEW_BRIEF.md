@@ -1,26 +1,20 @@
-# Claude independent review — v2.3.0-rc5 managed updater
+# Claude independent review request — Vector PPE Helper v2.3.0-rc6
 
-Review `beta/vector-ppe-helper.user.js` independently. Do not assume prior findings are fixed merely because earlier reviews said so.
+Please independently review the rc6 userscript and rc5→rc6 diff. Do not assume the reconciliation is correct.
 
-## Primary review goals
+Focus on:
 
-1. Confirm the new managed-update code cannot cause or authorize duplicate PPE submissions.
-2. Confirm `@updateURL` / `@downloadURL` point only at the intended GitHub Beta raw path and use no GitHub Actions.
-3. Confirm the helper never downloads and `eval`s/executes remote JavaScript. The only custom remote fetch should be `version.json`.
-4. Review version comparison semantics for stable vs prerelease values (`2.3.0-rc5` < `2.3.0`).
-5. Review manifest validation and malformed/unknown-status behavior.
-6. Review the compatibility hold: it should block only NEW automated runs after a successful explicit `hold`/`disabled` manifest or an unsupported minimum version; manual Vector use must remain possible.
-7. Review network-failure behavior. An unreachable GitHub host should not falsely report success and should not destroy local PPE settings/signatures.
-8. Confirm updater state contains no signatures or personal PPE configuration.
-9. Confirm the Updates UI escapes all remote manifest strings before rendering and does not introduce XSS.
-10. Confirm `OPEN UPDATE` cannot be redirected to an arbitrary origin by a malicious/malformed manifest; if it can, recommend URL allowlisting.
-11. Confirm current rc4 PPE inspection/form/submission logic was not inadvertently changed except for the intended pre-run compatibility gate and update UI.
-12. Re-check the rc3/rc4 safety properties most likely to regress: asset identity, search stabilization, completion evidence, stopped-run recovery, signature rotation, multi-person Captain mode, local Captain list persistence.
+1. Verify U1 is closed: `2.3.0-rc9 < 2.3.0-rc10`, `rc2 < rc10`, stable > prerelease, and no new malformed-version hole.
+2. Verify OPEN UPDATE cannot be redirected through localStorage/manifest state.
+3. Verify pre-run updater refresh latency is now bounded to about 15 minutes after a successful check, without producing per-item network calls.
+4. Verify rapid double-click of START cannot construct/save two runs while awaiting update status; all early returns must re-enable the button.
+5. Verify `minimumSupportedVersion` is reserved for genuine recalls rather than being automatically raised to every latest beta.
+6. Verify expired/unreverified hold state is clearly surfaced and does not silently masquerade as current safety approval.
+7. Re-check updater state contains no signature/personnel configuration.
+8. Re-check no remote JS fetch/eval/import/script injection was introduced.
+9. Confirm critical PPE inspection/submission functions are unchanged rc5→rc6.
+10. Evaluate the decision to keep `@grant none`: state whether UPDATES → CHECK NOW success on a logged-in Vector page is sufficient practical proof that page CSP permits this updater transport. If not, recommend the lowest-risk alternative.
+11. Verify the live repo design can operate with zero GitHub Actions.
+12. Flag any new blocker/high issue before live field validation/promotion.
 
-## Repository / operations review
-
-- Confirm there is no `.github/workflows` directory and the design needs zero GitHub Actions minutes.
-- Confirm `stable/` is held and does not accidentally publish the unvalidated candidate.
-- Review `docs/RELEASE_PROCESS.md` for a safe promotion/rollback procedure.
-
-Classify findings as BLOCKER / HIGH / MEDIUM / LOW and give exact code locations and recommended fixes.
+Please return severity-ranked findings and a ship recommendation.
