@@ -2,18 +2,15 @@
 
 This folder is the Mission Vector Check It test channel.
 
-- Current candidate: `2.3.0-rc6` — published for Beta field validation.
-- Use only for legitimate due PPE inspections during field validation.
+- Published Beta code: `2.3.0-rc6`.
+- Current Beta status: **HOLD** after a legitimate live inspection exposed a post-submit completion-verification false stop in the hardened RC line.
+- Review candidate: `2.3.0-rc10` is being independently reviewed and is **not published here yet**.
+- Use Beta only for legitimate due PPE inspections during approved field validation.
 - Do not create duplicate compliance inspections just to test the helper.
 - Personal signatures and browser configuration are never stored in this repository.
-- The pre-run compatibility gate refreshes successful status at most every 15 minutes; normal background status checks remain less frequent.
 
-Install/update URL:
+Install/update URL for the currently published Beta code:
 
 `https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js`
 
-Expected SHA-256 for the published Beta userscript:
-
-`f2292e65d3abd9e0ed1e009d1292d8ba50524480cc5a9a788abcbce6fa18a715`
-
-After installing, open PPE Helper → **UPDATES** → **CHECK NOW** on a logged-in Vector page. A successful timestamp confirms the current Vector page context can reach the GitHub manifest.
+The manifest hold is intentional. Stable v2.2.0 remains the known-good fallback while the completion verifier is hardened and reviewed.
