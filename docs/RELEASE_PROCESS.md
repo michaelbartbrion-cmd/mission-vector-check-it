@@ -1,25 +1,35 @@
-# Release process
+# Mission Vector Check It — Release process
 
 ## Beta
 
 1. Put the candidate in `beta/vector-ppe-helper.user.js`.
-2. Increment its `@version`.
-3. Update `beta/version.json`.
-4. Test via a legitimate due inspection; do not create duplicate compliance records.
-5. Obtain independent code review.
+2. Increment **both** the userscript metadata `@version` and the in-code `const VERSION`; they must match exactly.
+3. Update `beta/version.json` `latestVersion` and release notes.
+4. Leave `minimumSupportedVersion` unchanged unless there is a genuine safety/compatibility reason to recall older versions.
+5. Run syntax and version-comparison tests, including `rc9 < rc10`.
+6. Test update connectivity from a logged-in Vector page with PPE Helper → UPDATES → CHECK NOW.
+7. Test via legitimate due inspections only; do not create duplicate compliance records for software testing.
+8. Obtain independent review before promotion.
 
 ## Promote to stable
 
 1. Take the exact approved beta code.
-2. Change only release metadata needed for stable: `@version`, `@updateURL`, `@downloadURL`, display channel/version constants, and stable manifest URL.
-3. Publish as `stable/vector-ppe-helper.user.js`.
-4. Set `stable/version.json` to `status: ok`.
-5. Do not change form/submission logic during promotion.
+2. Change only release metadata/channel constants and URLs required for Stable, plus version if needed.
+3. Confirm `@version === const VERSION`.
+4. Publish to `stable/vector-ppe-helper.user.js` and update `stable/version.json` to `status: ok`.
+5. Keep `minimumSupportedVersion` at the oldest version still considered safe. Do not automatically set it equal to latest.
+6. Do not change PPE form/submission logic during promotion.
 
 ## Emergency compatibility hold
 
-Set the channel manifest `status` to `hold` and write a clear `message`. A successfully fetched hold blocks new automated runs but never prevents manual Vector use. This is a compatibility safety gate, not remote code execution.
+Set the appropriate channel manifest `status` to `hold` or `disabled` with a clear message. New automated runs refresh compatibility status at most 15 minutes after the last successful gate check. A successfully fetched hold blocks new automated runs only; in-flight resume and manual Vector use remain available.
+
+If a user is below `minimumSupportedVersion`, direct them to PPE Helper → UPDATES → OPEN UPDATE. Raise the minimum only for a genuine recall/known-incompatible version.
 
 ## Rollback
 
-Publish a higher-version userscript containing the last known-good logic. Tampermonkey update checks are version-driven, so a rollback release still needs a numerically newer `@version`.
+Publish a numerically higher userscript version containing the last known-good logic. Tampermonkey update checks are version-driven, so a rollback release must still have a newer version number.
+
+## GitHub Actions
+
+This repository intentionally has no `.github/workflows` directory. Static raw files are used directly; the updater requires zero GitHub Actions minutes.
