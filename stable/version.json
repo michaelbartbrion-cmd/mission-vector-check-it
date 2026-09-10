@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "project": "Mission Vector Check It",
+  "channel": "stable",
+  "latestVersion": "2.3.0",
+  "minimumSupportedVersion": "2.3.0",
+  "status": "hold",
+  "message": "Mission Vector Check It v2.3.0 has not been promoted to STABLE yet. Continue using the previously approved stable build until the live field test is complete.",
+  "releaseNotes": "Stable publication is intentionally held pending final live validation and independent review.",
+  "installUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/stable/vector-ppe-helper.user.js",
+  "repoUrl": "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
+  "publishedAt": "2026-09-10"
+}
