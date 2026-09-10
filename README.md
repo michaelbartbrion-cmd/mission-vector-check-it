@@ -14,8 +14,8 @@ Personal/local data such as signatures, inspector identity, local PPE prefix, Ca
 
 ## Current state
 
-- Beta candidate: `2.3.0-rc5`
-- Stable: held pending live field validation and independent review.
+- Beta candidate: `2.3.0-rc6` pending publication of the exact reviewed userscript file.
+- Stable: v2.2.0 remains the known-good fallback; managed stable promotion is held pending live field validation and independent review.
 
 ## No Actions
 
