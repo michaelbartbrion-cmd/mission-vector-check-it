@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Vector Check It - PPE Helper
 // @namespace    mission-ppe
-// @version      2.3.8
+// @version      2.3.10
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
 // @supportURL   https://github.com/michaelbartbrion-cmd/mission-vector-check-it/issues
-// @description  Vector Rebel — v2.3.8 direct Item Log completion verification with preserved row multiplicity
+// @description  Vector Rebel — v2.3.10 layout-independent Item Log completion verification with preserved row multiplicity
 // @match        https://checkitapp.targetsolutions.com/*
 // @grant        none
 // ==/UserScript==
@@ -19,12 +19,12 @@
     // replaces the previous helper instead of installing beside it.
     if (window.__vectorRebelInstance) {
         console.warn(
-            `Vector Rebel 2.3.8: another instance (${window.__vectorRebelInstance.version || 'unknown'}) is already active on this page.`
+            `Vector Rebel 2.3.10: another instance (${window.__vectorRebelInstance.version || 'unknown'}) is already active on this page.`
         );
         return;
     }
     window.__vectorRebelInstance = {
-        version: '2.3.8',
+        version: '2.3.10',
         startedAt: Date.now()
     };
 
@@ -32,7 +32,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '2.3.8';
+    const VERSION = '2.3.10';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -2476,7 +2476,15 @@
                                 ` · post-submit: ${escapeHtml(String(hv.postSubmitCount ?? 'n/a'))}` +
                                 ` · stable reads: ${escapeHtml(String(hv.stableReads ?? 0))}` +
                                 `<br>row ids: ${hv.postSubmitUsesStableIds ? 'stable DOM ids' : 'occurrence keys'}` +
-                                `<br>added keys: ${escapeHtml((hv.addedKeys || []).join(', ') || 'none')}`;
+                                `<br>parser path: ${escapeHtml(hv.parserPath || 'n/a')}` +
+                                ` · rows read: ${escapeHtml(String(hv.rowCount ?? 'n/a'))}` +
+                                `<br>added keys: ${escapeHtml((hv.addedKeys || []).join(', ') || 'none')}` +
+                                ((hv.addedRowTexts || []).length
+                                    ? `<br>added row: ${escapeHtml((hv.addedRowTexts || []).join(' | '))}`
+                                    : '') +
+                                ((hv.postSubmitRowTexts || []).length
+                                    ? `<br>post-submit rows:<br>${(hv.postSubmitRowTexts || []).map(t => '&nbsp;&nbsp;' + escapeHtml(t)).join('<br>')}`
+                                    : '');
                             details.appendChild(verify);
                         }
                     }
@@ -3485,11 +3493,38 @@
         );
     }
 
+    const ITEM_LOG_HEADER_LABELS = [
+        'DATE', 'PERSONNEL', 'LOCATION TYPE', 'LOCATION', 'RESPONSIBLE PARTY', 'NOTES', 'USER', 'TYPE'
+    ];
+
+    // v2.3.10: Vector's production Item Log does not always mark header cells as
+    // <th> or role="columnheader". Fall back to the first row's plain cells so a
+    // semantic container is still recognised instead of silently dropping to the
+    // text path.
     function historyContainerHeaderText(container) {
-        const cells = [...container.querySelectorAll('th,[role="columnheader"]')]
-            .map(el => el.textContent || '')
-            .join(' ');
-        return uiText(cells).toUpperCase();
+        if (!container) return '';
+
+        const semantic = [...container.querySelectorAll('th,[role="columnheader"]')]
+            .map(el => itemLogRowText(el))
+            .filter(Boolean);
+        if (semantic.length) return uiText(semantic.join(' ')).toUpperCase();
+
+        const firstRow =
+            container.querySelector('thead tr') ||
+            container.querySelector('tr') ||
+            container.querySelector('[role="row"]');
+        if (!firstRow) return '';
+
+        const cells = [...firstRow.querySelectorAll('td,th,[role="cell"],[role="gridcell"],div,span')]
+            .map(el => itemLogRowText(el))
+            .filter(text => text && text.length <= 40);
+        if (!cells.length) return '';
+
+        const labelled = cells.filter(text =>
+            ITEM_LOG_HEADER_LABELS.some(label => uiEquals(text, label))
+        );
+        // Only treat it as a header row when it really is one.
+        return labelled.length >= 3 ? uiText(labelled.join(' ')).toUpperCase() : '';
     }
 
     function findItemLogHistoryTable() {
@@ -3635,39 +3670,110 @@
         return completed || null;
     }
 
-    function textHistoryEntryElements(modeTitle) {
-        const selectors = 'tr,[role="row"],li,article,p,div';
-        const all = [...document.querySelectorAll(selectors)]
+    // ------------------------------------------------------------------
+    // STRUCTURAL ROW RECONSTRUCTION (v2.3.10)
+    // ------------------------------------------------------------------
+    // Production Vector splits a history record across sibling cells:
+    //   DATE | PERSONNEL | LOCATION TYPE | LOCATION | RESPONSIBLE PARTY | NOTES
+    // No single element holds the whole record, and the container may be a
+    // <table> without <th>, an ARIA grid, or plain nested divs. Rather than
+    // guessing a selector, reconstruct each row by walking up from the cell that
+    // carries the inspection title and COMPLETE until the smallest ancestor that
+    // also carries a date. That works for every layout because it relies on the
+    // record's own content, not on Vector's markup choices.
+    //
+    // Nothing is injected into the page. This reads the live DOM only.
+
+    const ITEM_LOG_ROW_CANDIDATE_SELECTOR =
+        'tr,[role="row"],li,article,p,div,span,a,dt,dd,label,time,strong,b,td,[role="cell"],[role="gridcell"]';
+
+    function itemLogAnchorElements(modeTitle) {
+        return [...document.querySelectorAll(ITEM_LOG_ROW_CANDIDATE_SELECTOR)]
             .filter(visible)
             .filter(el => !el.closest(`#${PANEL_ID}, #${OVERLAY_ID}`))
-            .filter(el => !el.closest('table,[role="table"],[role="grid"]'))
-            .map(el => ({ el, text: uiText(el.textContent || '') }))
-            .filter(x => textLooksLikeCompletedInspectionEntry(x.text, modeTitle));
+            .map(el => ({ el, text: itemLogRowText(el) }))
+            .filter(x =>
+                x.text &&
+                x.text.length <= 600 &&
+                uiIncludes(x.text, modeTitle) &&
+                /\bCOMPLETED?\b/i.test(x.text) &&
+                !/\bINCOMPLETE\b/i.test(x.text)
+            )
+            // Smallest first, so the walk-up starts from the status/notes cell
+            // rather than from a wrapper that already spans several rows.
+            .sort((a, b) => a.text.length - b.text.length);
+    }
 
-        // Keep the smallest / leaf-most matching DOM container. Critically,
-        // preserve multiple elements even when their visible text is identical.
-        // Vector can legitimately create several same-day COMPLETE rows whose
-        // text is byte-identical.
-        const leaf = all.filter(candidate => {
-            return !all.some(other =>
-                other.el !== candidate.el &&
-                candidate.el.contains(other.el) &&
-                other.text.length <= candidate.text.length
-            );
-        });
+    function reconstructItemLogRowFromAnchor(anchor, modeTitle) {
+        let node = anchor;
+        for (let depth = 0; node && depth < 16; depth += 1, node = node.parentElement) {
+            if (!visible(node)) continue;
+            if (node.closest(`#${PANEL_ID}, #${OVERLAY_ID}`)) continue;
 
-        const seenElements = new Set();
-        const result = [];
-        for (const entry of leaf) {
-            if (seenElements.has(entry.el)) continue;
-            seenElements.add(entry.el);
-            result.push(entry);
+            const text = itemLogRowText(node);
+            if (!text || text.length > 2000) continue;
+            if (!historyDateTokenPresent(text)) continue;
+            if (!uiIncludes(text, modeTitle)) continue;
+            if (!/\bCOMPLETED?\b/i.test(text)) continue;
+            if (/\bINCOMPLETE\b/i.test(text)) continue;
+
+            // A real row carries exactly one date. More than one means we walked
+            // past the row and into a container holding several records.
+            const dates = text.match(/\b\d{1,2}[\/-]\d{1,2}[\/-]\d{4}\b/g) || [];
+            if (dates.length !== 1) return null;
+
+            return node;
         }
-        return result;
+        return null;
+    }
+
+    // Reconstructed rows, in DOM order, multiplicity preserved.
+    function structuralItemLogRows(modeTitle) {
+        const rows = [];
+        const seen = new Set();
+
+        for (const anchor of itemLogAnchorElements(modeTitle)) {
+            const row = reconstructItemLogRowFromAnchor(anchor.el, modeTitle);
+            if (!row || seen.has(row)) continue;
+            seen.add(row);
+            rows.push(row);
+        }
+
+        // Keep the innermost match when one reconstructed row contains another.
+        const innermost = rows.filter(row => !rows.some(other => other !== row && row.contains(other)));
+
+        innermost.sort((a, b) => {
+            const pos = a.compareDocumentPosition(b);
+            if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+            if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+            return 0;
+        });
+        return innermost;
+    }
+
+    function textHistoryEntryElements(modeTitle) {
+        return structuralItemLogRows(modeTitle).map(el => ({ el, text: itemLogRowText(el) }));
+    }
+
+    // Deliberately generic page scan, used ONLY to detect a parser failure.
+    // It is never completion evidence and never feeds a count.
+    function assetPageCompletedTextEvidence(modeTitle) {
+        const seen = new Set();
+        const found = [];
+        for (const candidate of itemLogAnchorElements(modeTitle)) {
+            const text = candidate.text;
+            if (!historyDateTokenPresent(text)) continue;
+            const key = `${text}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            found.push(text.slice(0, 160));
+            if (found.length >= 20) break;
+        }
+        return found;
     }
 
     function rowLooksLikeCompletedModeEntry(row, modeTitle) {
-        const text = uiText(row?.textContent || '');
+        const text = itemLogRowText(row);
         return !!(
             text &&
             uiIncludes(text, modeTitle) &&
@@ -3676,23 +3782,36 @@
         );
     }
 
-    function itemLogCompletedRowElements(item, modeTitle) {
+    // Returns { rows, parserPath } or null when the history region cannot be read
+    // at all. null is deliberately distinct from an empty history.
+    function itemLogCompletedRowSource(item, modeTitle) {
         if (!isAssetPageFor(item) || !assetPageContainsExpectedId(item)) return null;
 
         const container = findItemLogHistoryTable();
         if (container) {
-            // Semantic table / grid path. One DOM row = one real history record;
-            // never collapse rows by text.
-            return historyRows(container).filter(row => rowLooksLikeCompletedModeEntry(row, modeTitle));
+            const rows = historyRows(container)
+                .filter(row => rowLooksLikeCompletedModeEntry(row, modeTitle));
+            if (rows.length) return { rows, parserPath: 'semantic-container' };
+
+            // A recognised container with no matching rows is still a real read,
+            // but cross-check the structural pass before trusting a zero: the
+            // container may be a header-only shell with the records rendered
+            // outside it.
+            const structural = structuralItemLogRows(modeTitle);
+            if (structural.length) return { rows: structural, parserPath: 'structural-outside-container' };
+            return { rows: [], parserPath: 'semantic-container-empty' };
         }
 
-        // Non-semantic fallback used by some Vector layouts.
-        const fallback = textHistoryEntryElements(modeTitle);
-        if (fallback.length) return fallback.map(entry => entry.el);
+        const structural = structuralItemLogRows(modeTitle);
+        if (structural.length) return { rows: structural, parserPath: 'structural' };
 
-        // Distinguish "readable but zero rows" from "history region unavailable".
-        if (findHistorySectionAnchor()) return [];
+        if (findHistorySectionAnchor()) return { rows: [], parserPath: 'history-region-empty' };
         return null;
+    }
+
+    function itemLogCompletedRowElements(item, modeTitle) {
+        const source = itemLogCompletedRowSource(item, modeTitle);
+        return source ? source.rows : null;
     }
 
     function modeHistoryEntries(item, modeTitle) {
@@ -3701,7 +3820,7 @@
 
         return rows.map(row => ({
             element: row,
-            text: uiText(row.textContent || ''),
+            text: itemLogRowText(row),
             source: row.closest('table,[role="table"],[role="grid"]') ? 'table' : 'text'
         })).filter(entry => entry.text);
     }
@@ -3751,7 +3870,7 @@
         const records = [];
 
         for (const row of rows || []) {
-            const text = uiText(row.textContent || '');
+            const text = itemLogRowText(row);
             const stableId = itemLogStableRowId(row);
 
             if (stableId) {
@@ -3780,8 +3899,9 @@
     }
 
     function readItemLogSnapshot(item, modeTitle) {
-        const rows = itemLogCompletedRowElements(item, modeTitle);
-        if (rows === null) return null;
+        const source = itemLogCompletedRowSource(item, modeTitle);
+        if (source === null) return null;
+        const rows = source.rows;
 
         const records = itemLogRowKeys(rows);
         const keys = records.map(record => record.key);
@@ -3792,6 +3912,7 @@
             texts,
             records,
             usesStableIds: records.length > 0 && records.every(record => record.stableId),
+            parserPath: source.parserPath,
             fingerprint: diagnosticTextHash(JSON.stringify(keys))
         };
     }
@@ -3903,8 +4024,47 @@
         return false;
     }
 
+    // ------------------------------------------------------------------
+    // ROW TEXT (v2.3.10)
+    // ------------------------------------------------------------------
+    // Element.textContent concatenates adjacent cells with NO separator:
+    //   <span>06/01/2026</span><span>Michael Brion</span>
+    //   -> "06/01/2026Michael Brion"
+    // The trailing \b of the date pattern then fails and the row is discarded,
+    // which is exactly how a fully rendered Item Log was counted as zero rows.
+    // innerText inserts the separators, but it depends on a live layout engine,
+    // is expensive, and is undefined for elements that are not rendered.
+    // itemLogRowText joins every descendant text node with a single space, so
+    // cell boundaries always exist and the result is deterministic.
+    // Compact, name-redacted row text for admin diagnostics only.
+    function compactHistoryRowText(text) {
+        const compact = uiText(text || '').slice(0, 140);
+        return redactDiagnosticText(compact, null);
+    }
+
+    function itemLogRowText(element) {
+        if (!element) return '';
+        if (element.nodeType === 3) return uiText(element.nodeValue || '');
+
+        const parts = [];
+        const walk = node => {
+            if (!node) return;
+            if (node.nodeType === 3) {
+                const value = String(node.nodeValue || '').trim();
+                if (value) parts.push(value);
+                return;
+            }
+            if (node.nodeType !== 1) return;
+            const tag = (node.tagName || '').toLowerCase();
+            if (tag === 'script' || tag === 'style' || tag === 'noscript' || tag === 'template') return;
+            for (const child of node.childNodes) walk(child);
+        };
+        walk(element);
+        return uiText(parts.join(' '));
+    }
+
     function rowHasCompletedStatus(row) {
-        const status = uiText(row?.textContent || '').toUpperCase();
+        const status = itemLogRowText(row).toUpperCase();
         return /\bCOMPLETED?\b/.test(status) && !/\bINCOMPLETE\b/.test(status);
     }
 
@@ -4405,6 +4565,7 @@
                 }
 
                 run.postSubmitHistoryKeys = snapshot.keys.slice();
+                run.itemLogParserPath = snapshot.parserPath || run.itemLogParserPath || '';
                 run.postSubmitHistoryEntries = snapshot.texts.slice();
                 run.postSubmitUsesStableIds = snapshot.usesStableIds;
                 run.postSubmitCompleteCount = snapshot.count;
@@ -4446,6 +4607,8 @@
                 run.historyVerification = {
                     result,
                     at: new Date().toISOString(),
+                    parserPath: snapshot.parserPath || '',
+                    rowCount: snapshot.count,
                     baselineCount: Number.isInteger(baselineCount) ? baselineCount : null,
                     postSubmitCount: snapshot.count,
                     stableReads,
@@ -4453,7 +4616,10 @@
                     postSubmitUsesStableIds: !!snapshot.usesStableIds,
                     baselineHistoryKeys: baselineKeys.slice(),
                     postSubmitHistoryKeys: snapshot.keys.slice(),
-                    addedKeys: addedKeys.slice()
+                    addedKeys: addedKeys.slice(),
+                    baselineRowTexts: (run.baselineHistoryEntries || []).map(compactHistoryRowText).slice(0, 25),
+                    postSubmitRowTexts: snapshot.texts.map(compactHistoryRowText).slice(0, 25),
+                    addedRowTexts: addedRecords.map(record => compactHistoryRowText(record.text))
                 };
                 persistDiagnosticRunState(run);
 
@@ -4506,6 +4672,11 @@
                 itemLogHeaders: findItemLogHistoryTable()
                     ? historyContainerHeaderText(findItemLogHistoryTable())
                     : '',
+                itemLogParserPath: run.itemLogParserPath || '',
+                textHistoryFallbackCount: textHistoryEntryElements(getMode(run.modeKey).title).length,
+                textHistoryFallbackEntries: textHistoryEntryElements(getMode(run.modeKey).title)
+                    .map(entry => uiText(entry.text))
+                    .slice(0, 20),
                 preSubmitAssetFingerprint: run.preSubmitAssetFingerprint || null,
                 postSubmitAssetFingerprint: run.postSubmitAssetFingerprint || null,
                 postSubmitSettledFingerprint: run.postSubmitSettledFingerprint || null
@@ -4758,10 +4929,29 @@
                 // of the baseline.
                 await revealAssetHistory(item, mode.title, 550);
                 const baselineSnapshot = await waitForStableHistoryBaseline(item, mode.title);
+
+                // v2.3.10 guard. A confident baseline of zero is only acceptable
+                // when the page really shows no completed history for this mode.
+                // If the generic page scan can see completed entries that the row
+                // parser could not convert into rows, that is a PARSER failure,
+                // not an empty log, and it must disable history confirmation
+                // rather than silently record a baseline of 0.
+                if (baselineSnapshot.count === 0) {
+                    const visibleEvidence = assetPageCompletedTextEvidence(mode.title);
+                    if (visibleEvidence.length) {
+                        throw new Error(
+                            `${item.assetId}: the Item Log shows ${visibleEvidence.length} completed ` +
+                            `${mode.short} entr${visibleEvidence.length === 1 ? 'y' : 'ies'} that the row parser ` +
+                            'could not read, so a baseline of zero was not trusted.'
+                        );
+                    }
+                }
+
                 run.baselineCompleteCount = baselineSnapshot.count;
                 run.baselineHistoryEntries = baselineSnapshot.texts.slice();
                 run.baselineHistoryKeys = baselineSnapshot.keys.slice();
                 run.baselineUsesStableIds = baselineSnapshot.usesStableIds;
+                run.itemLogParserPath = baselineSnapshot.parserPath || '';
                 run.postSubmitHistoryKeys = [];
                 run.postSubmitHistoryEntries = [];
                 run.postSubmitUsesStableIds = false;
@@ -4771,6 +4961,9 @@
                 run.historyVerification = {
                     result: 'baseline-ready',
                     at: new Date().toISOString(),
+                    parserPath: baselineSnapshot.parserPath || '',
+                    rowCount: baselineSnapshot.count,
+                    baselineRowTexts: baselineSnapshot.texts.map(compactHistoryRowText).slice(0, 25),
                     baselineCount: baselineSnapshot.count,
                     postSubmitCount: null,
                     stableReads: baselineSnapshot.stablePolls || ITEM_LOG_SETTLE_STABLE_POLLS,
