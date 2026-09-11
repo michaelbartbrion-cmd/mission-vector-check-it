@@ -2,12 +2,12 @@
   "schemaVersion": 1,
   "project": "Mission Vector Check It",
   "channel": "beta",
-  "latestVersion": "2.3.4",
+  "latestVersion": "2.3.5",
   "minimumSupportedVersion": "2.3.1",
   "status": "testing",
-  "message": "Vector Rebel v2.3.4 beta is current.",
-  "releaseNotes": "Fixes completion verification against the real Vector Item Log layout. Vector Rebel now mirrors the visible COMPLETE rows into a deterministic proof view so the existing pre-submit baseline and post-submit +1 check can confirm the new inspection without relying on return-to-asset inference.",
+  "message": "Vector Rebel v2.3.5 beta is current.",
+  "releaseNotes": "Fixes the recurring false Verification needed result by mirroring the visible Vector Item Log COMPLETE rows into a deterministic semantic table that the validated pre-submit baseline / post-submit exactly +1 verifier can read reliably.",
   "installUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
   "repoUrl": "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
-  "publishedAt": "2026-09-10"
+  "publishedAt": "2026-09-11"
 }
