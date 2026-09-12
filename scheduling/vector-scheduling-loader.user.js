@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mission Vector Check It - Vector Scheduling LIVE Loader
 // @namespace    mission-vector-check-it-scheduling-loader
-// @version      1.0.0
+// @version      1.0.1
 // @description  One-time Tampermonkey loader that always pulls the newest approved Vector Scheduling development runtime manifest.
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
 // @supportURL   https://github.com/michaelbartbrion-cmd/mission-vector-check-it/issues
@@ -12,12 +12,15 @@
 // @grant        GM_xmlhttpRequest
 // @connect      raw.githubusercontent.com
 // @run-at       document-idle
+// @noframes
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const LOADER_VERSION = '1.0.0';
+  if (window.top !== window.self) return;
+
+  const LOADER_VERSION = '1.0.1';
   const BASE = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/scheduling/';
   const MANIFEST_URL = BASE + 'vector-scheduling-runtime-manifest.json';
 
