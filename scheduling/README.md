@@ -17,6 +17,33 @@ Close the loop around apparatus position rotation:
 7. Flag ambiguous outcomes for review instead of guessing.
 8. Use the updated actual history for the next recommendation.
 
+## Development browser assistant
+
+`scheduling/vector-scheduling-assistant.user.js` is now the first end-to-end development UI. It is a separate Tampermonkey userscript from Vector Rebel PPE and is **not** promoted to Beta or Stable.
+
+Current development capabilities:
+
+- floating Vector Scheduling panel on CrewSense schedule/list pages;
+- imports a private local history/state JSON without putting real crew names in the public repository;
+- automatically reads the displayed Vector date when configured;
+- captures configured crew observations from the visible schedule/list page without clicking or changing Vector;
+- shows confirmed actual firefighter rotation ratios;
+- uses imported/captured future availability to mark tracked firefighters available or unavailable;
+- infers Normal versus TADE-required planning from the configured engineer when evidence is sufficient, with manual override;
+- ranks the top three role assignments with the pure rotation engine;
+- saves one- or two-day plans as intent only;
+- reconciles the saved plan against later Vector observations;
+- treats planned Swing + home-apparatus FFB as `Swing/FF` with Swing credit;
+- treats planned Swing + observed working elsewhere as `Swing` with Swing credit;
+- keeps ambiguous outcomes out of the ratio until manually resolved;
+- exports the complete private browser state for backup/audit.
+
+The browser assistant stores private state under:
+
+`missionVectorScheduling_v2`
+
+It can migrate the earlier development key `missionVectorScheduling_v1` on first load.
+
 ## Preferred Vector data path
 
 The preferred integration path is the official **read-only Vector Scheduling API**, not DOM scraping.
@@ -34,7 +61,7 @@ The current official Vector API documentation confirms that `GET /v1/schedule` i
 - exports helper-compatible observation JSON plus a readable CSV;
 - performs no Vector writes.
 
-A browser/DOM reader remains a fallback/prototyping path until the API output is validated against real Vector views.
+A browser/DOM reader remains a fallback/prototyping path until the API output is validated against real Vector views. The development userscript now implements that fallback so the reconciliation workflow can be tested before API validation is complete.
 
 ## Rotation model
 
@@ -66,6 +93,8 @@ For each tracked firefighter:
 The engine tests every legal permutation for the current scenario and ranks assignments by the sum of squared differences between firefighters' position ratios. This is intended to preserve the balancing behavior that has worked in the legacy spreadsheet rather than impose a target such as 25% for every role.
 
 The balance window is configurable. The same assignment across a two-day shift block can be scored as two projected credits.
+
+Private retrospective validation against the legacy workbook showed that, for same-assignment two-day blocks with a standard role set inside the current balance window, the historical choice fell within the engine's top three recommendations in 30 of 32 testable blocks. That result is kept out of committed fixtures because the underlying crew history is private; it is a development validation result, not a guarantee that the current scoring model captures every operational factor.
 
 ## Current role sets
 
@@ -111,6 +140,19 @@ Examples:
 
 Without a saved plan, home-apparatus FFB is intentionally ambiguous because it could be true Firefighter or Swing/FF. Likewise, being observed elsewhere without a saved plan may be Swing or a staffing move. Ambiguous outcomes become review items rather than guessed history.
 
+## Legacy spreadsheet migration
+
+The current private migration intentionally stops when the Truck 504 sheet changes from manually coded outcomes to raw Vector report lookups. Raw rows are **not** converted into position credit simply because they show a Truck 504 assignment.
+
+The private import can preserve:
+
+- the configured balance window;
+- all manually coded firefighter position outcomes as verified legacy history;
+- all manually coded five-person duty/status details as non-scoring duty history;
+- command-role metadata used for scenario inference.
+
+Real names/history stay in the private import file and local browser storage only.
+
 ## Historical completeness
 
 The legacy spreadsheet eventually changes from manually coded position outcomes to raw Vector-report lookups. Those later rows are observations/availability, not automatically credited position history.
@@ -121,20 +163,21 @@ The prototype therefore detects unresolved past working observations and marks r
 
 The repository is public, so real crew names, schedules, history, local configuration, API exports, API keys and secrets are **not committed here**. Use `crew-config.example.json` only as a template; real configuration stays local.
 
-The browser prototype stores settings, plans, observations, reviews, resolutions, and history under local storage key:
+The development browser prototype stores settings, plans, observations, reviews, resolutions, duty history and rotation history under local storage key:
 
-`missionVectorScheduling_v1`
+`missionVectorScheduling_v2`
 
 ## Repository components
 
 - `rotation-engine.js` — pure tested fairness/reconciliation logic; no Vector access.
 - `test-engine.js` — Node tests for the pure engine.
+- `vector-scheduling-assistant.user.js` — development browser UI for planning, read-only DOM observation and reconciliation.
 - `Vector_Scheduling_Truck504_Probe_v0.1.ps1` — read-only official API acquisition/export utility.
 - `crew-config.example.json` — privacy-safe local configuration template.
 - `DATA_MODEL.md` — plan/observation/history/review model.
 - `KNOWN_LIMITATIONS.md` — unresolved validation targets.
 
-The richer browser panel is still a local development prototype and is not promoted into Beta/Stable Vector Rebel. It should not be published until the official API response and/or live page DOM have been validated against real Vector data.
+The richer browser panel is still development-only and is not promoted into Beta/Stable Vector Rebel. It should not be published as production until the official API response and/or live page DOM have been validated against real Vector data.
 
 ## Development tests
 
@@ -150,3 +193,5 @@ The richer browser panel is still a local development prototype and is not promo
 - date/shift parsing;
 - two-day projection scoring;
 - configurable balance-window filtering.
+
+The development userscript has also passed local JavaScript syntax validation with Node `--check`. Live DOM behavior still requires validation on the actual Vector Scheduling pages.
