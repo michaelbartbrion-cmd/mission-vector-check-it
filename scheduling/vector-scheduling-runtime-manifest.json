@@ -8,6 +8,7 @@
     "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/5759a23d36b532082a5dd7ae79a1a33dee9acc89/scheduling/vector-scheduling-assistant.user.js",
     "vector-scheduling-runtime-patch-0.6.0.js",
     "vector-scheduling-runtime-reader-0.12.0.js",
-    "vector-scheduling-runtime-backfill-0.12.0.js"
+    "vector-scheduling-runtime-backfill-0.12.0.js",
+    "vector-scheduling-runtime-ui-0.12.0.js"
   ]
 }
