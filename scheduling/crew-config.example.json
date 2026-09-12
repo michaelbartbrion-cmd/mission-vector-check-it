@@ -4,7 +4,7 @@
     {"id": "ff1", "name": "Firefighter One", "kind": "firefighter"},
     {"id": "ff2", "name": "Firefighter Two", "kind": "firefighter"},
     {"id": "ff3", "name": "Firefighter Three", "kind": "firefighter"},
-    {"id": "engineer", "name": "Engineer Name", "kind": "command"},
-    {"id": "captain", "name": "Captain Name", "kind": "command"}
+    {"id": "engineer", "name": "Engineer Name", "kind": "command", "commandRole": "engineer"},
+    {"id": "captain", "name": "Captain Name", "kind": "command", "commandRole": "captain"}
   ]
 }
