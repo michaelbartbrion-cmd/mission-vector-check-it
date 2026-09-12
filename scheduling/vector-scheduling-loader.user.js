@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mission Vector Check It - Vector Scheduling LIVE Loader
 // @namespace    mission-vector-check-it-scheduling-loader
-// @version      1.0.1
+// @version      1.0.2
 // @description  One-time Tampermonkey loader that always pulls the newest approved Vector Scheduling development runtime manifest.
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
 // @supportURL   https://github.com/michaelbartbrion-cmd/mission-vector-check-it/issues
@@ -20,7 +20,7 @@
 
   if (window.top !== window.self) return;
 
-  const LOADER_VERSION = '1.0.1';
+  const LOADER_VERSION = '1.0.2';
   const BASE = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/scheduling/';
   const MANIFEST_URL = BASE + 'vector-scheduling-runtime-manifest.json';
 
@@ -46,6 +46,11 @@
     (new Function(wrapped))();
   }
 
+  function resolveScriptUrl(path) {
+    if (/^https?:\/\//i.test(path)) return path;
+    return BASE + String(path || '').replace(/^\/+/, '');
+  }
+
   async function fetchManifest() {
     const text = await gmGet(`${MANIFEST_URL}?t=${Date.now()}`);
     const manifest = JSON.parse(text);
@@ -57,6 +62,10 @@
 
   async function boot() {
     const manifest = await fetchManifest();
+    if (manifest.loaderMinVersion && manifest.loaderMinVersion !== LOADER_VERSION) {
+      console.warn(`Vector Scheduling: manifest requests loader ${manifest.loaderMinVersion}; running ${LOADER_VERSION}.`);
+    }
+
     window.__mvciLiveLoader = {
       loaderVersion: LOADER_VERSION,
       runtimeVersion: manifest.runtimeVersion,
@@ -65,9 +74,11 @@
     };
 
     for (const path of manifest.scripts) {
-      const url = `${BASE}${path}?runtime=${encodeURIComponent(manifest.runtimeVersion)}&t=${Date.now()}`;
+      const baseUrl = resolveScriptUrl(path);
+      const sep = baseUrl.includes('?') ? '&' : '?';
+      const url = `${baseUrl}${sep}runtime=${encodeURIComponent(manifest.runtimeVersion)}&t=${Date.now()}`;
       const code = await gmGet(url);
-      execute(code, url);
+      execute(code, baseUrl);
     }
 
     wireUpdateButton();
