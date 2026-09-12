@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mission Vector Check It - Vector Scheduling DEV Loader
 // @namespace    mission-vector-check-it-scheduling-loader
-// @version      0.4.2-dev
+// @version      0.5.0-dev
 // @description  One-time Tampermonkey loader for the Mission Vector Check It scheduling development assistant.
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
 // @supportURL   https://github.com/michaelbartbrion-cmd/mission-vector-check-it/issues
@@ -9,9 +9,10 @@
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/scheduling/vector-scheduling-loader.user.js
 // @match        https://crewsense.com/*
 // @match        https://*.crewsense.com/*
-// @require      https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/scheduling/rotation-engine.js?v=0.4.2-dev
-// @require      https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/scheduling/horizon-planner.js?v=0.4.2-dev
-// @require      https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/scheduling/vector-scheduling-assistant.user.js?v=0.4.2-dev
+// @require      https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/scheduling/rotation-engine.js?v=0.5.0-dev
+// @require      https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/scheduling/horizon-planner.js?v=0.5.0-dev
+// @require      https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/scheduling/vector-scheduling-assistant.user.js?v=0.5.0-dev
+// @require      https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/scheduling/vector-scheduling-runtime-patch-0.5.0.js?v=0.5.0-dev
 // @grant        none
 // ==/UserScript==
 
