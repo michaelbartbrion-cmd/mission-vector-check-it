@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Vector Check It - PPE Helper
 // @namespace    mission-ppe
-// @version      2.3.10
+// @version      2.3.11
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
 // @supportURL   https://github.com/michaelbartbrion-cmd/mission-vector-check-it/issues
-// @description  Vector Rebel — v2.3.10 layout-independent Item Log completion verification with preserved row multiplicity
+// @description  Vector Rebel — v2.3.11 adds simple in-app feedback with private admin review while preserving the v2.3.10 inspection engine
 // @match        https://checkitapp.targetsolutions.com/*
 // @grant        none
 // ==/UserScript==
@@ -24,7 +24,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '2.3.10',
+        version: '2.3.11',
         startedAt: Date.now()
     };
 
@@ -32,7 +32,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '2.3.10';
+    const VERSION = '2.3.11';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -97,6 +97,18 @@
     const UPDATE_FAILURE_INTERVAL_MS = 10 * 60 * 1000;
     const UPDATE_FETCH_TIMEOUT_MS = 5000;
     const REMOTE_HOLD_CACHE_MS = 24 * 60 * 60 * 1000;
+
+    // Feedback is deliberately isolated from the inspection/submission engine.
+    // Service endpoints are discovered from a small non-executable JSON file in
+    // this repository so the backend can move without changing inspection code.
+    const FEEDBACK_SERVICE_CONFIG_URL = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/feedback-service.json';
+    const FEEDBACK_SERVICE_STATE_KEY = 'vectorRebelFeedbackServiceState_v1';
+    const FEEDBACK_CONTACT_KEY = 'vectorRebelFeedbackContact_v1';
+    const FEEDBACK_ADMIN_SEEN_KEY = 'vectorRebelFeedbackAdminSeen_v1';
+    const FEEDBACK_ADMIN_STATUS_KEY = 'vectorRebelFeedbackAdminStatus_v1';
+    const FEEDBACK_CONFIG_CACHE_MS = 6 * 60 * 60 * 1000;
+    const FEEDBACK_ADMIN_POLL_MS = 15 * 60 * 1000;
+    const FEEDBACK_FETCH_TIMEOUT_MS = 6000;
     const POST_SUBMIT_RETURN_DWELL_MS = 1500;
     const POST_SUBMIT_HISTORY_GRACE_MS = 15000;
     const POST_SUBMIT_HISTORY_STABLE_POLLS = 3;
@@ -671,6 +683,240 @@
         render();
     }
 
+    // ============================================================
+    // FEEDBACK SERVICE — NON-INSPECTION SUPPORT PATH
+    // ============================================================
+
+    function feedbackServiceState() {
+        const state = loadJSON(FEEDBACK_SERVICE_STATE_KEY, null);
+        return state && typeof state === 'object' ? state : {};
+    }
+
+    function normalizeFeedbackEndpoint(value, expectedPath) {
+        const raw = clean(value);
+        if (!raw) throw new Error('Feedback service endpoint is blank.');
+        let url;
+        try {
+            url = new URL(raw);
+        } catch {
+            throw new Error('Feedback service endpoint is invalid.');
+        }
+        if (url.protocol !== 'https:') throw new Error('Feedback service must use HTTPS.');
+        if (!/\.base44\.app$/i.test(url.hostname)) throw new Error('Feedback service host is not approved.');
+        const path = url.pathname.replace(/\/+$/, '') || '/';
+        if (path !== expectedPath) throw new Error(`Feedback service path mismatch: ${path}`);
+        url.search = '';
+        url.hash = '';
+        return url.toString().replace(/\/$/, '');
+    }
+
+    function validateFeedbackServiceConfig(raw) {
+        if (!raw || typeof raw !== 'object') throw new Error('Feedback service configuration is not an object.');
+        if (Number(raw.schemaVersion) !== 1) throw new Error('Unsupported feedback service configuration.');
+        const feedback = raw.feedback;
+        if (!feedback || typeof feedback !== 'object') throw new Error('Feedback service configuration is missing.');
+        const enabled = feedback.enabled === true;
+        if (!enabled) {
+            return { enabled: false, submitUrl: '', statusUrl: '', dashboardUrl: '' };
+        }
+        const submitUrl = normalizeFeedbackEndpoint(feedback.submitUrl, '/functions/submitFeedback');
+        const statusUrl = normalizeFeedbackEndpoint(feedback.statusUrl, '/functions/feedbackStatus');
+        let dashboard;
+        try {
+            dashboard = new URL(clean(feedback.dashboardUrl));
+        } catch {
+            throw new Error('Feedback dashboard URL is invalid.');
+        }
+        if (dashboard.protocol !== 'https:' || !/\.base44\.app$/i.test(dashboard.hostname)) {
+            throw new Error('Feedback dashboard host is not approved.');
+        }
+        if (dashboard.origin !== new URL(submitUrl).origin || new URL(statusUrl).origin !== new URL(submitUrl).origin) {
+            throw new Error('Feedback service URLs do not share one approved origin.');
+        }
+        dashboard.search = '';
+        dashboard.hash = '';
+        return {
+            enabled: true,
+            submitUrl,
+            statusUrl,
+            dashboardUrl: dashboard.toString()
+        };
+    }
+
+    async function feedbackFetch(url, options = {}) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), FEEDBACK_FETCH_TIMEOUT_MS);
+        try {
+            return await fetch(url, {
+                ...options,
+                credentials: 'omit',
+                referrerPolicy: 'no-referrer',
+                cache: 'no-store',
+                signal: controller.signal
+            });
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    async function fetchFeedbackServiceConfig(force = false) {
+        const state = feedbackServiceState();
+        const checkedAt = Date.parse(state.checkedAt || 0) || 0;
+        if (!force && checkedAt && Date.now() - checkedAt < FEEDBACK_CONFIG_CACHE_MS && state.config) {
+            return state.config;
+        }
+        const now = Date.now();
+        try {
+            const response = await feedbackFetch(`${FEEDBACK_SERVICE_CONFIG_URL}?t=${now}`);
+            if (!response.ok) throw new Error(`Feedback configuration HTTP ${response.status}.`);
+            const config = validateFeedbackServiceConfig(await response.json());
+            saveJSON(FEEDBACK_SERVICE_STATE_KEY, {
+                checkedAt: new Date(now).toISOString(),
+                config,
+                error: ''
+            });
+            return config;
+        } catch (error) {
+            const fallback = state.config || { enabled: false, submitUrl: '', statusUrl: '', dashboardUrl: '' };
+            saveJSON(FEEDBACK_SERVICE_STATE_KEY, {
+                ...state,
+                checkedAt: new Date(now).toISOString(),
+                config: fallback,
+                error: error?.message || String(error)
+            });
+            return fallback;
+        }
+    }
+
+    function feedbackTechnicalDetails() {
+        const config = getConfig();
+        const run = getRun();
+        const last = loadJSON(LAST_SUMMARY_KEY, null);
+        let latestItem = null;
+        for (const group of Object.values(last?.groups || {})) {
+            if (Array.isArray(group?.items) && group.items.length) {
+                latestItem = group.items[0];
+                break;
+            }
+        }
+        const hv = latestItem?.verificationDiagnostics?.historyVerification || null;
+        return {
+            browser: clean(navigator.userAgent).slice(0, 500),
+            mode: clean(run?.modeKey || last?.modeKey || ''),
+            pagePath: clean(location.pathname).slice(0, 300),
+            failureStage: clean(run?.phase || ''),
+            verificationResult: clean(hv?.result || ''),
+            parserPath: clean(hv?.parserPath || ''),
+            expectedItems: Number(config.departmentProfile?.expectedGearCount) || 0,
+            foundItems: Number(run?.items?.length || last?.total || 0),
+            runState: clean(run?.phase || 'idle')
+        };
+    }
+
+    async function submitUserFeedback(payload) {
+        const service = await fetchFeedbackServiceConfig(false);
+        if (!service.enabled || !service.submitUrl) {
+            throw new Error('Feedback service is temporarily unavailable. Please try again later.');
+        }
+        const response = await feedbackFetch(service.submitUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        let result = null;
+        try {
+            result = await response.json();
+        } catch {
+            // handled below
+        }
+        if (!response.ok || !result?.ok) {
+            throw new Error(clean(result?.error) || `Feedback service returned HTTP ${response.status}.`);
+        }
+        return clean(result.ticketId);
+    }
+
+    function getFeedbackAdminStatus() {
+        const state = loadJSON(FEEDBACK_ADMIN_STATUS_KEY, null);
+        return state && typeof state === 'object' ? state : {};
+    }
+
+    function hasUnseenAdminFeedback(state = getFeedbackAdminStatus()) {
+        if (!isAdminUnlocked()) return false;
+        const latest = clean(state.latestTicketId);
+        if (!latest || Number(state.newCount || 0) < 1) return false;
+        return latest !== clean(localStorage.getItem(FEEDBACK_ADMIN_SEEN_KEY) || '');
+    }
+
+    function markAdminFeedbackSeen(state = getFeedbackAdminStatus()) {
+        const latest = clean(state.latestTicketId);
+        if (latest) localStorage.setItem(FEEDBACK_ADMIN_SEEN_KEY, latest);
+        refreshFeedbackAlertUI();
+    }
+
+    async function openFeedbackDashboard() {
+        const service = await fetchFeedbackServiceConfig(false);
+        if (!service.enabled || !service.dashboardUrl) {
+            alert('Feedback dashboard is not available yet.');
+            return;
+        }
+        markAdminFeedbackSeen();
+        window.open(service.dashboardUrl, '_blank', 'noopener');
+    }
+
+    async function checkAdminFeedbackStatus(force = false) {
+        if (!isAdminUnlocked() || getRun()) return getFeedbackAdminStatus();
+        const prior = getFeedbackAdminStatus();
+        const checkedAt = Date.parse(prior.checkedAt || 0) || 0;
+        if (!force && checkedAt && Date.now() - checkedAt < FEEDBACK_ADMIN_POLL_MS) {
+            refreshFeedbackAlertUI();
+            return prior;
+        }
+        const service = await fetchFeedbackServiceConfig(false);
+        if (!service.enabled || !service.statusUrl) {
+            refreshFeedbackAlertUI();
+            return prior;
+        }
+        try {
+            const response = await feedbackFetch(service.statusUrl, { method: 'GET' });
+            const result = await response.json();
+            if (!response.ok || !result?.ok) throw new Error(clean(result?.error) || `HTTP ${response.status}`);
+            const next = {
+                checkedAt: new Date().toISOString(),
+                total: Number(result.total || 0),
+                newCount: Number(result.newCount || 0),
+                latestTicketId: clean(result.latestTicketId),
+                latestCreatedAt: clean(result.latestCreatedAt),
+                error: ''
+            };
+            saveJSON(FEEDBACK_ADMIN_STATUS_KEY, next);
+            refreshFeedbackAlertUI();
+            return next;
+        } catch (error) {
+            const next = {
+                ...prior,
+                checkedAt: new Date().toISOString(),
+                error: error?.message || String(error)
+            };
+            saveJSON(FEEDBACK_ADMIN_STATUS_KEY, next);
+            refreshFeedbackAlertUI();
+            return next;
+        }
+    }
+
+    function refreshFeedbackAlertUI() {
+        const banner = document.querySelector(`#${PANEL_ID} [data-vector-feedback-alert]`);
+        if (banner) {
+            const state = getFeedbackAdminStatus();
+            const unseen = hasUnseenAdminFeedback(state);
+            banner.style.display = unseen ? 'block' : 'none';
+            if (unseen) {
+                const count = Number(state.newCount || 0);
+                const text = banner.querySelector('[data-vector-feedback-alert-text]');
+                if (text) text.textContent = `${count} new feedback item${count === 1 ? '' : 's'} waiting.`;
+            }
+        }
+        updateMinimizedPanelBadge(getRun());
+    }
     function deepClone(value) {
         return JSON.parse(JSON.stringify(value));
     }
@@ -2404,6 +2650,30 @@
             box.appendChild(failureNote);
         }
 
+        const feedbackAlert = document.createElement('div');
+        feedbackAlert.setAttribute('data-vector-feedback-alert', '1');
+        feedbackAlert.style.cssText =
+            'display:none;margin:0 0 10px;padding:9px 10px;background:#fff7df;border:1px solid #e2bf65;' +
+            'border-radius:8px;color:#6d5315;font-size:11px;line-height:1.4;';
+        const feedbackAlertText = document.createElement('div');
+        feedbackAlertText.setAttribute('data-vector-feedback-alert-text', '1');
+        feedbackAlertText.style.cssText = 'font-weight:700;margin-bottom:6px;';
+        feedbackAlertText.textContent = 'New feedback is waiting.';
+        const feedbackAlertOpen = document.createElement('button');
+        feedbackAlertOpen.type = 'button';
+        feedbackAlertOpen.textContent = 'Open Feedback';
+        feedbackAlertOpen.style.cssText =
+            'padding:6px 8px;margin-right:6px;border:1px solid #9a761f;border-radius:6px;' +
+            'background:#9a761f;color:#fff;font:700 11px Arial,sans-serif;cursor:pointer;';
+        feedbackAlertOpen.onclick = () => openFeedbackDashboard();
+        const feedbackAlertDismiss = document.createElement('button');
+        feedbackAlertDismiss.type = 'button';
+        feedbackAlertDismiss.textContent = 'Dismiss';
+        feedbackAlertDismiss.style.cssText =
+            'padding:6px 8px;border:1px solid #c6ad70;border-radius:6px;background:#fff;color:#6d5315;' +
+            'font:700 11px Arial,sans-serif;cursor:pointer;';
+        feedbackAlertDismiss.onclick = () => markAdminFeedbackSeen();
+        feedbackAlert.append(feedbackAlertText, feedbackAlertOpen, feedbackAlertDismiss);
         const actions = document.createElement('div');
         actions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
 
@@ -5819,6 +6089,7 @@
     function lockAdminTools() {
         localStorage.removeItem(ADMIN_UNLOCK_KEY);
         setStatus('Admin tools locked on this computer.');
+        refreshFeedbackAlertUI();
     }
 
     async function sha256Hex(value) {
@@ -5843,6 +6114,7 @@
             }
             localStorage.setItem(ADMIN_UNLOCK_KEY, '1');
             setStatus('Admin tools unlocked on this computer.');
+            setTimeout(() => checkAdminFeedbackStatus(true).catch(() => {}), 0);
             if (typeof onUnlocked === 'function') onUnlocked();
             return true;
         } catch (error) {
@@ -6809,6 +7081,7 @@
             ['captain', 'Captain Sets'],
             ['signatures', 'Signatures'],
             ['history', 'History'],
+            ['feedback', 'Feedback'],
             ['general', 'General']
         ];
         if (isAdminUnlocked()) tabs.push(['admin', 'Admin']);
@@ -7221,6 +7494,144 @@
             content.appendChild(c);
         }
 
+        function renderFeedback() {
+            const config = getConfig();
+            const c = card(
+                'Send Feedback',
+                'Tell us what did not work, what was confusing, or what would make Vector Rebel easier to use.'
+            );
+
+            const identity = document.createElement('div');
+            identity.style.cssText =
+                'padding:9px 10px;margin:8px 0 11px;background:#f3f7f9;border:1px solid #dce7ed;' +
+                'border-radius:8px;font-size:12px;line-height:1.45;color:#294f69;';
+            identity.innerHTML = config.inspectorName
+                ? `<b>Sending as:</b> ${escapeHtml(config.inspectorName)}`
+                : '<b>Profile setup required.</b> Save your name under Settings → Profile before sending feedback.';
+            c.appendChild(identity);
+
+            const typeLabel = document.createElement('label');
+            typeLabel.style.cssText = 'display:block;font-size:12px;font-weight:700;color:#294f69;margin:9px 0;';
+            typeLabel.textContent = 'What kind of feedback is this?';
+            const typeSelect = document.createElement('select');
+            typeSelect.style.cssText =
+                'display:block;width:100%;box-sizing:border-box;margin-top:5px;padding:10px 11px;' +
+                'border:1px solid #bdccd7;border-radius:7px;background:#fff;color:#18384f;font:400 13px Arial,sans-serif;';
+            [
+                ['bug', "Something didn't work"],
+                ['gear_mapping', 'My gear is wrong or missing'],
+                ['confusing_ui', 'Something is confusing'],
+                ['feature_request', 'I have an idea / suggestion'],
+                ['other', 'Other']
+            ].forEach(([value, label]) => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = label;
+                typeSelect.appendChild(option);
+            });
+            typeLabel.appendChild(typeSelect);
+            c.appendChild(typeLabel);
+
+            const messageLabel = document.createElement('label');
+            messageLabel.style.cssText = 'display:block;font-size:12px;font-weight:700;color:#294f69;margin:9px 0;';
+            messageLabel.textContent = 'What happened, or what should be better?';
+            const message = document.createElement('textarea');
+            message.maxLength = 4000;
+            message.placeholder = 'Describe it in your own words.';
+            message.style.cssText =
+                'display:block;width:100%;min-height:125px;box-sizing:border-box;margin-top:5px;padding:10px 11px;' +
+                'border:1px solid #bdccd7;border-radius:7px;background:#fff;color:#18384f;font:400 13px/1.45 Arial,sans-serif;resize:vertical;';
+            messageLabel.appendChild(message);
+            c.appendChild(messageLabel);
+
+            const stepsLabel = document.createElement('label');
+            stepsLabel.style.cssText = 'display:block;font-size:12px;font-weight:700;color:#294f69;margin:9px 0;';
+            stepsLabel.textContent = 'What were you trying to do? (optional)';
+            const steps = document.createElement('textarea');
+            steps.maxLength = 2500;
+            steps.placeholder = 'Example: I opened My Tour PPE and selected my gear.';
+            steps.style.cssText =
+                'display:block;width:100%;min-height:82px;box-sizing:border-box;margin-top:5px;padding:10px 11px;' +
+                'border:1px solid #bdccd7;border-radius:7px;background:#fff;color:#18384f;font:400 13px/1.45 Arial,sans-serif;resize:vertical;';
+            stepsLabel.appendChild(steps);
+            c.appendChild(stepsLabel);
+
+            const contact = field(
+                'Best way to contact you if we need more information (optional)',
+                localStorage.getItem(FEEDBACK_CONTACT_KEY) || '',
+                { placeholder: 'Email or phone' }
+            );
+            c.appendChild(contact.wrap);
+
+            const tech = document.createElement('label');
+            tech.style.cssText =
+                'display:flex;gap:9px;align-items:flex-start;padding:10px;margin:10px 0;' +
+                'background:#f7f9fa;border:1px solid #e1e8ed;border-radius:8px;font-size:12px;line-height:1.45;color:#496777;';
+            const techBox = document.createElement('input');
+            techBox.type = 'checkbox';
+            techBox.checked = true;
+            techBox.style.cssText = 'width:17px;height:17px;margin-top:1px;accent-color:#176b8e;';
+            const techText = document.createElement('div');
+            techText.innerHTML =
+                '<b>Include basic technical details (recommended)</b><br>' +
+                '<span style="font-size:11px">Version, page, mode, item counts, and verification state. ' +
+                'Vector Rebel never sends your saved signature drawing or raw run JSON with feedback.</span>';
+            tech.append(techBox, techText);
+            c.appendChild(tech);
+
+            const result = document.createElement('div');
+            result.style.cssText = 'font-size:12px;line-height:1.45;margin:8px 0;color:#607483;min-height:18px;';
+            c.appendChild(result);
+
+            const send = makeButton('Send Feedback', { background: '#176b8e', color: '#fff' });
+            send.disabled = !config.inspectorName || !!getRun();
+            if (getRun()) {
+                result.textContent = 'Finish or abort the active inspection run before sending feedback.';
+            }
+            send.onclick = async () => {
+                const text = clean(message.value);
+                if (!text) {
+                    result.style.color = '#9f1d1d';
+                    result.textContent = 'Please tell us what happened or what you would like changed.';
+                    message.focus();
+                    return;
+                }
+                send.disabled = true;
+                send.textContent = 'Sending…';
+                result.style.color = '#607483';
+                result.textContent = 'Sending feedback…';
+                try {
+                    const contactValue = clean(contact.input.value);
+                    localStorage.setItem(FEEDBACK_CONTACT_KEY, contactValue);
+                    const includeTechnical = techBox.checked;
+                    const ticketId = await submitUserFeedback({
+                        sourceArea: 'ppe',
+                        category: typeSelect.value,
+                        senderName: config.inspectorName,
+                        senderContact: contactValue,
+                        message: text,
+                        steps: clean(steps.value),
+                        includeTechnical,
+                        technical: includeTechnical ? feedbackTechnicalDetails() : {},
+                        appVersion: VERSION
+                    });
+                    result.style.color = '#176b4a';
+                    result.innerHTML =
+                        `<b>Feedback sent.</b>${ticketId ? ` Reference: ${escapeHtml(ticketId)}` : ''}`;
+                    message.value = '';
+                    steps.value = '';
+                } catch (error) {
+                    result.style.color = '#9f1d1d';
+                    result.textContent = error?.message || 'Feedback could not be sent right now.';
+                } finally {
+                    send.disabled = !config.inspectorName || !!getRun();
+                    send.textContent = 'Send Feedback';
+                }
+            };
+
+            c.appendChild(send);
+            content.appendChild(c);
+        }
         function renderGeneral() {
             const state = getUpdateState();
             const gate = evaluateRemoteCompatibility(state);
@@ -7300,6 +7711,40 @@
                 return;
             }
 
+            const feedbackCard = card(
+                'Feedback',
+                'Private review dashboard for Vector Rebel feedback. Feedback is stored directly in the feedback service; it is not emailed to you.'
+            );
+            const feedbackStatus = document.createElement('div');
+            feedbackStatus.style.cssText =
+                'font-size:12px;line-height:1.5;margin:8px 0;padding:9px;background:#f3f7f9;border-radius:7px;';
+            const drawFeedbackStatus = (state = getFeedbackAdminStatus()) => {
+                feedbackStatus.innerHTML =
+                    `<b>New:</b> ${escapeHtml(String(Number(state.newCount || 0)))}<br>` +
+                    `<b>Total:</b> ${escapeHtml(String(Number(state.total || 0)))}<br>` +
+                    `<b>Last checked:</b> ${escapeHtml(state.checkedAt || 'not checked yet')}` +
+                    `${state.error ? `<br><span style="color:#9f1d1d"><b>Last error:</b> ${escapeHtml(state.error)}</span>` : ''}`;
+            };
+            drawFeedbackStatus();
+            feedbackCard.appendChild(feedbackStatus);
+
+            const checkFeedback = makeButton('Check Feedback Now', { background: '#e8f3f7' });
+            checkFeedback.onclick = async () => {
+                checkFeedback.disabled = true;
+                checkFeedback.textContent = 'Checking…';
+                try {
+                    const state = await checkAdminFeedbackStatus(true);
+                    drawFeedbackStatus(state);
+                } finally {
+                    checkFeedback.disabled = false;
+                    checkFeedback.textContent = 'Check Feedback Now';
+                }
+            };
+
+            const openFeedback = makeButton('Open Feedback Dashboard', { background: '#176b8e', color: '#fff' });
+            openFeedback.onclick = () => openFeedbackDashboard();
+            feedbackCard.append(checkFeedback, openFeedback);
+            content.appendChild(feedbackCard);
             const rosterCard = card(
                 'Master Roster',
                 'Admin-only roster maintenance. Refresh Master from PPE can be started from anywhere in Vector; Vector Rebel opens Equipment → PPE automatically before the read-only scan.'
@@ -7711,6 +8156,7 @@
             else if (active === 'captain') renderCaptainSets();
             else if (active === 'signatures') renderSignatures();
             else if (active === 'history') renderHistory();
+            else if (active === 'feedback') renderFeedback();
             else if (active === 'general') renderGeneral();
             else if (active === 'admin') renderAdmin();
         }
@@ -7826,6 +8272,18 @@
             return;
         }
 
+        if (hasUnseenAdminFeedback()) {
+            const feedbackState = getFeedbackAdminStatus();
+            const count = Number(feedbackState.newCount || 0);
+            mini.style.borderColor = '#9a761f';
+            mini.style.boxShadow = '0 0 0 3px rgba(154,118,31,.16),0 5px 18px rgba(13,50,72,.28)';
+            mini.setAttribute(
+                'aria-label',
+                `Expand Vector Rebel. ${count} new feedback item${count === 1 ? '' : 's'} waiting.`
+            );
+            mini.title = `Vector Rebel — ${count} new feedback`;
+            return;
+        }
         mini.setAttribute('aria-label', 'Expand Vector Rebel.');
         mini.title = 'Vector Rebel';
     }
@@ -7916,6 +8374,30 @@
             'font-size:11px;margin:0 0 10px;padding:9px 10px;line-height:1.45;' +
             'background:#f3f7f9;border:1px solid #e0e8ed;border-radius:8px;color:#4f6878;';
 
+        const feedbackAlert = document.createElement('div');
+        feedbackAlert.setAttribute('data-vector-feedback-alert', '1');
+        feedbackAlert.style.cssText =
+            'display:none;margin:0 0 10px;padding:9px 10px;background:#fff7df;border:1px solid #e2bf65;' +
+            'border-radius:8px;color:#6d5315;font-size:11px;line-height:1.4;';
+        const feedbackAlertText = document.createElement('div');
+        feedbackAlertText.setAttribute('data-vector-feedback-alert-text', '1');
+        feedbackAlertText.style.cssText = 'font-weight:700;margin-bottom:6px;';
+        feedbackAlertText.textContent = 'New feedback is waiting.';
+        const feedbackAlertOpen = document.createElement('button');
+        feedbackAlertOpen.type = 'button';
+        feedbackAlertOpen.textContent = 'Open Feedback';
+        feedbackAlertOpen.style.cssText =
+            'padding:6px 8px;margin-right:6px;border:1px solid #9a761f;border-radius:6px;' +
+            'background:#9a761f;color:#fff;font:700 11px Arial,sans-serif;cursor:pointer;';
+        feedbackAlertOpen.onclick = () => openFeedbackDashboard();
+        const feedbackAlertDismiss = document.createElement('button');
+        feedbackAlertDismiss.type = 'button';
+        feedbackAlertDismiss.textContent = 'Dismiss';
+        feedbackAlertDismiss.style.cssText =
+            'padding:6px 8px;border:1px solid #c6ad70;border-radius:6px;background:#fff;color:#6d5315;' +
+            'font:700 11px Arial,sans-serif;cursor:pointer;';
+        feedbackAlertDismiss.onclick = () => markAdminFeedbackSeen();
+        feedbackAlert.append(feedbackAlertText, feedbackAlertOpen, feedbackAlertDismiss);
         const actions = document.createElement('div');
         actions.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:7px;';
 
@@ -7948,7 +8430,7 @@
             'font-size:11px;line-height:1.4;color:#607483;border-radius:6px;';
         statusBox.textContent = 'Ready.';
 
-        body.append(info, actions, statusBox);
+        body.append(info, feedbackAlert, actions, statusBox);
         full.append(titleRow, body);
 
         const mini = document.createElement('button');
@@ -7988,6 +8470,23 @@
     setTimeout(() => {
         fetchUpdateManifest(false).catch(() => {});
     }, 1200);
+
+    // Feedback networking is intentionally independent of inspection execution.
+    // Admin status checks are skipped while a run is active.
+    setTimeout(() => {
+        fetchFeedbackServiceConfig(false)
+            .then(() => isAdminUnlocked() ? checkAdminFeedbackStatus(false) : null)
+            .catch(() => {});
+    }, 1800);
+
+    setInterval(() => {
+        if (isAdminUnlocked()) checkAdminFeedbackStatus(false).catch(() => {});
+    }, FEEDBACK_ADMIN_POLL_MS);
+
+    window.addEventListener('focus', () => {
+        if (isAdminUnlocked()) checkAdminFeedbackStatus(false).catch(() => {});
+    });
+
 
     const migrationNotice = loadJSON(MIGRATION_NOTICE_KEY, null);
     if (migrationNotice?.message) {
