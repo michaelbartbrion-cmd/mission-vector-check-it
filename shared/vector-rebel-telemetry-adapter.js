@@ -6,7 +6,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const PROGRAM_KEY = 'vector-rebel';
   const PROGRAM_NAME = 'Vector Rebel';
   const PROGRAM_CATEGORY = 'rebel';
@@ -72,7 +72,7 @@
     };
   }
 
-  function runtimeHeartbeat({ version, updateState, status = 'connected', occurredAt } = {}) {
+  function runtimeHeartbeat({ version, updateState, status = 'connected', occurredAt, queueCount } = {}) {
     const manifest = updateState?.manifest || {};
     const updateError = clean(updateState?.error, 1000);
     const latestVersion = clean(manifest?.latestVersion, 100);
@@ -94,6 +94,7 @@
       component: 'PPE helper userscript',
       status: ['connected', 'degraded', 'disconnected', 'error', 'unknown'].includes(status) ? status : 'unknown',
       version: clean(version, 100),
+      queue_count: Math.max(0, safeNumber(queueCount)),
       source: PROGRAM_NAME,
       occurred_at: occurredAt || new Date().toISOString(),
       details,
