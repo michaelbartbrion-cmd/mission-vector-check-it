@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel - Rebel Core Telemetry DEV
 // @namespace    mission-vector-check-it-vector-rebel-telemetry-dev
-// @version      0.1.0
+// @version      0.1.1
 // @description  Development-only, read-only telemetry sidecar for Vector Rebel -> Rebel Core. Does not modify PPE execution.
 // @match        https://checkitapp.targetsolutions.com/*
 // @require      https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/shared/rebel-core-client.js
@@ -13,7 +13,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const LAST_SUMMARY_KEY = 'vectorPpeLastRunSummary_v3';
   const UPDATE_STATE_KEY = 'vectorPpeUpdateState_v1';
   const PAIRING_KEY = 'missionVectorRebelCorePairing_v1';
@@ -73,10 +73,12 @@
   function emitHeartbeat() {
     if (!paired()) return;
     const updateState = readJson(UPDATE_STATE_KEY, {});
+    const clientStatus = client.status();
     client.emit(Adapter.runtimeHeartbeat({
       version: vectorRebelVersion(),
       updateState,
       status: window.__vectorRebelInstance ? 'connected' : 'degraded',
+      queueCount: clientStatus.queued,
     }));
   }
 
