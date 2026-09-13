@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Vector Check It - PPE Helper
 // @namespace    mission-ppe
-// @version      2.3.10
+// @version      2.3.11-telemetry1
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
 // @supportURL   https://github.com/michaelbartbrion-cmd/mission-vector-check-it/issues
-// @description  Vector Rebel — v2.3.10 layout-independent Item Log completion verification with preserved row multiplicity
+// @description  Vector Rebel — telemetry development build on the frozen v2.3.10 PPE engine
 // @match        https://checkitapp.targetsolutions.com/*
 // @grant        none
 // ==/UserScript==
@@ -24,7 +24,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '2.3.10',
+        version: '2.3.11-telemetry1',
         startedAt: Date.now()
     };
 
@@ -32,7 +32,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '2.3.10';
+    const VERSION = '2.3.11-telemetry1';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -316,6 +316,308 @@
 
     function saveJSON(key, value) {
         localStorage.setItem(key, JSON.stringify(value));
+    }
+
+    // ============================================================
+    // REBEL CORE TELEMETRY — ISOLATED, FAIL-OPEN SIDE CHANNEL
+    // ============================================================
+
+    const REBEL_CORE_PAIRING_KEY = 'vectorRebelCorePairing_v1';
+    const REBEL_CORE_INSTALLATION_KEY = 'vectorRebelCoreInstallation_v1';
+    const REBEL_CORE_ENROLL_URL = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
+    const REBEL_CORE_ENROLL_RETRY_MS = 30 * 60 * 1000;
+    const REBEL_CORE_QUEUE_KEY = 'vectorRebelTelemetryQueue_v1';
+    const REBEL_CORE_STATE_KEY = 'vectorRebelTelemetryState_v1';
+    const REBEL_CORE_QUEUE_MAX = 200;
+    const REBEL_CORE_BATCH_MAX = 25;
+    const REBEL_CORE_HEARTBEAT_MS = 10 * 60 * 1000;
+    const REBEL_CORE_FLUSH_MS = 30 * 1000;
+    const REBEL_CORE_FETCH_TIMEOUT_MS = 5000;
+    const REBEL_CORE_BACKOFF_MS = [30000, 60000, 120000, 300000, 600000];
+    let rebelCoreFlushTimer = null;
+    let rebelCoreEventSeq = 0;
+
+    function rebelCoreLoadPairing() {
+        const p = loadJSON(REBEL_CORE_PAIRING_KEY, null);
+        if (!p || typeof p !== 'object') return null;
+        const endpoint = clean(p.endpoint);
+        const deviceId = clean(p.deviceId);
+        const token = String(p.token || '').trim();
+        return endpoint && deviceId && token ? { endpoint, deviceId, token } : null;
+    }
+
+    function rebelCorePairingSummary() {
+        const p = rebelCoreLoadPairing();
+        if (!p) return { paired: false, deviceId: '', tokenLast4: '' };
+        return { paired: true, deviceId: p.deviceId, tokenLast4: p.token.slice(-4) };
+    }
+
+    function rebelCoreInstallationId() {
+        let id = clean(localStorage.getItem(REBEL_CORE_INSTALLATION_KEY) || '');
+        if (id) return id;
+        try {
+            const bytes = crypto.getRandomValues(new Uint8Array(16));
+            id = `vr-install-${Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')}`;
+            localStorage.setItem(REBEL_CORE_INSTALLATION_KEY, id);
+            return id;
+        } catch {
+            id = `vr-install-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
+            try { localStorage.setItem(REBEL_CORE_INSTALLATION_KEY, id); } catch {}
+            return id;
+        }
+    }
+
+    async function rebelCoreEnsureEnrollment(force = false) {
+        try {
+            if (rebelCoreLoadPairing()) return true;
+            const state = rebelCoreState();
+            const lastAttempt = Date.parse(state.lastEnrollAttemptAt || 0) || 0;
+            if (!force && lastAttempt && Date.now() - lastAttempt < REBEL_CORE_ENROLL_RETRY_MS) return false;
+            rebelCoreSaveState({ lastEnrollAttemptAt: new Date().toISOString() });
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), REBEL_CORE_FETCH_TIMEOUT_MS);
+            let response;
+            try {
+                const cfg = getConfig();
+                response = await fetch(REBEL_CORE_ENROLL_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        installationId: rebelCoreInstallationId(),
+                        profileName: clean(cfg?.inspectorName || ''),
+                        version: VERSION
+                    }),
+                    signal: controller.signal,
+                    cache: 'no-store'
+                });
+            } finally {
+                clearTimeout(timer);
+            }
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || !result?.ok || !result.telemetryEndpoint || !result.deviceId || !result.token) {
+                throw new Error(result?.error || `Enrollment HTTP ${response.status}`);
+            }
+            saveJSON(REBEL_CORE_PAIRING_KEY, {
+                endpoint: clean(result.telemetryEndpoint),
+                deviceId: clean(result.deviceId),
+                token: String(result.token)
+            });
+            rebelCoreSaveState({
+                enrolledAt: new Date().toISOString(),
+                lastError: '',
+                failures: 0,
+                nextRetryAt: ''
+            });
+            return true;
+        } catch (error) {
+            rebelCoreSaveState({ lastError: rebelCoreSafeText(error?.message || error, 300) });
+            return false;
+        }
+    }
+    function rebelCoreQueue() {
+        const q = loadJSON(REBEL_CORE_QUEUE_KEY, []);
+        return Array.isArray(q) ? q : [];
+    }
+
+    function rebelCoreSaveQueue(queue) {
+        try { saveJSON(REBEL_CORE_QUEUE_KEY, (Array.isArray(queue) ? queue : []).slice(-REBEL_CORE_QUEUE_MAX)); }
+        catch { /* telemetry storage must never affect PPE */ }
+    }
+
+    function rebelCoreState() {
+        const s = loadJSON(REBEL_CORE_STATE_KEY, {});
+        return s && typeof s === 'object' ? s : {};
+    }
+
+    function rebelCoreSaveState(patch) {
+        try { saveJSON(REBEL_CORE_STATE_KEY, { ...rebelCoreState(), ...patch }); }
+        catch { /* fail open */ }
+    }
+
+    function rebelCoreSafeText(value, max = 300) {
+        let text = clean(String(value || '')).slice(0, max);
+        const pairing = rebelCoreLoadPairing();
+        if (pairing?.token) text = text.split(pairing.token).join('[redacted]');
+        try {
+            const cfg = getConfig();
+            for (const privateValue of [cfg?.inspectorName, cfg?.selfPrefix]) {
+                if (privateValue) text = text.split(String(privateValue)).join('[redacted]');
+            }
+        } catch {}
+        return text.replace(/https?:\/\/\S+/gi, '[url]');
+    }
+    function rebelCoreEventId(prefix = 'evt') {
+        rebelCoreEventSeq += 1;
+        return `${prefix}:${Date.now()}:${TAB_ID}:${rebelCoreEventSeq}`.replace(/[^A-Za-z0-9._:-]/g, '_');
+    }
+
+    function rebelCoreEnqueue(kind, payload) {
+        try {
+            const queue = rebelCoreQueue();
+            queue.push({ kind, payload });
+            rebelCoreSaveQueue(queue);
+            rebelCoreScheduleFlush(1200);
+        } catch { /* discard safely */ }
+    }
+
+    function telemetryEvent(event, options = {}) {
+        try {
+            const payload = {
+                eventId: options.eventId || rebelCoreEventId('evt'),
+                event,
+                program: 'Vector Rebel',
+                module: clean(options.module || 'core'),
+                version: VERSION,
+                action: clean(options.action || ''),
+                success: typeof options.success === 'boolean' ? options.success : undefined,
+                durationMs: Number.isFinite(options.durationMs) ? Math.max(0, Math.round(options.durationMs)) : undefined,
+                workflowMode: clean(options.workflowMode || ''),
+                errorType: rebelCoreSafeText(options.errorType || '', 120),
+                errorMessage: rebelCoreSafeText(options.errorMessage || '', 300),
+                description: rebelCoreSafeText(options.description || '', 300),
+                metadata: options.metadata && typeof options.metadata === 'object' ? options.metadata : {},
+                timestamp: options.timestamp || new Date().toISOString()
+            };
+            rebelCoreEnqueue('event', payload);
+            return payload.eventId;
+        } catch { return ''; }
+    }
+    function telemetrySuggestion(suggestion = {}) {
+        try {
+            const payload = {
+                suggestionId: suggestion.suggestionId || rebelCoreEventId('sug'),
+                sourceProgram: 'Vector Rebel',
+                sourceVersion: VERSION,
+                title: rebelCoreSafeText(suggestion.title || 'Vector Rebel suggestion', 220),
+                details: rebelCoreSafeText(suggestion.details || '', 4000),
+                category: clean(suggestion.category || 'other'),
+                priority: ['low', 'medium', 'high', 'critical'].includes(suggestion.priority) ? suggestion.priority : 'medium',
+                sourceContext: rebelCoreSafeText(suggestion.sourceContext || '', 800),
+                timestamp: suggestion.timestamp || new Date().toISOString()
+            };
+            rebelCoreEnqueue('suggestion', payload);
+            telemetryEvent('suggestion_generated', {
+                module: clean(suggestion.module || 'suggestions'),
+                workflowMode: clean(suggestion.workflowMode || ''),
+                metadata: { source: clean(suggestion.category || 'other') }
+            });
+            return payload.suggestionId;
+        } catch { return ''; }
+    }
+
+    function rebelCoreScheduleFlush(delay = REBEL_CORE_FLUSH_MS) {
+        if (rebelCoreFlushTimer) return;
+        rebelCoreFlushTimer = setTimeout(() => {
+            rebelCoreFlushTimer = null;
+            rebelCoreFlush().catch(() => {});
+        }, Math.max(250, delay));
+    }
+
+    function rebelCoreBackoffDelay(failures) {
+        const index = Math.min(Math.max(0, failures - 1), REBEL_CORE_BACKOFF_MS.length - 1);
+        return REBEL_CORE_BACKOFF_MS[index];
+    }
+    async function rebelCoreFetch(path, init = {}) {
+        const pairing = rebelCoreLoadPairing();
+        if (!pairing) throw new Error('Not paired');
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), REBEL_CORE_FETCH_TIMEOUT_MS);
+        try {
+            return await fetch(pairing.endpoint, {
+                ...init,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Rebel-Device-ID': pairing.deviceId,
+                    'Authorization': `Bearer ${pairing.token}`,
+                    ...(init.headers || {})
+                },
+                signal: controller.signal,
+                cache: 'no-store'
+            });
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    async function rebelCoreFlush(force = false) {
+        try {
+            if (!rebelCoreLoadPairing()) return false;
+            if (getRun() && !force) { rebelCoreScheduleFlush(REBEL_CORE_FLUSH_MS); return false; }
+            const state = rebelCoreState();
+            const nextRetryAt = Date.parse(state.nextRetryAt || 0) || 0;
+            if (!force && nextRetryAt && Date.now() < nextRetryAt) {
+                rebelCoreScheduleFlush(Math.max(1000, nextRetryAt - Date.now()));
+                return false;
+            }
+            const queue = rebelCoreQueue();
+            if (!queue.length) return true;
+            const batch = queue.slice(0, REBEL_CORE_BATCH_MAX);
+            const events = batch.filter(x => x?.kind === 'event').map(x => x.payload);
+            const suggestions = batch.filter(x => x?.kind === 'suggestion').map(x => x.payload);
+            const response = await rebelCoreFetch('', { method: 'POST', body: JSON.stringify({ version: VERSION, events, suggestions }) });
+            if (!response.ok) throw new Error(`Rebel Core HTTP ${response.status}`);
+            const result = await response.json().catch(() => ({}));
+            if (!result?.ok) throw new Error(result?.error || 'Rebel Core rejected telemetry');
+            rebelCoreSaveQueue(queue.slice(batch.length));
+            rebelCoreSaveState({ lastSyncAt: new Date().toISOString(), lastError: '', failures: 0, nextRetryAt: '' });
+            if (rebelCoreQueue().length) rebelCoreScheduleFlush(1000);
+            return true;
+        } catch (error) {
+            const failures = Math.min(20, Number(rebelCoreState().failures || 0) + 1);
+            const delay = rebelCoreBackoffDelay(failures);
+            rebelCoreSaveState({ failures, lastError: rebelCoreSafeText(error?.message || error, 300), nextRetryAt: new Date(Date.now() + delay).toISOString() });
+            rebelCoreScheduleFlush(delay);
+            return false;
+        }
+    }
+    async function rebelCoreTestConnection() {
+        try {
+            const response = await rebelCoreFetch('', { method: 'GET' });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || !result?.ok) throw new Error(result?.error || `HTTP ${response.status}`);
+            rebelCoreSaveState({ lastSyncAt: new Date().toISOString(), lastError: '', failures: 0, nextRetryAt: '' });
+            return { ok: true, result };
+        } catch (error) {
+            rebelCoreSaveState({ lastError: rebelCoreSafeText(error?.message || error, 300) });
+            return { ok: false, error: rebelCoreSafeText(error?.message || error, 300) };
+        }
+    }
+
+    function telemetryRuntimeError(error, module = 'runtime') {
+        try {
+            const err = error instanceof Error ? error : new Error(String(error || 'Unknown runtime error'));
+            const signature = `${err.name}:${rebelCoreSafeText(err.message, 180)}:${module}`;
+            const state = rebelCoreState();
+            const lastAt = Date.parse(state.lastRuntimeErrorAt || 0) || 0;
+            if (state.lastRuntimeErrorSignature === signature && Date.now() - lastAt < 10 * 60 * 1000) return;
+            rebelCoreSaveState({ lastRuntimeErrorSignature: signature, lastRuntimeErrorAt: new Date().toISOString() });
+            telemetryEvent('runtime_error', {
+                module,
+                success: false,
+                errorType: err.name || 'Error',
+                errorMessage: err.message || 'Unknown runtime error'
+            });
+        } catch { /* fail open */ }
+    }
+
+    function telemetryHeartbeat() {
+        telemetryEvent('heartbeat', {
+            module: 'health',
+            success: true,
+            metadata: { health: 'userscript_running', queueDepth: rebelCoreQueue().length, updateChannel: UPDATE_CHANNEL }
+        });
+    }
+
+    function rebelCoreTelemetryStatus() {
+        const pairing = rebelCorePairingSummary();
+        const state = rebelCoreState();
+        return {
+            ...pairing,
+            lastSyncAt: state.lastSyncAt || '',
+            lastError: state.lastError || '',
+            queueCount: rebelCoreQueue().length,
+            failures: Number(state.failures || 0)
+        };
     }
 
     // ============================================================
@@ -7989,6 +8291,19 @@
         fetchUpdateManifest(false).catch(() => {});
     }, 1200);
 
+    setTimeout(async () => {
+        const enrolled = await rebelCoreEnsureEnrollment(false);
+        if (enrolled) {
+            telemetryEvent('app_loaded', { module: 'core', success: true });
+            telemetryHeartbeat();
+            rebelCoreFlush(false).catch(() => {});
+        }
+    }, 1800);
+
+    setInterval(async () => {
+        if (!rebelCoreLoadPairing()) await rebelCoreEnsureEnrollment(false);
+        if (rebelCoreLoadPairing()) telemetryHeartbeat();
+    }, REBEL_CORE_HEARTBEAT_MS);
     const migrationNotice = loadJSON(MIGRATION_NOTICE_KEY, null);
     if (migrationNotice?.message) {
         setTimeout(() => alert(`Vector Rebel migration notice:\n\n${migrationNotice.message}`), 400);
