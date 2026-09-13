@@ -18,6 +18,7 @@
     "rebel-core-scheduling-ledger-0.15.0.js",
     "vector-scheduling-runtime-reconciliation-0.15.0.js",
     "vector-scheduling-runtime-reconciliation-filter-0.15.0.js",
+    "vector-scheduling-runtime-coverage-filter-0.16.0.js",
     "vector-scheduling-runtime-coordinator-0.16.0.js"
   ]
 }
