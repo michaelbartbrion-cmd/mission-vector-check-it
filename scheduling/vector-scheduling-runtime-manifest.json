@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "runtimeVersion": "0.19.0-dev",
+  "runtimeVersion": "0.20.0-dev",
   "loaderMinVersion": "1.0.1",
   "scripts": [
     "rotation-engine.js",
@@ -24,6 +24,7 @@
     "vector-scheduling-runtime-coverage-filter-0.16.0.js",
     "vector-scheduling-runtime-coordinator-0.16.0.js",
     "rebel-core-program-heartbeat-0.17.0.js",
-    "vector-scheduling-runtime-bridge-ui-0.19.0.js"
+    "vector-scheduling-runtime-bridge-ui-0.19.0.js",
+    "vector-scheduling-runtime-unified-bridge-0.20.0.js"
   ]
 }
