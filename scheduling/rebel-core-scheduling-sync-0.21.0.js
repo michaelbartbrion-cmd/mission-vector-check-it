@@ -31,8 +31,8 @@
   function status() { return loadJson(STATUS_KEY, { lastAttemptAt: null, lastSuccessAt: null, lastError: null }); }
   function setStatus(patch) { const next = { ...status(), ...patch }; saveJson(STATUS_KEY, next); return next; }
   function sentState() {
-    const s = loadJson(SENT_KEY, { credits: {}, plans: {}, cases: {} });
-    s.credits = s.credits || {}; s.plans = s.plans || {}; s.cases = s.cases || {};
+    const s = loadJson(SENT_KEY, { credits: {}, plans: {}, cases: {}, observations: {} });
+    s.credits = s.credits || {}; s.plans = s.plans || {}; s.cases = s.cases || {}; s.observations = s.observations || {};
     return s;
   }
 
@@ -133,6 +133,51 @@
       });
   }
 
+  function controlled(group) { return /^(Truck|Medic)\s+504$/i.test(clean(group)); }
+
+  function segmentRows(s) {
+    return (s?.segments || [])
+      .filter(x => x?.segmentKey && x?.date && x?.personName && Number(x?.durationHours || 0) > 0)
+      .map(x => {
+        const group = clean(x.assignmentGroup);
+        const key = `staffing-segment:${clean(x.segmentKey)}`;
+        const data = {
+          observation_id: key,
+          batch_id: `historical:${x.date}`,
+          work_date: x.date,
+          captured_at: x.capturedAt || nowIso(),
+          person_id: clean(x.personId),
+          person_name: clean(x.personName),
+          activity: 'Historical duty segment',
+          assignment: group,
+          assignment_group: group,
+          duty_code: clean(x.dutyCode),
+          shift_label: x.isCShift ? 'C Shift' : '',
+          found: true,
+          capture_quality: x.verified ? 'row+group' : 'row-only',
+          raw_text: clean(x.rawText),
+          source: clean(x.source || 'Vector Scheduling precision reader'),
+          source_version: VERSION,
+          page_mode: 'ListView',
+          station: x.isCShift && controlled(group) ? 'Station 4' : '',
+          unit: group,
+          position_label: clean(x.roleHint || x.dutyCode),
+          start_time: clean(x.startTime),
+          end_time: clean(x.endTime),
+          duration_hours: Number(x.durationHours || 0),
+          is_c_shift: Boolean(x.isCShift),
+          c_shift_day: Number(x.cShiftDay || 0) || undefined,
+          station4_controlled: Boolean(x.isCShift && controlled(group)),
+          verified: Boolean(x.verified),
+          record_granularity: 'segment',
+          role_hint: clean(x.roleHint),
+          source_observation_key: clean(x.segmentKey),
+        };
+        const revision = JSON.stringify([x.date,x.personId,x.assignmentGroup,x.startTime,x.endTime,x.durationHours,x.dutyCode,x.roleHint,x.rawText,x.isCShift,x.verified,x.capturedAt]);
+        return { key, revision, data };
+      });
+  }
+
   async function postPart(field, rows) {
     const p = pairing();
     if (!p.deviceId || !p.token) throw new Error('Mission Vector Bridge is not paired.');
@@ -153,6 +198,7 @@
           credits: field === 'credits' ? rows.map(r => r.data) : [],
           plans: field === 'plans' ? rows.map(r => r.data) : [],
           reconciliationCases: field === 'cases' ? rows.map(r => r.data) : [],
+          observations: field === 'observations' ? rows.map(r => r.data) : [],
         },
       }),
     });
@@ -178,18 +224,19 @@
 
   function pendingCounts() {
     const s = state();
-    if (!s) return { credits: 0, plans: 0, cases: 0, totalCredits: 0, totalPlans: 0, totalCases: 0 };
-    const sent = sentState(), credits = creditRows(s), plans = planRows(s), cases = caseRows(s);
+    if (!s) return { credits: 0, plans: 0, cases: 0, observations: 0, totalCredits: 0, totalPlans: 0, totalCases: 0, totalObservations: 0 };
+    const sent = sentState(), credits = creditRows(s), plans = planRows(s), cases = caseRows(s), observations = segmentRows(s);
     return {
-      totalCredits: credits.length, totalPlans: plans.length, totalCases: cases.length,
+      totalCredits: credits.length, totalPlans: plans.length, totalCases: cases.length, totalObservations: observations.length,
       credits: credits.filter(r => sent.credits[r.key] !== r.revision).length,
       plans: plans.filter(r => sent.plans[r.key] !== r.revision).length,
       cases: cases.filter(r => sent.cases[r.key] !== r.revision).length,
+      observations: observations.filter(r => sent.observations[r.key] !== r.revision).length,
     };
   }
 
   async function syncNow() {
-    if (!paired()) { refreshCard(); return { paired: false, credits: 0, plans: 0, cases: 0 }; }
+    if (!paired()) { refreshCard(); return { paired: false, credits: 0, plans: 0, cases: 0, observations: 0 }; }
     setStatus({ lastAttemptAt: nowIso(), lastError: null });
     try {
       try { window.MVCI_VECTOR_RECONCILIATION_0150?.reconcile?.(); } catch (_) {}
@@ -198,9 +245,10 @@
       const credits = await sendPending('credits', creditRows(s), sent, 150);
       const plans = await sendPending('plans', planRows(s), sent, 100);
       const cases = await sendPending('cases', caseRows(s), sent, 30);
-      setStatus({ lastSuccessAt: nowIso(), lastError: null, creditsSent: credits, plansSent: plans, casesSent: cases });
+      const observations = await sendPending('observations', segmentRows(s), sent, 100);
+      setStatus({ lastSuccessAt: nowIso(), lastError: null, creditsSent: credits, plansSent: plans, casesSent: cases, observationsSent: observations });
       refreshCard();
-      return { paired: true, credits, plans, cases };
+      return { paired: true, credits, plans, cases, observations };
     } catch (error) {
       setStatus({ lastError: clean(error?.message || error) });
       refreshCard();
@@ -217,15 +265,15 @@
     const c = pendingCounts(), st = status(), isPaired = paired();
     const health = st.lastError ? `Error: ${esc(st.lastError)}` : st.lastSuccessAt ? `Last sync ${new Date(st.lastSuccessAt).toLocaleString()}` : 'Not synced yet';
     card.innerHTML = `<h3>Rebel Core scheduling sync <span class="vs-muted">${VERSION}</span></h3>
-      <div class="vs-muted" style="margin-bottom:7px">${c.totalCredits} verified current-era credits · ${c.totalPlans} plans · ${c.totalCases} reconciliation cases</div>
-      <div class="vs-muted" style="margin-bottom:7px">Pending: ${c.credits} credits · ${c.plans} plans · ${c.cases} cases</div>
+      <div class="vs-muted" style="margin-bottom:7px">${c.totalCredits} verified current-era credits · ${c.totalPlans} plans · ${c.totalCases} reconciliation cases · ${c.totalObservations} factual segments</div>
+      <div class="vs-muted" style="margin-bottom:7px">Pending: ${c.credits} credits · ${c.plans} plans · ${c.cases} cases · ${c.observations} segments</div>
       ${isPaired ? `<div style="margin-bottom:7px">${health}</div><button id="vs-core-sync-now-v0210" class="vs-btn secondary">Sync to Rebel Core</button>` : '<div class="vs-muted">Use the Mission Vector Bridge pairing above; no second pairing is required.</div>'}`;
     const btn = card.querySelector('#vs-core-sync-now-v0210');
     if (btn) btn.onclick = async () => {
       btn.disabled = true;
       try {
         const result = await syncNow();
-        alert(`Rebel Core scheduling sync complete.\n\n${result.credits} credit row(s), ${result.plans} plan row(s), and ${result.cases} reconciliation case(s) sent.`);
+        alert(`Rebel Core scheduling sync complete.\n\n${result.credits} credit row(s), ${result.plans} plan row(s), ${result.cases} reconciliation case(s), and ${result.observations} factual segment(s) sent.`);
       } catch (error) {
         alert(`Scheduling sync failed.\n\n${error?.message || error}`);
       } finally { btn.disabled = false; }
