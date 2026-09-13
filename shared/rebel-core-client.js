@@ -240,15 +240,15 @@
     }
 
     function heartbeat(fields = {}) {
-      return emit({ kind: 'heartbeat', occurred_at: nowIso(), ...safeClone(fields) });
+      return emit({ ...safeClone(fields), kind: 'heartbeat', occurred_at: clean(fields.occurred_at) || nowIso() });
     }
 
     function usage(fields = {}) {
-      return emit({ kind: 'usage', occurred_at: nowIso(), ...safeClone(fields) });
+      return emit({ ...safeClone(fields), kind: 'usage', occurred_at: clean(fields.occurred_at) || nowIso() });
     }
 
     function suggestion(fields = {}) {
-      return emit({ kind: 'suggestion', occurred_at: nowIso(), ...safeClone(fields) });
+      return emit({ ...safeClone(fields), kind: 'suggestion', occurred_at: clean(fields.occurred_at) || nowIso() });
     }
 
     function startAutoFlush(intervalMs = 30000) {
