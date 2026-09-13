@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mission Vector Check It - Overtime Collector
 // @namespace    mission-vector-check-it
-// @version      0.1.0
+// @version      0.2.0
 // @description  Read-only CrewSense overtime ranking/signup collector for Rebel Command.
 // @match        https://www.crewsense.com/*
 // @match        https://crewsense.com/*
@@ -15,7 +15,7 @@
 
     if (window.__vectorOvertimeCollector) return;
 
-    const VERSION = '0.1.0';
+    const VERSION = '0.2.0';
     const ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
     const PAIR_KEY = 'vectorOvertimeCollectorPairing_v1';
     const STATE_KEY = 'vectorOvertimeCollectorState_v1';
@@ -27,6 +27,7 @@
     const state = {
         lastMutationAt: Date.now(),
         captureRunning: false,
+        sweepRunning: false,
         captureTimer: null,
         lastDigest: '',
         lastSentAt: 0,
@@ -252,6 +253,108 @@
         return response.json().catch(() => ({}));
     }
 
+    async function fetchWorklist() {
+        const p = pairing();
+        if (!p.deviceId || !p.token) throw new Error('Collector is not paired.');
+        const url = new URL(p.endpoint || ENDPOINT);
+        url.searchParams.set('action', 'overtime-worklist');
+        const response = await fetch(url.toString(), {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${p.token}`, 'X-Rebel-Device-ID': p.deviceId },
+            cache: 'no-store', credentials: 'omit'
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || body?.ok === false) throw new Error(body?.error || `Could not load OT worklist (${response.status})`);
+        return body;
+    }
+
+    function formatUsDate(date) {
+        const m = String(date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        return m ? `${Number(m[2])}/${Number(m[3])}/${m[1]}` : '';
+    }
+
+    function findForecastControls() {
+        const label = [...document.querySelectorAll('label,div,span,p')]
+            .filter(rendered)
+            .find(el => /select date to forecast rankings/i.test(clean(el.textContent)));
+        if (!label) return null;
+        let scope = label.parentElement;
+        for (let depth = 0; scope && depth < 7; depth += 1, scope = scope.parentElement) {
+            const inputs = [...scope.querySelectorAll('input')].filter(rendered).filter(el => parseDateString(el.value));
+            if (!inputs.length) continue;
+            const input = inputs[0];
+            const buttons = [...scope.querySelectorAll('button')]
+                .filter(rendered)
+                .filter(b => !b.disabled && b.getAttribute('aria-disabled') !== 'true');
+            const following = buttons.filter(b => !!(input.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+            const submit = following.find(b => {
+                const text = clean(b.innerText || b.getAttribute('aria-label') || b.title || '');
+                const classes = clean(b.className).toLowerCase();
+                const lower = text.toLowerCase();
+                return lower !== 'x' && lower !== 'clear' && lower !== 'reset'
+                    && !/calendar|date picker/.test(lower)
+                    && !/danger|delete|remove|red|calendar|datepicker/.test(classes);
+            });
+            if (submit) return { input, submit };
+        }
+        return null;
+    }
+
+    async function setForecastDate(date) {
+        const controls = findForecastControls();
+        if (!controls) throw new Error('Could not safely identify the forecast-date controls.');
+        const value = formatUsDate(date);
+        if (!value) throw new Error(`Invalid forecast date: ${date}`);
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        if (setter) setter.call(controls.input, value); else controls.input.value = value;
+        controls.input.dispatchEvent(new Event('input', { bubbles: true }));
+        controls.input.dispatchEvent(new Event('change', { bubbles: true }));
+        controls.input.dispatchEvent(new Event('blur', { bubbles: true }));
+        await wait(150);
+        controls.submit.click();
+        const start = Date.now();
+        while (Date.now() - start < 12000) {
+            await wait(200);
+            const detected = detectForecastDate();
+            if (detected.date === date && !loadingVisible() && Date.now() - state.lastMutationAt >= 500) return true;
+        }
+        throw new Error(`Vector did not settle on forecast date ${date}.`);
+    }
+
+    async function sweepNeededRankings({ limit = 20 } = {}) {
+        if (state.sweepRunning || state.captureRunning || !isRankingPage() || !isPaired()) return { skipped: true, reason: 'busy-or-not-ready' };
+        state.sweepRunning = true;
+        renderStatus();
+        let originalDate = '';
+        const results = [];
+        try {
+            const worklist = await fetchWorklist();
+            if (worklist?.rankingParserVerified !== true) return { skipped: true, reason: 'ranking-parser-not-verified' };
+            const needed = (Array.isArray(worklist?.dates) ? worklist.dates : [])
+                .filter(x => x?.rankingNeeded === true && /^20\d{2}-\d{2}-\d{2}$/.test(String(x?.workDate || '')))
+                .slice(0, Math.max(1, Math.min(60, Number(limit) || 20)));
+            if (!needed.length) return { ok: true, captured: 0, reason: 'nothing-needed' };
+            originalDate = detectForecastDate().date;
+            for (const item of needed) {
+                await setForecastDate(item.workDate);
+                await waitStable(8000);
+                const result = await captureRanking({ force: true });
+                results.push({ workDate: item.workDate, result });
+                await wait(500);
+            }
+            return { ok: true, captured: results.length, results };
+        } catch (err) {
+            console.warn('Vector overtime ranking sweep:', err);
+            return { ok: false, error: String(err?.message || err), results };
+        } finally {
+            if (originalDate && detectForecastDate().date !== originalDate) {
+                try { await setForecastDate(originalDate); } catch { /* leave current date if restore fails */ }
+            }
+            state.sweepRunning = false;
+            renderStatus();
+        }
+    }
+
     async function configure() {
         const current = pairing();
         if (current.deviceId && current.token) {
@@ -336,6 +439,7 @@
             const result = await sendRankingCapture(payload,digest);
             state.status = result?.ranking?.quality === 'good' ? 'sent-good' : 'sent-partial';
             state.lastResult = result;
+            if (!state.sweepRunning) setTimeout(() => sweepNeededRankings().catch(() => {}), 1500);
             return { ok:true, full, rows:rows.length, diagnostics:diag, result };
         } catch (err) {
             console.warn('Vector overtime collector:',err);
@@ -351,7 +455,7 @@
     function scheduleCapture(delay=1200) {
         clearTimeout(state.captureTimer);
         state.captureTimer=setTimeout(() => {
-            if (!document.body || !isRankingPage()) return;
+            if (!document.body || !isRankingPage() || state.sweepRunning) return;
             captureRanking().catch(() => {});
         },delay);
     }
@@ -375,6 +479,8 @@
     window.__vectorOvertimeCollector = {
         version:VERSION,
         captureRanking,
+        sweepNeededRankings,
+        fetchWorklist,
         configure,
         status:() => ({version:VERSION,paired:isPaired(),status:state.status,lastSentAt:state.lastSentAt,lastResult:state.lastResult})
     };
