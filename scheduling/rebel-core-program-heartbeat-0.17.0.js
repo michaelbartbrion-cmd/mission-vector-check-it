@@ -73,10 +73,12 @@
 
   async function usageLoaded() {
     if (!pairing()) return false;
-    const marker = `${runtimeVersion()}|${location.pathname}|${location.hash}|${new Date().toISOString().slice(0, 13)}`;
+    const hour = new Date().toISOString().slice(0, 13);
+    const marker = `${runtimeVersion()}|${hour}`;
     if (sessionStorage.getItem(LOAD_SENT_KEY) === marker) return false;
     const ok = await post({
       kind: 'usage',
+      event_key: `vector-scheduling:runtime-loaded:${runtimeVersion()}:${hour}`,
       program_key: 'vector-scheduling',
       program_name: 'Vector Scheduling',
       program_category: 'scheduling',
