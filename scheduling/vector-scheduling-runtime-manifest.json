@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "runtimeVersion": "0.13.0-dev",
+  "runtimeVersion": "0.14.0-dev",
   "loaderMinVersion": "1.0.1",
   "scripts": [
     "rotation-engine.js",
@@ -9,6 +9,7 @@
     "vector-scheduling-runtime-patch-0.6.0.js",
     "vector-scheduling-runtime-reader-0.12.0.js",
     "vector-scheduling-runtime-backfill-0.13.0.js",
-    "vector-scheduling-runtime-ui-0.13.0.js"
+    "vector-scheduling-runtime-ui-0.13.0.js",
+    "rebel-core-telemetry-0.14.0.js"
   ]
 }
