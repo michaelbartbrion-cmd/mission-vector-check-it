@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.20.0-dev';
+  const VERSION = '0.20.2-dev';
   const ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const PAIR_KEY = 'vectorStaffingCollectorPairing_v1';
   const CARD_ID = 'vs-vector-bridge-v0200';
@@ -87,11 +87,17 @@
     return /Salary Step\s*\[1010\]|\bSub\s*\[1010\]|Additional Time|Disaster Relief|Overtime|OT Sign|Force Hire|Backfill|Trade|Swap|Open Slot|Vacation|Sick|Leave|Time Off/i.test(text);
   }
 
+  function looksLikeScheduleRow(text) {
+    const t = clean(text);
+    if (!/\b\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\b/.test(t)) return false;
+    return rowMarker(t) || /^Open Slot\b/i.test(t);
+  }
+
   function candidateElements(root=document) {
     const pool = [...root.querySelectorAll('tr,[role="row"],li,article,section,div')]
       .filter(el => rendered(el) && !el.closest(`#${CARD_ID}`) && !el.closest('#mvci-vs-panel'))
       .map(el => ({el, text: clean(el.textContent)}))
-      .filter(x => x.text.length >= 8 && x.text.length <= 900 && rowMarker(x.text));
+      .filter(x => x.text.length >= 8 && x.text.length <= 900 && looksLikeScheduleRow(x.text));
     const selected=[];
     for (const item of pool.sort((a,b)=>a.text.length-b.text.length)) {
       if (selected.some(x => item.el.contains(x.el))) continue;
@@ -119,8 +125,8 @@
 
   function hoursFrom(text) {
     const t=clean(text);
-    let m=t.match(/\b(\d+(?:\.\d+)?)\s*(?:hrs?|hours?)\b/i);
-    if (m) return Number(m[1]);
+    let m=t.match(/\b(\d+(?:\.\d+)?)\s*(?:hrs?|hours?)(?:\s+(\d+)\s*min)?\b/i);
+    if (m) return Math.round((Number(m[1]) + Number(m[2] || 0) / 60) * 100) / 100;
     m=t.match(/\b(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\b/);
     if (!m) return null;
     let start=Number(m[1])+Number(m[2])/60, end=Number(m[3])+Number(m[4])/60;
@@ -142,14 +148,20 @@
     const marker=t.search(/\s+(?=Salary Step\s*\[1010\]|Sub\s*\[1010\]|Additional Time|Salary Disaster Relief|Overtime|OT Sign|Force Hire|Backfill|Trade|Swap|Vacation|Sick|Leave|Time Off)/i);
     const prefix=clean(marker>0?t.slice(0,marker):t);
     const tokens=prefix.split(' ').filter(Boolean);
-    const dutySet=new Set(['CAPT','CAPTAIN','DE','DE-A','DE-B','DE-C','FF','FFA','FFB','FFC','TM','TILLER','TADE','TAC','SWING','FFC']);
-    let duty='';
-    if (tokens.length>2) {
-      const last=tokens[tokens.length-1].toUpperCase();
-      if (dutySet.has(last)) duty=tokens.pop();
+    const statusSet=new Set(['S','A','O','V']);
+    const dutySet=new Set(['CAPT','CAPTAIN','BC','CHIEF','DE','DE-A','DE-B','DE-C','FF','FFA','FFB','FFC','TM','TILLER','TADE','TAC','SWING','FTO']);
+    while (tokens.length && statusSet.has(tokens[tokens.length-1].toUpperCase())) tokens.pop();
+    while (tokens.length && tokens[tokens.length-1] === '-') tokens.pop();
+    const duties=[];
+    while (tokens.length) {
+      const last=tokens[tokens.length-1];
+      if (!dutySet.has(last.toUpperCase())) break;
+      duties.unshift(tokens.pop());
     }
+    while (tokens.length && tokens[tokens.length-1] === '-') tokens.pop();
+    if (tokens.length > 2 && /^\d+$/.test(tokens[tokens.length-1])) tokens.pop();
     const personName=clean(tokens.join(' ')).slice(0,180);
-    return {personName, dutyCode:duty};
+    return {personName, dutyCode:clean(duties.join(' '))};
   }
 
   function hash32(text) {
