@@ -6,14 +6,16 @@ window.__mvciVectorUi0160={version:VERSION,startedAt:Date.now()};
 function wire(){
  const panel=document.getElementById('mvci-vs-panel');if(!panel)return;
  const loader=window.__mvciLiveLoader||{};
- const runtime=loader.runtimeVersion||VERSION;
- const loaderVersion=loader.loaderVersion||'unknown';
+ const runtime=loader.runtimeVersion||document.documentElement.dataset.mvciRuntimeVersion||VERSION;
+ const loaderVersion=loader.loaderVersion||document.documentElement.dataset.mvciLoaderVersion||'unknown';
+ const failures=Number(document.documentElement.dataset.mvciLoaderFailures||0);
+ const loaded=Number(document.documentElement.dataset.mvciLoaderLoaded||0);
  const strong=panel.querySelector('.vs-head strong');
  if(strong){
-   const sig=`${runtime}|${loaderVersion}`;
+   const sig=`${runtime}|${loaderVersion}|${failures}|${loaded}`;
    if(strong.dataset.mvciRuntimeLabel!==sig){
      strong.dataset.mvciRuntimeLabel=sig;
-     strong.innerHTML=`Vector Scheduling DEV <span style="opacity:.75;font-size:11px">runtime ${runtime} · loader ${loaderVersion}</span>`;
+     strong.innerHTML=`Vector Scheduling DEV <span style="opacity:.75;font-size:11px">runtime ${runtime} · loader ${loaderVersion}${loaded?` · ${loaded} modules`:''}${failures?` · ${failures} failed`:''}</span>`;
    }
  }
  const button=document.getElementById('vs-update');
@@ -29,10 +31,10 @@ function wire(){
  } else { card.id='vs-authoritative-build-v0160'; }
  const reader=window.MVCI_VECTOR_READER_0160?'multi-row precision reader active':window.MVCI_VECTOR_READER_0150?'precision reader active':window.MVCI_VECTOR_READER_0120?'base reader active':'reader loading';
  const reconciliation=window.MVCI_VECTOR_RECONCILIATION_0150?'reconciliation active':'reconciliation loading';
- const sig=`${runtime}|${loaderVersion}|${reader}|${reconciliation}`;
+ const sig=`${runtime}|${loaderVersion}|${reader}|${reconciliation}|${failures}|${loaded}`;
  if(card.dataset.sig!==sig){
    card.dataset.sig=sig;
-   card.innerHTML=`<h3>Live build status</h3><div><b>Runtime:</b> ${runtime}</div><div><b>Loader:</b> ${loaderVersion}</div><div><b>Reader:</b> ${reader}</div><div><b>Reconciliation:</b> ${reconciliation}</div><div class="vs-muted" style="margin-top:5px">This card is the authoritative build display; older component labels identify individual modules only.</div>`;
+   card.innerHTML=`<h3>Live build status</h3><div><b>Runtime:</b> ${runtime}</div><div><b>Loader:</b> ${loaderVersion}</div><div><b>Modules:</b> ${loaded||'loading'} loaded${failures?` · ${failures} failed`:''}</div><div><b>Reader:</b> ${reader}</div><div><b>Reconciliation:</b> ${reconciliation}</div><div class="vs-muted" style="margin-top:5px">This card is the authoritative build display; older component labels identify individual modules only.</div>`;
  }
 }
 setInterval(wire,900);setTimeout(wire,180);
