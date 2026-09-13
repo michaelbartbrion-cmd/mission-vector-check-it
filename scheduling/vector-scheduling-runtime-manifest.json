@@ -15,6 +15,7 @@
     "rebel-core-telemetry-0.14.0.js",
     "rebel-core-segment-telemetry-0.15.0.js",
     "rebel-core-scheduling-ledger-0.15.0.js",
-    "vector-scheduling-runtime-reconciliation-0.15.0.js"
+    "vector-scheduling-runtime-reconciliation-0.15.0.js",
+    "vector-scheduling-runtime-reconciliation-filter-0.15.0.js"
   ]
 }
