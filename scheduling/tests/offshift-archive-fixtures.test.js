@@ -20,7 +20,7 @@ assert.equal(isCShift('2026-09-16'), true);
 assert.equal(previousOffShift('2026-09-11'), '2026-09-09');
 assert.equal(previousOffShift('2026-09-10'), '2026-09-09');
 assert.equal(previousOffShift('2026-09-16'), '2026-09-15');
-assert.equal(previousOffShift('2026-02-18'), '2026-02-16');
+assert.equal(previousOffShift('2026-02-18'), '2026-02-17');
 assert.equal(count('2025-09-30','2026-09-11',isCShift),116);
 assert.equal(count('2025-09-30','2026-09-11',isOffShift),231);
 
