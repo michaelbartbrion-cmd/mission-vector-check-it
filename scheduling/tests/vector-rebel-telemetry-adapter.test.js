@@ -68,6 +68,7 @@ for (const forbidden of [
 
 const heartbeat = adapter.runtimeHeartbeat({
   version: '2.3.10',
+  queueCount: 7,
   updateState: {
     checkedAt: '2026-09-13T18:11:00.000Z',
     successfulAt: '2026-09-13T18:11:00.000Z',
@@ -80,6 +81,7 @@ assert.equal(heartbeat.kind, 'heartbeat');
 assert.equal(heartbeat.connection_key, 'vector-rebel-runtime');
 assert.equal(heartbeat.version, '2.3.10');
 assert.equal(heartbeat.status, 'connected');
+assert.equal(heartbeat.queue_count, 7);
 
 const update = adapter.updateUsage({
   checkedAt: '2026-09-13T18:11:00.000Z',
