@@ -74,6 +74,7 @@ Recommended fields:
   "component": "PPE helper userscript",
   "status": "connected",
   "version": "2.3.10",
+  "queue_count": 0,
   "source": "Vector Rebel",
   "occurred_at": "2026-09-13T16:00:00.000Z",
   "details": "Concise non-sensitive status text"
@@ -82,7 +83,7 @@ Recommended fields:
 
 Connection status values: `connected`, `degraded`, `disconnected`, `error`, `unknown`.
 
-If `program_key` is supplied, Rebel Core also updates the Program registry's last-seen/version/health metadata.
+If `program_key` is supplied, Rebel Core also updates the Program registry's last-seen/version/health metadata. `queue_count` is optional and lets Rebel Command surface telemetry backlog without exposing queued event contents.
 
 ### `usage`
 
@@ -114,6 +115,8 @@ Use a stable `event_key` when the same logical event could be retried. Rebel Cor
 
 Do not record keystrokes or full arbitrary Vector page content as usage telemetry.
 
+For Vector Rebel completed-run telemetry, the initial privacy rule is aggregate-only. Allowed fields include mode, total item count, pass/failure counts, inferred completion count, duration, program version, and timestamps. Do not send inspector name, gear owner, asset IDs, PPE item types, individual pass/fail answers, failure notes, signatures, evidence strings, or verification diagnostics as usage telemetry.
+
 ### `suggestion`
 
 Purpose: move Vector Rebel improvement suggestions into Rebel Command instead of managing them on the Vector screen.
@@ -131,6 +134,11 @@ Purpose: factual Vector work/activity evidence. It does not itself authorize rid
 Fields may include person/date/time/duration, C-shift flag, assignment group, apparatus, station, duty/activity/pay codes, raw evidence, capture source, verification state, precision segment fields, and notes.
 
 `affects_riding_ratio` must not be set true merely because evidence was captured. Vector Scheduling reconciliation owns that decision.
+
+C-shift and off-shift activity are separate concepts:
+
+- C-shift riding-position evidence may later reconcile into the official Truck 504 ratio ledger.
+- Off-shift overtime, subs, training, deployments, special assignments, and other work are retained as informational history only and must not change riding ratios.
 
 ### `sync_run`
 
@@ -182,12 +190,21 @@ A production client should:
 7. tolerate Rebel Core being unavailable;
 8. keep operational Vector behavior independent from telemetry success.
 
+The shared development client in `shared/rebel-core-client.js` is the preferred implementation base so each Vector Check It program does not invent its own retry, batching, secret handling, or queue logic.
+
 ## Scheduling implementation status
 
-Vector Scheduling development runtime 0.17.0-dev is the current proving ground. It reports runtime/Tampermonkey health, synchronization state, factual activity, precision segments, verified legacy credits, plans, reconciliation cases, and an idempotent hourly `runtime_loaded` usage event after pairing.
+Vector Scheduling development runtime 0.18.0-dev is the current proving ground. It reports runtime/Tampermonkey health, synchronization state, factual activity, precision segments, verified legacy credits, plans, reconciliation cases, and a small lifecycle usage event after pairing.
+
+The runtime now has two distinct historical passes:
+
+- **Historical ratio backfill**: C-shift-only by default, because only C-shift riding positions count toward Truck 504 balancing.
+- **Off-shift activity archive**: checks only scheduled off-days to collect overtime, subs, training, deployments, special assignments, and other factual work history. Its records are informational only.
 
 This does **not** mean browser-to-Rebel-Core synchronization is operationally verified. It remains implemented-but-unverified until an authenticated event is observed in Rebel Command from Michael's paired browser.
 
-## Vector Rebel integration rule
+## Vector Rebel integration status and rule
 
 Vector Rebel/PPE Helper is safety-sensitive. Integrate this contract as an isolated reporting module without changing the validated PPE decision, submit, verification, or Vector interaction paths. Test with Rebel Core available, unavailable, and invalidly paired before promotion through the normal Mission Vector Check It release process.
+
+A development-only sidecar exists at `beta/vector-rebel-rebel-core-telemetry.dev.user.js` on the feature branch. It is **not** part of the production beta helper. The sidecar uses the shared Rebel Core client and the privacy-safe adapter to report runtime health, update-check results, aggregate completed-run usage, and future explicit suggestions without modifying PPE execution. Promotion still requires PRIMARY review and live browser testing.
