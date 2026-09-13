@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "runtimeVersion": "0.16.0-dev",
+  "runtimeVersion": "0.17.0-dev",
   "loaderMinVersion": "1.0.1",
   "scripts": [
     "rotation-engine.js",
@@ -19,6 +19,7 @@
     "vector-scheduling-runtime-reconciliation-0.15.0.js",
     "vector-scheduling-runtime-reconciliation-filter-0.15.0.js",
     "vector-scheduling-runtime-coverage-filter-0.16.0.js",
-    "vector-scheduling-runtime-coordinator-0.16.0.js"
+    "vector-scheduling-runtime-coordinator-0.16.0.js",
+    "rebel-core-program-heartbeat-0.17.0.js"
   ]
 }
