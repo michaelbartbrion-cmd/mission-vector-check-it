@@ -14,6 +14,7 @@
 
   const clean = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
   const nowIso = () => new Date().toISOString();
+  const timeRangeRe = /\b\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\b/;
 
   function loadJson(key, fallback) {
     try {
@@ -159,6 +160,7 @@
       raw_text: clean(observation.rawText),
       verified: Boolean(observation.found && observation.captureQuality === 'row+group'),
       captured_at: clean(observation.capturedAt) || nowIso(),
+      record_granularity: 'summary',
       notes: 'Rebel Core factual activity record. Riding-position credit remains owned by Vector Scheduling reconciliation.',
     };
   }
@@ -245,6 +247,8 @@
     const latestByDayPerson = new Map();
     for (const o of observations) {
       if (!o?.found || !o?.date || !(o?.personId || o?.personName)) continue;
+      const raw = clean(o.rawText);
+      if (!timeRangeRe.test(raw)) continue;
       const key = `${o.date}|${o.personId || o.personName}`;
       const prev = latestByDayPerson.get(key);
       if (!prev || String(o.capturedAt || '') > String(prev.capturedAt || '')) latestByDayPerson.set(key, o);
@@ -281,13 +285,16 @@
     const sent = sentState();
     try {
       await sendHeartbeats(scheduleState);
-      const backfills = await sendBackfillState(scheduleState, sent);
-      const health = await sendBackfillHealth(scheduleState, sent);
-      const activities = await sendActivities(scheduleState, sent, forceActivities);
-      saveJson(SENT_KEY, { activities: pruneMap(sent.activities), syncRuns: pruneMap(sent.syncRuns, 500), health: pruneMap(sent.health, 1000) });
+      const backfillRows = await sendBackfillState(scheduleState, sent);
+      const healthRows = await sendBackfillHealth(scheduleState, sent);
+      const activityRows = await sendActivities(scheduleState, sent, forceActivities);
+      sent.activities = pruneMap(sent.activities);
+      sent.syncRuns = pruneMap(sent.syncRuns, 500);
+      sent.health = pruneMap(sent.health, 500);
+      saveJson(SENT_KEY, sent);
       setStatus({ paired: true, lastSuccessAt: nowIso(), lastError: null });
       refreshCard();
-      return { paired: true, activities, backfills, health };
+      return { paired: true, backfillRows, healthRows, activityRows };
     } catch (error) {
       setStatus({ paired: true, lastError: clean(error?.message || error) });
       refreshCard();
@@ -295,87 +302,67 @@
     }
   }
 
-  function cardHtml() {
-    const cfg = config();
-    const s = status();
-    if (!cfg) {
-      return `<h3>Rebel Core sync <span class="vs-muted">${VERSION}</span></h3><div class="vs-muted" style="margin-bottom:7px">Not paired. Rebel Core keeps health, usage and activity management out of the daily Vector screen.</div><button id="vs-rebel-core-pair" class="vs-btn secondary">Pair Rebel Core</button>`;
-    }
-    const health = s.lastError ? `Error: ${clean(s.lastError)}` : s.lastSuccessAt ? `Last sync ${new Date(s.lastSuccessAt).toLocaleString()}` : 'Paired; waiting for first sync';
-    return `<h3>Rebel Core sync <span class="vs-muted">${VERSION}</span></h3><div style="margin-bottom:7px"><b style="color:#27ae60">Linked</b> · <span class="vs-muted">${health}</span></div><div style="display:flex;gap:6px"><button id="vs-rebel-core-sync" class="vs-btn secondary">Sync now</button><button id="vs-rebel-core-forget" class="vs-btn secondary">Forget pairing</button></div>`;
+  async function testConnection() {
+    const scheduleState = state();
+    await sendHeartbeats(scheduleState || {});
+    refreshCard();
+    return true;
+  }
+
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
   function refreshCard() {
     const panel = document.getElementById('mvci-vs-panel');
     if (!panel) return;
-    let card = panel.querySelector('#vs-rebel-core-sync-card');
+    let card = panel.querySelector('#vs-rebel-core-sync-card-v0140');
     if (!card) {
       card = document.createElement('div');
-      card.id = 'vs-rebel-core-sync-card';
+      card.id = 'vs-rebel-core-sync-card-v0140';
       card.className = 'vs-card';
-      panel.appendChild(card);
+      const insertBefore = [...panel.querySelectorAll('.vs-card')].find(x => /Import\s*\/\s*export/i.test(x.textContent || ''));
+      if (insertBefore) insertBefore.insertAdjacentElement('beforebegin', card);
+      else panel.appendChild(card);
     }
-    const html = cardHtml();
-    if (card.dataset.html !== html) {
-      card.dataset.html = html;
-      card.innerHTML = html;
-    }
-    const pair = card.querySelector('#vs-rebel-core-pair');
-    if (pair && !pair.dataset.wired) {
-      pair.dataset.wired = '1';
-      pair.onclick = async () => {
-        const raw = prompt('Paste the private Rebel Core pairing JSON copied from Rebel Command.');
-        if (!raw) return;
-        try {
-          await configure(raw);
-          alert('Rebel Core paired and initial scheduling sync completed.');
-        } catch (error) {
-          alert(`Rebel Core pairing failed.\n\n${error?.message || error}`);
-        }
-      };
-    }
-    const sync = card.querySelector('#vs-rebel-core-sync');
-    if (sync && !sync.dataset.wired) {
-      sync.dataset.wired = '1';
-      sync.onclick = async () => {
-        sync.disabled = true;
-        try {
-          const result = await syncNow();
-          alert(`Rebel Core sync complete.\n\n${result.activities || 0} activity records uploaded.`);
-        } catch (error) {
-          alert(`Rebel Core sync failed.\n\n${error?.message || error}`);
-        } finally {
-          sync.disabled = false;
-        }
-      };
-    }
-    const forget = card.querySelector('#vs-rebel-core-forget');
-    if (forget && !forget.dataset.wired) {
-      forget.dataset.wired = '1';
-      forget.onclick = () => {
-        if (confirm('Forget the Rebel Core pairing on this Vector browser? This does not delete Rebel Core history.')) forgetPairing();
-      };
-    }
-  }
+    const cfg = config();
+    const st = status();
+    const label = !cfg ? 'Not paired' : st.lastError ? 'Offline / error' : st.lastSuccessAt ? 'Connected' : 'Paired — not tested';
+    const detail = st.lastError ? esc(st.lastError) : st.lastSuccessAt ? `Last sync ${esc(new Date(st.lastSuccessAt).toLocaleString())}` : 'No successful telemetry sync yet.';
+    card.innerHTML = `<h3>Rebel Core sync <span class="vs-muted">${VERSION}</span></h3><div><b>Status:</b> ${esc(label)}</div><div class="vs-muted" style="margin:4px 0 8px">${detail}</div><div class="vs-grid"><button id="vs-rebel-core-config-v0140" class="vs-btn secondary">${cfg ? 'Replace pairing' : 'Pair Rebel Core'}</button>${cfg ? '<button id="vs-rebel-core-sync-v0140" class="vs-btn secondary">Sync now</button><button id="vs-rebel-core-test-v0140" class="vs-btn secondary">Test connection</button><button id="vs-rebel-core-forget-v0140" class="vs-btn secondary">Forget pairing</button>' : ''}</div><div class="vs-muted" style="margin-top:6px">Pairing stays only in this browser. Telemetry is read-only against Vector and never blocks scheduling if Rebel Core is unavailable.</div>`;
 
-  let syncing = false;
-  async function periodicSync() {
-    if (syncing || !config()) return;
-    syncing = true;
-    try { await syncNow(); } catch (error) { console.warn('Rebel Core telemetry sync failed', error); } finally { syncing = false; }
+    card.querySelector('#vs-rebel-core-config-v0140')?.addEventListener('click', async () => {
+      const raw = prompt('Paste the private pairing JSON copied from Rebel Command.');
+      if (!raw) return;
+      try {
+        await configure(raw);
+        alert('Rebel Core paired and initial synchronization completed.');
+      } catch (error) {
+        alert(`Rebel Core pairing failed.\n\n${error?.message || error}`);
+      }
+    });
+    card.querySelector('#vs-rebel-core-sync-v0140')?.addEventListener('click', async () => {
+      try {
+        const r = await syncNow({ forceActivities: false });
+        alert(`Rebel Core sync complete.\n\nActivity records sent: ${r.activityRows || 0}\nBackfill updates: ${r.backfillRows || 0}\nHealth updates: ${r.healthRows || 0}`);
+      } catch (error) {
+        alert(`Rebel Core sync failed.\n\n${error?.message || error}`);
+      }
+    });
+    card.querySelector('#vs-rebel-core-test-v0140')?.addEventListener('click', async () => {
+      try { await testConnection(); alert('Rebel Core connection test succeeded.'); }
+      catch (error) { alert(`Rebel Core connection test failed.\n\n${error?.message || error}`); }
+    });
+    card.querySelector('#vs-rebel-core-forget-v0140')?.addEventListener('click', () => {
+      if (!confirm('Forget this browser pairing? Rebel Core data already received will remain stored.')) return;
+      forgetPairing();
+    });
   }
 
   setInterval(refreshCard, 1500);
-  setInterval(periodicSync, 60000);
-  setTimeout(refreshCard, 500);
-  setTimeout(periodicSync, 5000);
+  setInterval(() => { if (config()) syncNow().catch(() => {}); }, 120000);
+  setTimeout(refreshCard, 400);
+  setTimeout(() => { if (config()) syncNow().catch(() => {}); }, 5000);
 
-  window.MVCI_REBEL_CORE_TELEMETRY = {
-    version: VERSION,
-    configure,
-    forgetPairing,
-    syncNow,
-    status,
-    isPaired: () => Boolean(config()),
-  };
+  window.MVCI_REBEL_CORE_TELEMETRY_0140 = { version: VERSION, configure, forgetPairing, syncNow, testConnection, status };
 })();
