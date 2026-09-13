@@ -11,7 +11,7 @@
     "vector-scheduling-runtime-segments-0.15.0.js",
     "vector-scheduling-runtime-segment-migration-0.15.0.js",
     "vector-scheduling-runtime-backfill-0.13.0.js",
-    "vector-scheduling-runtime-ui-0.13.0.js",
+    "vector-scheduling-runtime-ui-0.15.0.js",
     "rebel-core-telemetry-0.14.0.js",
     "rebel-core-segment-telemetry-0.15.0.js",
     "rebel-core-scheduling-ledger-0.15.0.js",
