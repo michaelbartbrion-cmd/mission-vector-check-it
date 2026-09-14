@@ -62,6 +62,23 @@ The implemented sequence is:
 - Reread verification is only accepted after Rebel Command has recorded a manual single-write test.
 - A reread mismatch stops at `partial` / mismatch rather than being treated as success.
 
+## Server-enforced transitions
+
+Rebel Command now uses `base44/functions/manageVectorAction/entry.ts` for user-driven package transitions instead of updating package status directly from the page.
+
+The server function enforces:
+
+- `draft -> approved` only;
+- `approved -> queued` only;
+- expired/redo preview requeue only from `previewed`;
+- manual-write recording only from a `previewed` package with `preview_status=ready`;
+- manual-write recording only while the preview is at most ten minutes old;
+- exact `WRITE COMPLETED` confirmation plus required notes;
+- cancellation only before the manual-write stage;
+- audit events for every accepted transition.
+
+The server transition function never writes to Vector. `writing` means only that Michael recorded completion of the one manual test change so the browser may perform reread verification.
+
 ## Rebel Command UI
 
 New page: `/actions` — Vector Actions.
@@ -88,6 +105,18 @@ Preparing the package is not approval and does not change Vector.
 
 Scheduling can now create approved atomic schedule packages from individually approved Scheduling plans. Packaging does not queue or write them; Vector Actions controls queue/preview progression.
 
+## Unified PRIMARY roadmap in Rebel Command
+
+The Program registry now contains active records for:
+
+- Vector Rebel
+- Vector Scheduling
+- Vector Overtime Predictor
+
+The Rebel Command Dashboard now shows shared Program status and Vector action-gate counts alongside device/telemetry health. This is coordination only; PPE/Vector Rebel domain logic remains separate from Scheduling/Overtime domain logic.
+
+The existing PPE helper is preserved and must not be removed or repurposed as part of this consolidation.
+
 ## Runtime browser behavior
 
 On the matching Vector ListView date, the legacy disabled INPUT buttons are repurposed by `vector-action-preview-0.22.1.js` as read-only controls:
@@ -97,13 +126,26 @@ On the matching Vector ListView date, the legacy disabled INPUT buttons are repu
 
 After a manual test write has been recorded in Rebel Command, the matching control becomes a reread verification control.
 
+The runtime requires the newly triggered ListView census itself to report `sent-good`. A partial fresh census blocks preview/reread even if an older good batch exists.
+
 The module never submits a Vector form and never invokes an input/write routine.
 
 ## Connection-state note
 
 Rebel Core currently contains multiple Mission Vector Bridge pairing records from testing. At least one has live successful activity. Rebel Command Overtime now prefers the active bridge with real `last_seen_at` / success history instead of blindly selecting the newest unused pairing record.
 
-Unused pairings were not automatically disabled or deleted because credentials may still exist in an authorized browser. Cleanup remains optional and should be deliberate.
+Connections now prevents normal creation of another Mission Vector Bridge while an enabled shared pairing already exists and surfaces enabled pairings that have never checked in. Existing unused pairings were not automatically disabled or deleted because credentials may still exist in an authorized browser; cleanup remains deliberate.
+
+## Validation state after implementation
+
+The Base44 Rebel Command app passes lint and production build.
+
+The following server functions bundle and pass JavaScript syntax validation:
+
+- `telemetryBridge`
+- `manageVectorAction`
+
+No `VectorActionPackage` existed at the end of autonomous implementation, so no scheduling or overtime action was prepared, approved, previewed, or written on Michael's behalf during development.
 
 ## Next live test
 
