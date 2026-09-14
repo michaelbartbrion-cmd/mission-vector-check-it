@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "runtimeVersion": "0.27.0-dev",
+  "runtimeVersion": "0.27.1-dev",
   "loaderMinVersion": "1.0.3",
   "scripts": [
     "rotation-engine.js",
@@ -25,6 +25,7 @@
     "mission-vector-range-safety-0.25.1.js",
     "mission-vector-update-button-0.26.0.js",
     "mission-vector-rebel-icon-0.26.1.js",
-    "mission-vector-command-center-0.27.0.js"
+    "mission-vector-command-center-0.27.0.js",
+    "mission-vector-action-safe-autosync-0.27.1.js"
   ]
 }
