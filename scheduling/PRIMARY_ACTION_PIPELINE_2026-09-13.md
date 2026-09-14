@@ -2,7 +2,7 @@
 
 Date: 2026-09-13
 
-This document records the next PRIMARY-controlled phase after the completed Scheduling/Overtime live-test handoff at commit `5188555c130df408e88cc6a289bad1dc6ef028b0`.
+This document records the PRIMARY-controlled phase after the completed Scheduling/Overtime live-test handoff at commit `5188555c130df408e88cc6a289bad1dc6ef028b0`.
 
 ## Authority
 
@@ -10,22 +10,40 @@ Mission Vector Check It - PRIMARY is the coordinating development thread for Vec
 
 Canonical control center: Rebel Command.
 Canonical data layer: Rebel Core.
-Vector-side surface: small authenticated bridge/collectors only.
+Vector-side surface: small authenticated read-only collectors and the explicitly gated action-preview bridge.
 
 ## Current runtime
 
 Scheduling LIVE Loader remains `1.0.3`.
-Current PRIMARY runtime manifest: `0.22.1-dev`.
-New action module: `scheduling/vector-action-preview-0.22.1.js`.
+Current PRIMARY runtime manifest: `0.23.0-dev`.
+
+Runtime `0.23.0-dev` keeps the proven Scheduling/Overtime collection and action-preview modules and adds:
+
+- `scheduling/vector-bridge-ui-0.23.0.js`
+- `scheduling/mission-vector-global-launcher-0.23.0.js`
+- a hardened `vector-action-preview-0.22.1.js` implementation reporting runtime `0.23.0-dev`
+
+The global launcher provides a small `MISSION VECTOR` control from any CrewSense page. A user can choose a date and request either schedule/staffing collection or OT-priority collection. The launcher navigates to the required CrewSense page and then starts the existing read-only collector. The old OT ranking-page capture button is hidden by the runtime while the proven collector remains available underneath.
+
+## Collection reliability correction
+
+A 2026-09-15 live check showed the Vector bridge UI reporting a generic telemetry error even though Rebel Core had already received a 54-row staffing capture and derived signup/forecast records. Two causes were addressed:
+
+1. browser-side action-preview polling was mutating the injected UI frequently enough to interfere with the full-census `pageStable` gate;
+2. the server POST handler treated any later sub-pipeline exception as a failure of the entire telemetry request, even after another ingestion path had successfully committed data.
+
+Runtime `0.23.0-dev` reduces browser DOM churn by updating action controls only when their state signature changes and uses slower polling intervals. `telemetryBridge` now isolates staffing, ranking, signup, scheduling-ledger, action-preview, and action-verification ingestion failures. A noncritical downstream failure returns a warning instead of incorrectly converting a successful staffing ingestion into a top-level `Telemetry unavailable` response.
+
+Partial staffing captures now store an explicit completeness summary showing the state of `captureComplete`, page stability, group sweep, scroll sweep, loading state, date confidence, group count, row count, and regular-24h count.
 
 ## Action-package model
 
-Rebel Command now owns a shared `VectorActionPackage` lifecycle for:
+Rebel Command owns a shared `VectorActionPackage` lifecycle for:
 
 - `schedule`
 - `overtime_signup`
 
-A new `VectorActionAudit` ledger records the lifecycle stages.
+`VectorActionAudit` records the lifecycle stages.
 
 Scheduling packages are atomic: one approved Scheduling plan / one person-assignment change per package.
 Overtime packages are atomic: one desired signup-state change for Michael on one date.
@@ -56,15 +74,15 @@ The implemented sequence is:
 - A partial fresh scrape stops the action flow rather than falling back to untrusted evidence.
 - Rebel Command preview expires after ten minutes before a manual test write may be recorded.
 - Schedule package preflight requires exactly one matching employee record and rejects ambiguous/missing targets.
-- A schedule package already in its intended target state is not writable; it is treated as no change needed.
+- A schedule package already in its intended target state is treated as no change needed.
 - Overtime package preflight checks current signup state and validated selection forecast state.
-- Overtime package preflight fails if the ranking batch, likely-OT-slot count, or Michael's predicted signup position has drifted from the package assumptions.
-- Reread verification is only accepted after Rebel Command has recorded a manual single-write test.
+- Overtime package preflight fails if ranking batch, likely-OT-slot count, or Michael's predicted signup position drift from package assumptions.
+- Reread verification is accepted only after Rebel Command records a manual single-write test.
 - A reread mismatch stops at `partial` / mismatch rather than being treated as success.
 
 ## Server-enforced transitions
 
-Rebel Command now uses `base44/functions/manageVectorAction/entry.ts` for user-driven package transitions instead of updating package status directly from the page.
+Rebel Command uses `base44/functions/manageVectorAction/entry.ts` for user-driven package transitions instead of updating package status directly from the page.
 
 The server function enforces:
 
@@ -81,92 +99,86 @@ The server transition function never writes to Vector. `writing` means only that
 
 ## Rebel Command UI
 
-New page: `/actions` — Vector Actions.
+Rebel Command was reorganized for operational use rather than raw development telemetry.
 
-The page provides:
+Navigation is now grouped as:
 
-- visible write-lock banner;
-- package approval and queue controls;
-- preview status;
-- explicit manual-write recording gate;
-- reread status;
-- complete action audit trail;
-- package/precondition/preview/verification evidence inspection.
+- Mission: Command Center
+- Work: Scheduling, Overtime, Vector Actions
+- System: Data Collection, Programs
+- Review: Suggestions, Activity
 
-Overtime Forecast can now prepare a draft `overtime_signup` package only when:
+The Command Center surfaces overall readiness, quick access to the major workflows, only the items needing attention, and a compact latest-data confidence check. Technical system details remain available in a collapsed section.
 
-- staffing evidence is good;
-- selection forecast evidence is good;
-- Michael is eligible;
-- at least one likely OT slot exists;
-- Michael is currently not signed up.
+`Data Collection` replaces the old connection-centric presentation and explains the shared Mission Vector browser connection, the global CrewSense launcher, current collection quality, and pairing state. Raw pairing records are moved under Advanced pairing records.
 
-Preparing the package is not approval and does not change Vector.
+Scheduling now provides an inline Station 4 assignment form instead of a sequence of browser prompts.
 
-Scheduling can now create approved atomic schedule packages from individually approved Scheduling plans. Packaging does not queue or write them; Vector Actions controls queue/preview progression.
+Overtime now places the upcoming overtime outlook first, reduces the main table to the information needed for a decision, and moves parser/collector diagnostics under a collapsed collection-quality section.
 
-## Unified PRIMARY roadmap in Rebel Command
-
-The Program registry now contains active records for:
-
-- Vector Rebel
-- Vector Scheduling
-- Vector Overtime Predictor
-
-The Rebel Command Dashboard now shows shared Program status and Vector action-gate counts alongside device/telemetry health. This is coordination only; PPE/Vector Rebel domain logic remains separate from Scheduling/Overtime domain logic.
-
-The existing PPE helper is preserved and must not be removed or repurposed as part of this consolidation.
+Vector Actions now presents each package as a four-stage safety checklist with a clear next action. Raw package JSON and audit evidence remain available under Advanced details. The visible write-lock warning remains prominent.
 
 ## Runtime browser behavior
 
-On the matching Vector ListView date, the legacy disabled INPUT buttons are repurposed by `vector-action-preview-0.22.1.js` as read-only controls:
+On matching Vector ListView dates, action controls remain read-only:
 
 - `PREVIEW SCHEDULE`
 - `PREVIEW OT SIGNUPS`
 
-After a manual test write has been recorded in Rebel Command, the matching control becomes a reread verification control.
+After a manual test write is recorded in Rebel Command, the matching control becomes a reread verification control.
 
 The runtime requires the newly triggered ListView census itself to report `sent-good`. A partial fresh census blocks preview/reread even if an older good batch exists.
 
-The module never submits a Vector form and never invokes an input/write routine.
+The runtime never submits a Vector form and never invokes an input/write routine.
+
+The new `MISSION VECTOR` launcher is collection/navigation convenience only. It does not change the action write boundary.
 
 ## Connection-state note
 
-Rebel Core currently contains multiple Mission Vector Bridge pairing records from testing. At least one has live successful activity. Rebel Command Overtime now prefers the active bridge with real `last_seen_at` / success history instead of blindly selecting the newest unused pairing record.
+Rebel Core contains multiple Mission Vector Bridge pairing records from testing. At least one has live successful activity. Rebel Command prefers the enabled bridge with real `last_seen_at` / success history instead of blindly selecting the newest unused pairing record.
 
-Connections now prevents normal creation of another Mission Vector Bridge while an enabled shared pairing already exists and surfaces enabled pairings that have never checked in. Existing unused pairings were not automatically disabled or deleted because credentials may still exist in an authorized browser; cleanup remains deliberate.
+Data Collection prevents normal creation of another Mission Vector Bridge while an enabled shared pairing exists and surfaces enabled pairings that have never checked in. Existing unused pairings are not automatically disabled or deleted because credentials may still exist in an authorized browser; cleanup remains deliberate.
 
 ## Validation state after implementation
 
-The Base44 Rebel Command app passes lint and production build.
+The Base44 Rebel Command app passes lint and production build after the 0.23.0 UI changes.
 
 The following server functions bundle and pass JavaScript syntax validation:
 
 - `telemetryBridge`
 - `manageVectorAction`
 
-No `VectorActionPackage` existed at the end of autonomous implementation, so no scheduling or overtime action was prepared, approved, previewed, or written on Michael's behalf during development.
+No action package was created as part of the 0.23.0 autonomous usability/reliability work. Real schedule or overtime intent remains a user decision.
 
-## Next live test
+## Next live validation
 
 Do not enable automated writes.
 
-The next test is the first complete action-package proof:
+First validate collection/runtime behavior:
 
-1. refresh Vector to runtime `0.22.1-dev`;
-2. prepare one desired action package in Rebel Command;
-3. approve and queue it in Vector Actions;
-4. navigate Vector ListView to the exact target date;
-5. run read-only PREVIEW;
-6. confirm Rebel Command marks preview `ready` and inspect evidence;
-7. manually perform exactly one corresponding Vector change;
-8. immediately record the manual test write in Vector Actions;
-9. run the browser reread verification;
-10. confirm package becomes `verified` and audit trail contains preview -> write_recorded -> reread_verified.
+1. refresh any CrewSense page;
+2. confirm LIVE Loader `1.0.3` loads runtime `0.23.0-dev`;
+3. confirm the small `MISSION VECTOR` launcher appears;
+4. choose a real test date and run `Collect schedule / staffing`;
+5. confirm it navigates to the correct ListView date and finishes as Data ready or gives a concrete review reason instead of a generic telemetry failure;
+6. from another CrewSense page, use `MISSION VECTOR -> Collect OT priority` for the same or another desired date;
+7. confirm it navigates to Callback Rankings and starts the ranking capture without requiring the old embedded OT capture button.
+
+Only after collection behavior is validated should the first complete action-package proof be run for a real action Michael actually wants:
+
+1. prepare one desired action package in Rebel Command;
+2. approve and queue it in Vector Actions;
+3. navigate Vector ListView to the exact target date;
+4. run read-only PREVIEW;
+5. confirm Rebel Command marks preview `ready` and inspect evidence;
+6. manually perform exactly one corresponding Vector change;
+7. immediately record the manual test write in Vector Actions;
+8. run browser reread verification;
+9. confirm package becomes `verified` and audit trail contains preview -> write_recorded -> reread_verified.
 
 Any blocked preview, partial census, changed overtime assumptions, ambiguous scheduling target, expired preview, or reread mismatch is a stop condition.
 
 ## Write boundary
 
 Automated Vector writes remain disabled.
-Do not add or enable a Vector writer until at least one atomic package completes the full preview -> manual single write -> reread -> verification path cleanly and PRIMARY explicitly approves the next phase.
+Do not add or enable a Vector writer until the relevant atomic package type completes the full preview -> manual single write -> reread -> verification path cleanly and PRIMARY explicitly approves the next phase.
