@@ -16,6 +16,8 @@ The C-shift Station 4 operating grid contains all five regular crew members:
 
 The scheduling UI must keep all five visible by C-shift date. Time off, deployment/away status, current factual unit/duty evidence, suggested firefighter riding positions, and saved manual overrides belong in the same grid-style operating view.
 
+Future attendance uses only trusted regular-24h census evidence for `working`. Trade/sub, overtime/additional-time, leave and deployment rows do not silently make a regular crew member available for riding suggestions. Missing people are never inferred.
+
 ## TADE
 
 `TADE` means Temporary Acting Driver Engineer and is a full riding-ratio category alongside Firefighter, Swing and Tiller.
@@ -25,6 +27,8 @@ Operational rule supplied by Michael:
 - if Michael Brion is unavailable, a tracked firefighter must drive in his place when staffing allows;
 - if Captain Baldree is unavailable while Michael is available, Michael moves up for the shift and a tracked firefighter fills Michael's driver position as TADE;
 - if both Michael and Baldree are unavailable, Rebel Command must not invent command/driver coverage. Mark the row for manual staffing/command resolution.
+
+The planner also recognizes explicit Vector/CrewSense `Temporary Captain` / `TAC Capt` evidence on Michael as authoritative evidence that he is acting Captain. This lets the TADE rule operate even when Captain Baldree's own row is not rendered, without inferring from mere absence.
 
 For a trusted future census with all three tracked firefighters available:
 
@@ -55,6 +59,8 @@ Migration performed without changing ratio totals:
 - legacy rows with explicit `Swing/FF` evidence were then classified `designated`;
 - remaining ambiguous plain-Swing rows stay `unknown` until factual evidence or manual reconciliation proves subtype;
 - TADE credits received explicit `credit_detail=TADE`.
+
+Factual Vector duty segments can independently prove that a firefighter was actually sent out. Those actual destination facts are shown even when an older whole-shift spreadsheet credit says something different. Conflicts remain reconciliation cases rather than silently rewriting historical ratio credit.
 
 ## Excel-style scheduling grid
 
