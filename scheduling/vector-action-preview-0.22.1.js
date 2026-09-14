@@ -1,12 +1,12 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.22.1-dev';
+  const VERSION = '0.23.0-dev';
   const ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const PAIR_KEY = 'vectorStaffingCollectorPairing_v1';
 
-  if (window.top !== window.self || window.__mvciVectorActionPreview0221) return;
-  window.__mvciVectorActionPreview0221 = { version: VERSION, startedAt: Date.now() };
+  if (window.top !== window.self || window.__mvciVectorActionPreview0230) return;
+  window.__mvciVectorActionPreview0230 = { version: VERSION, startedAt: Date.now() };
 
   const state = { packages: [], running: false, lastError: '', lastRefreshAt: null };
   const clean = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
@@ -60,7 +60,7 @@
 
   async function freshGoodCensus() {
     const bridge = window.MVCI_VECTOR_BRIDGE_0200;
-    if (!bridge?.scrapeNow) throw new Error('Unified Vector bridge is not loaded.');
+    if (!bridge?.scrapeNow) throw new Error('Mission Vector schedule collector is not loaded.');
     await bridge.scrapeNow();
     const status = bridge.status?.() || {};
     if (status.status === 'error') throw new Error(status.lastError || 'Fresh Vector census failed.');
@@ -169,10 +169,11 @@
     return state.packages.filter(p => p.actionType === type && p.stage === stage && p.targetDate === date);
   }
 
-  function findBridgeButton(prefix) {
+  function findBridgeButton(prefixes) {
     const card = document.getElementById('vs-vector-bridge-v0200');
     if (!card) return null;
-    return [...card.querySelectorAll('button')].find(b => clean(b.textContent).toUpperCase().startsWith(prefix));
+    const list = Array.isArray(prefixes) ? prefixes : [prefixes];
+    return [...card.querySelectorAll('button')].find(b => list.some(prefix => clean(b.textContent).toUpperCase().startsWith(prefix)));
   }
 
   function wireButton(button, type, label) {
@@ -181,44 +182,44 @@
     const queued = matching(type, 'preview');
     const rows = verify.length ? verify : queued;
     const mode = verify.length ? 'VERIFY' : 'PREVIEW';
-    button.disabled = state.running || rows.length === 0 || !paired();
-    button.textContent = `${mode} ${label} · ${rows.length}`;
-    button.title = rows.length
+    const disabled = state.running || rows.length === 0 || !paired();
+    const text = `${mode} ${label} · ${rows.length}`;
+    const title = rows.length
       ? `${mode === 'VERIFY' ? 'Fresh reread verification' : 'Read-only preview'} for ${rows[0].targetDate}. No automated Vector write exists.`
       : `No ${label.toLowerCase()} action package is ready for the displayed date.`;
-    button.onclick = async event => {
-      event.preventDefault(); event.stopPropagation();
-      const current = verify.length ? matching(type, 'reread_verification') : matching(type, 'preview');
-      if (!current.length) return;
-      if (current.length > 1) {
-        const chosen = current[0];
-        const ok = confirm(`${current.length} ${label.toLowerCase()} packages match this date.\n\nRun the first package now?\n\n${chosen.summary}\n\nNo automated Vector write will occur.`);
-        if (!ok) return;
-      }
-      const pkg = current[0];
-      if (verify.length) await verifyPackage(pkg);
-      else await previewPackage(pkg);
-    };
-  }
+    const signature = JSON.stringify({ type, mode, count: rows.length, disabled, date: displayedDate(), first: rows[0]?.packageKey || '' });
 
-  function patchButtons() {
-    const schedule = findBridgeButton('INPUT SCHEDULE') || findBridgeButton('PREVIEW SCHEDULE') || findBridgeButton('VERIFY SCHEDULE');
-    const overtime = findBridgeButton('INPUT OT SIGNUPS') || findBridgeButton('PREVIEW OT SIGNUPS') || findBridgeButton('VERIFY OT SIGNUPS');
-    wireButton(schedule, 'schedule', 'SCHEDULE');
-    wireButton(overtime, 'overtime_signup', 'OT SIGNUPS');
-    const card = document.getElementById('vs-vector-bridge-v0200');
-    if (card && !card.querySelector('#mvci-action-preview-note-v0221')) {
-      const note = document.createElement('div');
-      note.id = 'mvci-action-preview-note-v0221';
-      note.className = 'vs-muted';
-      note.style.marginTop = '6px';
-      note.textContent = `Action preview ${VERSION} · fresh-good census required · automated Vector writes disabled`;
-      card.appendChild(note);
+    if (button.dataset.mvciActionSignature !== signature) {
+      button.dataset.mvciActionSignature = signature;
+      if (button.disabled !== disabled) button.disabled = disabled;
+      if (button.textContent !== text) button.textContent = text;
+      if (button.title !== title) button.title = title;
+      button.onclick = async event => {
+        event.preventDefault(); event.stopPropagation();
+        const currentVerify = matching(type, 'reread_verification');
+        const current = currentVerify.length ? currentVerify : matching(type, 'preview');
+        if (!current.length) return;
+        if (current.length > 1) {
+          const chosen = current[0];
+          const ok = confirm(`${current.length} ${label.toLowerCase()} packages match this date.\n\nRun the first package now?\n\n${chosen.summary}\n\nNo automated Vector write will occur.`);
+          if (!ok) return;
+        }
+        const pkg = current[0];
+        if (currentVerify.length) await verifyPackage(pkg);
+        else await previewPackage(pkg);
+      };
     }
   }
 
-  setInterval(patchButtons, 900);
-  setInterval(refreshWorklist, 5000);
+  function patchButtons() {
+    const schedule = findBridgeButton(['INPUT SCHEDULE','PREVIEW SCHEDULE','VERIFY SCHEDULE']);
+    const overtime = findBridgeButton(['INPUT OT SIGNUPS','PREVIEW OT SIGNUPS','VERIFY OT SIGNUPS']);
+    wireButton(schedule, 'schedule', 'SCHEDULE');
+    wireButton(overtime, 'overtime_signup', 'OT SIGNUPS');
+  }
+
+  setInterval(patchButtons, 2500);
+  setInterval(refreshWorklist, 8000);
   setTimeout(refreshWorklist, 2200);
   setTimeout(patchButtons, 1200);
 
