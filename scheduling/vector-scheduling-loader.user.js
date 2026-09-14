@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Mission Vector Check It - Vector Scheduling LIVE Loader
 // @namespace    mission-vector-check-it-scheduling-loader
-// @version      1.0.3
-// @description  Tampermonkey loader that pulls the newest Vector Scheduling development runtime and keeps loading independent modules if one fails.
+// @version      1.0.4
+// @description  Quiet Tampermonkey loader for the current Mission Vector CrewSense runtime.
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
 // @supportURL   https://github.com/michaelbartbrion-cmd/mission-vector-check-it/issues
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/scheduling/vector-scheduling-loader.user.js
@@ -17,13 +17,14 @@
 
 (function () {
   'use strict';
-
   if (window.top !== window.self) return;
 
-  const LOADER_VERSION = '1.0.3';
+  const LOADER_VERSION = '1.0.4';
   const BASE = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/scheduling/';
   const MANIFEST_URL = BASE + 'vector-scheduling-runtime-manifest.json';
-  const STATUS_ID = 'mvci-live-loader-status-v103';
+
+  // Clean up the visible badge left by 1.0.3 if this loader replaces it in-place.
+  try { document.getElementById('mvci-live-loader-status-v103')?.remove(); } catch (_) {}
 
   function publish(meta) {
     try {
@@ -53,8 +54,7 @@
   }
 
   function execute(code, sourceUrl) {
-    const wrapped = `${code}\n//# sourceURL=${sourceUrl}`;
-    (new Function(wrapped))();
+    (new Function(`${code}\n//# sourceURL=${sourceUrl}`))();
   }
 
   function resolveScriptUrl(path) {
@@ -71,25 +71,6 @@
     return manifest;
   }
 
-  function renderStatus(meta) {
-    let el = document.getElementById(STATUS_ID);
-    if (!el) {
-      el = document.createElement('div');
-      el.id = STATUS_ID;
-      el.style.cssText = [
-        'position:fixed','right:8px','top:8px','z-index:2147483647',
-        'background:#111827','color:#e5e7eb','border:1px solid #374151',
-        'border-radius:6px','padding:5px 8px','font:11px/1.25 system-ui,sans-serif',
-        'box-shadow:0 2px 10px rgba(0,0,0,.25)','pointer-events:none','opacity:.9'
-      ].join(';');
-      document.documentElement.appendChild(el);
-    }
-    const failures = meta.failures || [];
-    el.textContent = `MVCI loader ${meta.loaderVersion} · runtime ${meta.runtimeVersion || 'loading'} · ${meta.loadedScripts?.length || 0} loaded${failures.length ? ` · ${failures.length} failed` : ''}`;
-    el.style.borderColor = failures.length ? '#b45309' : '#374151';
-    if (meta.complete) setTimeout(() => { try { el.remove(); } catch (_) {} }, failures.length ? 15000 : 5000);
-  }
-
   async function boot() {
     const manifest = await fetchManifest();
     const meta = {
@@ -102,10 +83,9 @@
       complete: false
     };
     publish(meta);
-    renderStatus(meta);
 
     if (manifest.loaderMinVersion && manifest.loaderMinVersion !== LOADER_VERSION) {
-      console.warn(`Vector Scheduling: manifest requests loader ${manifest.loaderMinVersion}; running ${LOADER_VERSION}.`);
+      console.warn(`Mission Vector: manifest requests loader ${manifest.loaderMinVersion}; running ${LOADER_VERSION}.`);
     }
 
     for (const path of manifest.scripts) {
@@ -119,21 +99,15 @@
       } catch (err) {
         const failure = { path: String(path), error: String(err?.message || err) };
         meta.failures.push(failure);
-        console.error('Vector Scheduling module failed:', failure.path, err);
+        console.error('Mission Vector module failed:', failure.path, err);
       }
       publish(meta);
-      renderStatus(meta);
     }
 
     meta.complete = true;
     meta.completedAt = new Date().toISOString();
     publish(meta);
-    renderStatus(meta);
-    wireUpdateButton();
-
-    if (meta.failures.length) {
-      console.warn('Vector Scheduling loaded with module failures:', meta.failures);
-    }
+    if (meta.failures.length) console.warn('Mission Vector loaded with module failures:', meta.failures);
   }
 
   async function checkUpdateAndReload() {
@@ -142,30 +116,19 @@
       const current = window.__mvciLiveLoader?.runtimeVersion || document.documentElement.dataset.mvciRuntimeVersion || 'unknown';
       const next = manifest.runtimeVersion;
       const msg = current === next
-        ? `Scheduler runtime ${next} is current. Reload it now?`
-        : `New scheduler runtime available: ${current} → ${next}. Reload now?`;
+        ? `Mission Vector runtime ${next} is current. Reload it now?`
+        : `New Mission Vector runtime available: ${current} → ${next}. Reload now?`;
       if (confirm(msg)) location.reload();
     } catch (err) {
-      alert(`Vector Scheduling update check failed.\n\n${err.message || err}`);
+      alert(`Mission Vector update check failed.\n\n${err.message || err}`);
     }
-  }
-
-  function wireUpdateButton() {
-    const button = document.getElementById('vs-update');
-    if (!button) return;
-    button.dataset.mvciLiveLoaderWired = '1';
-    button.title = 'Check the live runtime manifest and reload the newest scheduler build';
-    button.onclick = checkUpdateAndReload;
   }
 
   window.MVCI_SCHEDULER_CHECK_UPDATE = checkUpdateAndReload;
 
-  const observer = new MutationObserver(() => setTimeout(wireUpdateButton, 0));
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-
   boot().catch(err => {
-    console.error('Vector Scheduling LIVE Loader failed:', err);
-    const meta = {
+    console.error('Mission Vector LIVE Loader failed:', err);
+    publish({
       loaderVersion: LOADER_VERSION,
       runtimeVersion: 'boot-error',
       loadedAt: new Date().toISOString(),
@@ -173,9 +136,7 @@
       loadedScripts: [],
       failures: [{ path: 'loader', error: String(err?.message || err) }],
       complete: true
-    };
-    publish(meta);
-    renderStatus(meta);
-    alert(`Vector Scheduling LIVE Loader failed.\n\n${err.message || err}\n\nThe loader did not make any changes to Vector.`);
+    });
+    alert(`Mission Vector loader failed.\n\n${err.message || err}\n\nNo Vector changes were made.`);
   });
 })();
