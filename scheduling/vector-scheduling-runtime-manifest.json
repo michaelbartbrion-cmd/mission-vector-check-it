@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "runtimeVersion": "0.28.0-dev",
+  "runtimeVersion": "0.28.1-dev",
   "loaderMinVersion": "1.0.3",
   "scripts": [
     "mission-vector-boot-shell-0.28.0.js",
@@ -21,6 +21,7 @@
     "vector-scheduling-runtime-unified-bridge-0.20.0.js",
     "rebel-core-scheduling-sync-0.21.0.js",
     "mission-vector-action-runner-0.28.0.js",
-    "mission-vector-command-center-0.28.0.js"
+    "mission-vector-command-center-0.28.0.js",
+    "mission-vector-navigation-guard-0.28.1.js"
   ]
 }
