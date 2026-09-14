@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "runtimeVersion": "0.29.0-dev",
+  "runtimeVersion": "0.29.1-dev",
   "loaderMinVersion": "1.0.4",
   "scripts": [
     "mission-vector-boot-shell-0.29.0.js",
@@ -19,6 +19,7 @@
     "vector-scheduling-runtime-coverage-filter-0.16.0.js",
     "vector-scheduling-runtime-coordinator-0.16.0.js",
     "vector-staffing-bridge-0.29.0.js",
+    "rebel-command-dst-ui-patch-0.29.1.js",
     "rebel-core-scheduling-sync-0.21.0.js",
     "mission-vector-action-runner-0.29.0.js",
     "mission-vector-command-center-0.29.0.js"
