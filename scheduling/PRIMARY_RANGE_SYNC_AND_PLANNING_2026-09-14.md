@@ -6,9 +6,9 @@ Authority remains `Mission Vector Check It - PRIMARY`.
 
 ## User-facing direction
 
-CrewSense uses one Vector Rebel-style Mission Vector `V` control. Runtime `0.25.0-dev` adds a smart read-only `Sync Past + Future Range` workflow while retaining single-date staffing/OT collection and the existing action-preview/input controls.
+CrewSense uses one Vector Rebel-style Mission Vector `V` control. Runtime `0.25.1-dev` provides a smart read-only `Sync Past + Future Range` workflow while retaining single-date staffing/OT collection and the existing action-preview/input controls.
 
-Rebel Command now treats the scheduling and overtime products as range-based operating views rather than single-date diagnostics.
+Rebel Command now treats Scheduling and Overtime as range-based operating views rather than single-date diagnostics.
 
 ## Configurable ranges
 
@@ -54,7 +54,9 @@ Preferences are stored in `OvertimePreference`. A draft OT signup package is onl
 
 Authenticated bridge GET `?action=range-sync-plan` returns only the non-sensitive range configuration, latest capture dates/quality, and known likely-OT dates needing a ranking refresh.
 
-Runtime `0.25.0-dev` builds a bounded queue that prioritizes:
+Runtime `0.25.0-dev` provides the range queue. Runtime `0.25.1-dev` adds the action-safety and post-sync reconciliation layer.
+
+The bounded queue prioritizes:
 
 1. recent past C-shift dates (to detect changed riding history);
 2. near-future C-shift dates (to support Station 4 planning);
@@ -65,6 +67,18 @@ Runtime `0.25.0-dev` builds a bounded queue that prioritizes:
 The queue is capped by `auto_range_sync_max_dates_per_session` (default 18). Cursors rotate the older/future coverage so repeated CrewSense sessions progressively cover the whole configured range instead of hammering every historical/future date on every login.
 
 Auto range sync is enabled by default and attempts once per browser-tab session. The queue survives CrewSense page navigation and resumes after each rendered page is ready. A visible Stop Range Sync control is provided.
+
+### Action-safety hold
+
+Before the automatic range crawl begins, runtime `0.25.1-dev` checks the authenticated Vector action worklist. If a queued or writing Scheduling/OT package is waiting, automatic range navigation is held so the browser is not pulled away from an active input/verification workflow. Michael may complete/cancel the action and start range sync manually afterward.
+
+### Post-range reconciliation
+
+When a range crawl transitions from active to complete, runtime `0.25.1-dev` asks the existing reconciliation module to reevaluate newly collected evidence and then asks the existing Rebel Core Scheduling sync module to push any newly derived cases/records. This preserves the existing fail-closed rule: changed past evidence can create a reconciliation case, but raw scrape evidence does not silently become riding credit.
+
+## OT ranking completeness correction
+
+The server ranking gate no longer rejects an otherwise complete ranking solely because the collector's own status-UI mutation toggled the MutationObserver-based `pageStable` flag after a full sweep. Trusted ranking still requires the browser's `captureComplete` result, no loading indicator, high date confidence, at least 80 rows, sequential ranks, unique names, Michael present, and the one-time parser validation flag. This should allow the proven 130-row Global OT List capture shape to become `good` on the next fresh collection.
 
 ## Safety boundary
 
