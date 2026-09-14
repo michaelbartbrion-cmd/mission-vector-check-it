@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "runtimeVersion": "0.23.0-dev",
+  "runtimeVersion": "0.24.0-dev",
   "loaderMinVersion": "1.0.3",
   "scripts": [
     "rotation-engine.js",
@@ -20,8 +20,6 @@
     "vector-scheduling-runtime-coordinator-0.16.0.js",
     "vector-scheduling-runtime-unified-bridge-0.20.0.js",
     "rebel-core-scheduling-sync-0.21.0.js",
-    "vector-action-preview-0.22.1.js",
-    "vector-bridge-ui-0.23.0.js",
-    "mission-vector-global-launcher-0.23.0.js"
+    "mission-vector-control-panel-0.24.0.js"
   ]
 }
