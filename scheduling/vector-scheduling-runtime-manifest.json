@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "runtimeVersion": "0.29.5-dev",
+  "runtimeVersion": "0.29.7-dev",
   "loaderMinVersion": "1.0.4",
   "scripts": [
     "mission-vector-boot-shell-0.29.0.js",
@@ -25,6 +25,7 @@
     "mission-vector-action-runner-0.29.0.js",
     "mission-vector-command-center-0.29.0.js",
     "rebel-scout-ui-fix-0.29.3.js",
-    "rebel-scout-live-input-test-0.29.4.js"
+    "rebel-scout-live-input-test-0.29.4.js",
+    "rebel-scout-diagnostics-0.29.7.js"
   ]
 }
