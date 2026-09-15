@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "runtimeVersion": "0.30.2-dev",
+  "runtimeVersion": "0.30.3-dev",
   "loaderMinVersion": "1.0.4",
   "scripts": [
     "mission-vector-boot-shell-0.29.0.js",
@@ -26,6 +26,6 @@
     "mission-vector-command-center-0.29.0.js",
     "rebel-scout-ui-fix-0.29.3.js",
     "rebel-scout-assisted-input-0.30.0.js",
-    "rebel-command-sync-epoch-patch-0.30.2.js"
+    "rebel-command-sync-generation-patch-0.30.3.js"
   ]
 }
