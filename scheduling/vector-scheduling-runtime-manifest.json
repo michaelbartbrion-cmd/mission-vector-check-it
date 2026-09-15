@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "runtimeVersion": "0.29.4-dev",
+  "runtimeVersion": "0.29.5-dev",
   "loaderMinVersion": "1.0.4",
   "scripts": [
     "mission-vector-boot-shell-0.29.0.js",
