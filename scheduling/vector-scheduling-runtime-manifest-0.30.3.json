@@ -26,6 +26,7 @@
     "mission-vector-command-center-0.29.0.js",
     "rebel-scout-ui-fix-0.29.3.js",
     "rebel-scout-assisted-input-0.30.0.js",
+    "rebel-command-loader-ui-patch-0.30.3.js",
     "rebel-command-sync-generation-patch-0.30.3.js",
     "rebel-scout-runtime-proof-0.30.3.js"
   ]
