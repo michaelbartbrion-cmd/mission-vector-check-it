@@ -24,9 +24,12 @@ async function reportOnce(attempt){
   const p=pairing();
   const base={version:VERSION,attempts:attempt,loaderVersion,runtimeVersion,complete,failures:failures.length,generationGuard:clean(generationGuard?.version)};
 
-  if(!p.deviceId||!p.token){window.MVCI_RUNTIME_PROOF_0303={...base,status:'not_paired'};return{ok:false,retry:true,reason:'not_paired'}}
+  if(!p.deviceId||!p.token){window.MVCI_RUNTIME_PROOF_0303={...base,status:'not_paired'};return{ok:false,retry:attempt<MAX_ATTEMPTS,reason:'not_paired'}}
   if(loaderVersion!==EXPECTED_LOADER||runtimeVersion!==VERSION||!complete||failures.length||generationGuard?.version!==VERSION){
-    const retry=!complete&&attempt<MAX_ATTEMPTS;
+    // A legacy assisted module can temporarily overwrite the shared manifest
+    // version with its own module version. Give the identity repair bounded
+    // time to run, but NEVER report a checkpoint for a still-mismatched set.
+    const retry=attempt<MAX_ATTEMPTS&&failures.length===0;
     window.MVCI_RUNTIME_PROOF_0303={...base,status:'not_proven',retry};
     console.warn(`Mission Vector ${VERSION}: runtime proof withheld because the loader/runtime set is incomplete or mismatched.`,window.MVCI_RUNTIME_PROOF_0303);
     return{ok:false,retry,reason:'runtime_not_proven'};
