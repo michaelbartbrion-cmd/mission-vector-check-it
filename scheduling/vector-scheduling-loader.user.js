@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mission Vector Check It - Vector Scheduling LIVE Loader
 // @namespace    mission-vector-check-it-scheduling-loader
-// @version      1.0.4
+// @version      1.0.5
 // @description  Quiet Tampermonkey loader for the current Mission Vector CrewSense runtime.
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
 // @supportURL   https://github.com/michaelbartbrion-cmd/mission-vector-check-it/issues
@@ -19,11 +19,11 @@
   'use strict';
   if (window.top !== window.self) return;
 
-  const LOADER_VERSION = '1.0.4';
+  const LOADER_VERSION = '1.0.5';
   const BASE = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/scheduling/';
-  const MANIFEST_URL = BASE + 'vector-scheduling-runtime-manifest.json';
+  // Version the manifest path itself so a stale branch-path response cannot strand the browser on an older runtime.
+  const MANIFEST_URL = BASE + 'vector-scheduling-runtime-manifest-0.30.3.json';
 
-  // Clean up the visible badge left by 1.0.3 if this loader replaces it in-place.
   try { document.getElementById('mvci-live-loader-status-v103')?.remove(); } catch (_) {}
 
   function publish(meta) {
@@ -41,7 +41,7 @@
       GM_xmlhttpRequest({
         method: 'GET',
         url,
-        headers: { 'Cache-Control': 'no-cache, no-store, max-age=0' },
+        headers: { 'Cache-Control': 'no-cache, no-store, max-age=0', 'Pragma': 'no-cache' },
         onload: r => {
           if (r.status >= 200 && r.status < 300) resolve(r.responseText);
           else reject(new Error(`HTTP ${r.status} loading ${url}`));
@@ -67,6 +67,9 @@
     const manifest = JSON.parse(text);
     if (!manifest || !Array.isArray(manifest.scripts) || !manifest.runtimeVersion) {
       throw new Error('Runtime manifest is invalid.');
+    }
+    if (manifest.runtimeVersion !== '0.30.3-dev') {
+      throw new Error(`Pinned manifest returned unexpected runtime ${manifest.runtimeVersion}.`);
     }
     return manifest;
   }
