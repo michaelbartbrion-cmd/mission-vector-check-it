@@ -1,20 +1,22 @@
 # Mission Vector Check It — typecheck triage — September 16, 2026
 
-Canonical workspace remains Mission Vector Check It - PRIMARY. This is engineering continuity, not a substitute PRIMARY, approval to write, or proof of production deployment.
+Canonical workspace: **Mission Vector Check It - PRIMARY**. This is an engineering continuity record, not another PRIMARY, live deployment evidence, or authorization to write to Vector.
 
-## Verified current state
+## RESOLVED — independent app development checks
 
-- Rebel Command `/app`: `npm run lint` PASS, `npm run build` PASS after the September 16 shared component/typing changes.
-- `npm run typecheck` FAIL (exit 2). Its output is now limited to `src/pages/Actions.jsx` at lines 30 and 56. Do not describe the full test suite as passing.
-- Fixed and compiler-cleared: `button.jsx`, `input.jsx`, `label.jsx`, `input-otp.jsx` React forward-ref prop typing; optional authentication-layout props in `AuthLayout.jsx`; Vite `ImportMeta.env` types through `vite/client` in `jsconfig.json`; typed `OAuthConsent.jsx` display-request headers without altering auth or consent flow; numeric `Date.getTime()` arithmetic in Scheduling's existing C-shift calculation. OTP component preserves its children-based mode instead of accepting incompatible render-prop combinations.
-- These code changes do not touch Vector save/delete/OT actions, mailbox mutation, credentials, or runtime-proof identity.
+At the actual Rebel Command Base44 app root `/app`, `npm run typecheck`, `npm run lint`, and `npm run build` each returned exit code **0** on September 16, 2026. This explicitly supersedes the earlier typecheck exit 2 and the prior assertion that Actions was blocked by the editor. The normal `Base44.edit_file` path subsequently accepted a narrow edit; no permission bypass was used.
 
-## One outstanding compile-error group
+- Shared UI components `button.jsx`, `input.jsx`, `label.jsx`, and `input-otp.jsx` have accurate React forward-ref prop typing; the OTP remains in its children-based mode.
+- `AuthLayout.jsx` defines optional subtitle/footer/children props; `jsconfig.json` declares `vite/client` for the existing Vite environment; `OAuthConsent.jsx` explicitly types request headers without changing the auth or consent flow; `Scheduling.jsx` uses numeric `Date.getTime()` arithmetic with unchanged cycle logic.
+- `src/pages/Actions.jsx` now uses named objects `{label,done}` for its four visual progress steps and `{Icon,label,value}` for summary cards, eliminating heterogenous tuple inference. Package state transitions, required human confirmation, stale-preview rejection, reread, and automated-write prohibition were not modified by this presentation-only edit.
+- The Work Email validation-display guard in `RebelSystemMonitor.jsx`, `WorkEmail.jsx`, and `Connections.jsx` only accepts an explicit structured `validation_status==='validated'`; GOOD capture quality or the word `validated` in free-text notes is not proof of human review.
 
-`src/pages/Actions.jsx` uses heterogeneous `['label', boolean]` arrays for its four-step progress display and `[Icon, label, count]` arrays for summary cards. JavaScript tuple inference widens keys to `string | boolean` and `Icon` to a union containing numbers and strings, producing `Key`, `ReactNode`, and invalid JSX component type errors. Replace ONLY these presentation-only tuples with named objects `{label,done}` and `{Icon,label,value}`, and destructure the named fields in the two `.map()` callbacks. Preserve all action-package transitions, read-only preview, required human confirmation, stale-preview rejection, reread and no-automated-write gates exactly as they are.
+Base44 checkpoint: `6aaaae81704b86b7d4f97f27`, app git commit `e93407b6f22bb4bbd9b59285587908785aa31e9f`. Checkpoint records app development state, **not** a verified published deployment.
 
-The attempted edit of Actions was blocked by the editor. Do not work around the block or suppress errors with `@ts-nocheck`, blanket `any`, removed scripts, or changed permissions. This group remains open until a normal permitted edit is available.
+The Vite build displayed a non-blocking Browserslist age warning; dependencies were not changed automatically.
 
-## Acceptance
+## Distinct operational gates — STILL OPEN
 
-Run `npm run lint && npm run build && npm run typecheck` from `/app`; checkpoint when all three pass. Treat a successful development build and browser runtime proof as different milestones. The browser's `runtime_boot/runtime_loaded` record and exact human-click trace remain absent as last checked; human test remains trace-only and on hold until proof. Automated Vector writes remain OFF.
+Successful app compilation does not establish a published version, a full CrewSense loader/runtime checkpoint, a browser human-click trace, an approved assisted preparation test, or a real Vector write. As last checked, `RebelScoutDiagnostic` had no accepted `runtime_boot` event, and bridge `vr-89a32ea9fdd09a81` last checked in at 2026-09-16T10:58:32Z. Its stored `online` field is not proof it is currently connected.
+
+Keep loader 1.0.5 / manifest 0.30.3-dev unchanged. First require authentic live runtime proof; only then the separately permitted exact person/date trace-only test, without PREPARE, Save, Delete, or automated writes. Preserve historical riding-credit provenance, and keep Work Email reader 0.1.6 explicitly UNREVIEWED until visual human comparison.
