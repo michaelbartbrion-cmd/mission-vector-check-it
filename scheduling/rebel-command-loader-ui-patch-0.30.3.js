@@ -42,5 +42,10 @@ document.addEventListener('click',ev=>{
 },true);
 new MutationObserver(()=>patch()).observe(document.documentElement,{childList:true,subtree:true});
 setTimeout(patch,250);setTimeout(patch,1000);
+// The assisted 0.30.0 module can rewrite shared identity after the original
+// startup timers, even when the DOM does not mutate again. Re-check the exact
+// pinned manifest identity periodically without restarting the loader,
+// collecting data, changing assignments, or asserting loader completion.
+setInterval(patch,2000);
 window.MVCI_COMMAND_LOADER_UI_PATCH_0303={version:VERSION,patch,status:()=>({loader:loader(),expected:EXPECTED_LOADER,runtime:window.__mvciLiveLoader?.runtimeVersion||''})};
 })();
