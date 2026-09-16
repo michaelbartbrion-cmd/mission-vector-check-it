@@ -6,8 +6,20 @@ const ROOT_ID='mvci-command-center-v0290';
 if(window.top!==window.self||window.MVCI_COMMAND_LOADER_UI_PATCH_0303)return;
 window.MVCI_COMMAND_LOADER_UI_PATCH_0303={version:VERSION};
 const loader=()=>String(document.documentElement.dataset.mvciLoaderVersion||window.__mvciLiveLoader?.loaderVersion||'').trim();
+function repairRuntimeIdentity(){
+  const meta=window.__mvciLiveLoader;
+  // The pinned loader validates its versioned manifest before boot. Do not alter
+  // the identity of another loader, an unknown manifest, or a failed boot.
+  if(!meta||meta.loaderVersion!==EXPECTED_LOADER||!/vector-scheduling-runtime-manifest-0\.30\.3\.json(?:\?|$)/.test(String(meta.manifestUrl||''))||meta.runtimeVersion==='boot-error')return;
+  // The legacy assisted-input module reports its OWN 0.30.0 module version by
+  // overwriting the shared manifest identity on every DOM mutation. Restore
+  // only this known collision; never clear loader failures or set complete.
+  if(meta.runtimeVersion==='0.30.0-dev'&&window.REBEL_SCOUT_ASSISTED_0300?.version==='0.30.0-dev')meta.runtimeVersion=VERSION;
+  if(meta.runtimeVersion===VERSION&&document.documentElement.dataset.mvciRuntimeVersion!==VERSION)document.documentElement.dataset.mvciRuntimeVersion=VERSION;
+}
 function patch(){
   if(loader()!==EXPECTED_LOADER)return;
+  repairRuntimeIdentity();
   const root=document.getElementById(ROOT_ID);if(!root)return;
   const update=root.querySelector('#mvci29-update');
   if(update&&update.textContent!=='Update')update.textContent='Update';
@@ -30,5 +42,5 @@ document.addEventListener('click',ev=>{
 },true);
 new MutationObserver(()=>patch()).observe(document.documentElement,{childList:true,subtree:true});
 setTimeout(patch,250);setTimeout(patch,1000);
-window.MVCI_COMMAND_LOADER_UI_PATCH_0303={version:VERSION,patch,status:()=>({loader:loader(),expected:EXPECTED_LOADER})};
+window.MVCI_COMMAND_LOADER_UI_PATCH_0303={version:VERSION,patch,status:()=>({loader:loader(),expected:EXPECTED_LOADER,runtime:window.__mvciLiveLoader?.runtimeVersion||''})};
 })();
