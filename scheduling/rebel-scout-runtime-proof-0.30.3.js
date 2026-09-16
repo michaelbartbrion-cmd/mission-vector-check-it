@@ -60,9 +60,10 @@ async function reportOnce(attempt){
   try{
     const r=await fetch(p.endpoint||ENDPOINT,{method:'POST',cache:'no-store',credentials:'omit',headers:{Authorization:`Bearer ${p.token}`,'X-Rebel-Device-ID':p.deviceId,'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const b=await r.json().catch(()=>({}));
-    const accepted=r.ok&&b?.ok!==false&&b?.scoutDiagnostic?.accepted!==false;
-    const duplicate=b?.scoutDiagnostic?.duplicate===true;
-    const ok=accepted||duplicate;
+    const ack=b?.scoutDiagnostic;
+    const duplicate=ack?.duplicate===true;
+    // A duplicate flag on an HTTP error or malformed response is NOT proof.
+    const ok=r.ok&&b?.ok===true&&ack?.accepted===true&&clean(ack?.diagnosticId)===diagnosticId;
     window.MVCI_RUNTIME_PROOF_0303={...base,status:ok?'reported':'report_failed',generation:clean(generationResult.generation),httpStatus:r.status,diagnosticId,duplicate};
     if(ok)console.info(`Mission Vector ${VERSION}: live runtime proof ${duplicate?'already recorded':'reported'}.`);else console.warn(`Mission Vector ${VERSION}: runtime proof report was not accepted.`,b);
     return{ok,retry:!ok&&attempt<MAX_ATTEMPTS,reason:ok?'reported':'report_failed'};
