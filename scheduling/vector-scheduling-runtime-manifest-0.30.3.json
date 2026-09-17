@@ -29,6 +29,7 @@
     "rebel-command-sync-generation-patch-0.30.3.js",
     "rebel-command-ot-date-guard-0.30.3.js",
     "rebel-scout-runtime-proof-0.30.3.js",
-    "mission-vector-command-center-0.29.0.js"
+    "mission-vector-command-center-0.29.0.js",
+    "rebel-browser-ui-polish-0.30.3.js"
   ]
 }
