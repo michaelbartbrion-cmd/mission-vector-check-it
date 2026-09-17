@@ -1,0 +1,40 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const path=require('node:path');
+const code=fs.readFileSync(path.join(__dirname,'..','rebel-scout-assisted-input-0.30.0.js'),'utf8');
+const line=name=>{const m=code.match(new RegExp(`^(?:async )?function ${name}\\([^\\n]*$`,'m'));assert.ok(m,`missing ${name}`);return m[0]};
+const trace=code.slice(code.indexOf('function traceClick(ev){'),code.indexOf("document.addEventListener('pointerdown',traceClick,true);"));
+const prep=code.slice(code.indexOf('async function prepareOpenAssignment(){'),code.indexOf('async function openDate(){'));
+assert.ok(trace.startsWith('function traceClick(ev){'));
+assert.match(code,/const PREPARATION_ENABLED=false/);
+assert.match(code,/prepareOpenAssignment\(\)\{if\(!PREPARATION_ENABLED\)throw/);
+assert.match(code,/querySelector\('#rs0300-prepare'\)\.disabled=true/);
+assert.doesNotMatch(code,/manually press CrewSense Save/);
+const location={origin:'https://www.crewsense.com',hash:'#2026-09-28',href:'https://www.crewsense.com/Application/ControlPanel/Schedule/#2026-09-28',assign(url){this.assigned=url}};
+let st={date:'2026-09-28',person:'Jerry Weems',role:'TM',armed:false},shown='2026-09-28',isSched=true,records=[],statuses=[],events=[],released=0;
+const ctx={isoDate:/^\d{4}-\d{2}-\d{2}$/,location,state:()=>st,saveState:o=>Object.assign(st,o),isSchedule:()=>isSched,renderedDate:()=>shown,isLogin:()=>false,releaseLock:()=>released++,setStatus:s=>statuses.push(s),removeKey:k=>events.push(['remove',k]),saveJson:(k,v)=>records.push({k,v}),loadJson:()=>({}),TRACE_KEY:'test-trace',LOCK_KEY:'test-lock',TRACE_PATCH:'2026-09-16-trace-only',PANEL_ID:'panel',ROOT_ID:'root',clean:s=>String(s||'').replace(/\s+/g,' ').trim(),pathSummary:()=>[],jQueryHandlers:()=>[],diagnostic:(_k,stage)=>{events.push(['diagnostic',stage]);return Promise.resolve(true)},setTimeout:()=>{},Date,console};
+vm.createContext(ctx);ctx.PREPARATION_ENABLED=false;vm.runInContext([line('targetHash'),line('scheduleUrl'),prep,line('openDate'),line('armTrace'),trace].join('\n'),ctx);
+assert.equal(ctx.targetHash('2026-09-28'),'#2026-09-28');
+assert.equal(ctx.scheduleUrl('2026-09-28'),'https://www.crewsense.com/Application/ControlPanel/Schedule/#2026-09-28');
+for(const bad of ['2026/09/28','2026-02-30','2026-13-01'])assert.throws(()=>ctx.targetHash(bad));
+(async()=>{
+ await assert.rejects(ctx.prepareOpenAssignment(),/TRACE-ONLY MODE/);
+ shown='2026-09-16';await ctx.openDate();assert.equal(location.assigned,ctx.scheduleUrl(st.date));
+ shown='2026-09-28';delete location.assigned;await ctx.openDate();assert.equal(location.assigned,undefined);
+ location.hash='#2026/09/28';await ctx.openDate();assert.equal(location.assigned,ctx.scheduleUrl(st.date));location.hash='#2026-09-28';
+ shown='2026-09-16';ctx.armTrace();assert.equal(st.armed,false);
+ shown='2026-09-28';ctx.armTrace();assert.equal(st.armed,true);assert.ok(events.some(e=>e[0]==='remove'));
+ const group={dataset:{id:'187323',date:'2026-09-28'},textContent:'Truck 504 Add Open Slot Jerry Weems',};
+ const row={dataset:{shiftUserId:'20434282',userId:'294763',date:'2026-09-28',qualifierid:'13591'},textContent:'FFB Jerry Weems',closest:()=>group,querySelector:()=>({textContent:'Jerry Weems'})};
+ const ev={target:{closest:q=>q.includes('fc-event-user')?row:null},composedPath:()=>[]};
+ ctx.traceClick(ev);assert.equal(st.armed,false);assert.equal(records.length,1);
+ assert.equal(records[0].v.target.shiftUserId,'20434282');assert.equal(records[0].v.target.assignmentId,'187323');
+ assert.equal(records[0].v.target.observedRole,'FFB');assert.ok(events.some(e=>e[1]==='human_click_trace'));
+ const goodRecords=records.length,diagnostics=events.length;
+ for(const change of [()=>{row.querySelector=()=>({textContent:'Other Person'})},()=>{row.querySelector=()=>({textContent:'Jerry Weems'});group.textContent='Engine 503 Jerry Weems'},()=>{group.textContent='Truck 504 Jerry Weems';row.dataset.date='2026-09-23'},()=>{row.dataset.date='2026-09-28';shown='2026-09-23'},()=>{shown='2026-09-28';row.dataset.userId=''},()=>{row.dataset.userId='294763';group.dataset.id=''}]){
+  change();st.armed=true;ctx.traceClick(ev);assert.equal(st.armed,false);assert.equal(records.length,goodRecords);assert.equal(events.length,diagnostics);
+ }
+ console.log('trace-only-navigation-fixtures: PASS (ISO navigation, date guard, exact-row trace, unsafe clicks rejected, prepare disabled)');
+})().catch(e=>{console.error(e);process.exitCode=1});
