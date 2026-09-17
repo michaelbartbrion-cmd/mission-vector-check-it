@@ -1,0 +1,22 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const root = path.join(__dirname, '..');
+const file = 'rebel-browser-ui-polish-0.30.3.js';
+const script = fs.readFileSync(path.join(root, file), 'utf8');
+const manifest = JSON.parse(fs.readFileSync(path.join(root, 'vector-scheduling-runtime-manifest-0.30.3.json'), 'utf8'));
+assert.equal(manifest.scripts.filter(p => p === file).length, 1, 'quarantined path should occur exactly once');
+assert.equal(manifest.scripts.at(-1), file, 'quarantined module stays last and loader module count stays intact');
+assert.doesNotMatch(script, /MutationObserver|setInterval|setTimeout|\.innerHTML|\.textContent|\.appendChild|\.insertAdjacent|\.fetch\s*\(/, 'quarantine may not touch live page or install loops');
+const forbidden = action => () => { throw Error(`Quarantine performed forbidden operation: ${action}`); };
+const page = new Proxy({}, { get: forbidden('document access'), set: forbidden('document write') });
+const window = { top: {}, self: {} };
+window.top = window.self;
+const context = { window, document: page, MutationObserver: forbidden('observer'), setTimeout: forbidden('timeout'), setInterval: forbidden('interval'), fetch: forbidden('fetch') };
+vm.runInNewContext(script, context, { filename: file, timeout: 1000 });
+assert.equal(window.MVCI_REBEL_BROWSER_POLISH_0303.enabled, false);
+assert.match(window.MVCI_REBEL_BROWSER_POLISH_0303.reason, /disabled|loop/i);
+console.log('rebel-scout-quarantine: PASS (inert module, no page access, no observers/timers, pinned manifest unchanged)');
