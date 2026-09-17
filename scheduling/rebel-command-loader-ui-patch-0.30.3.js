@@ -40,6 +40,29 @@ document.addEventListener('click',ev=>{
   ev.preventDefault();ev.stopImmediatePropagation();
   try{window.MVCI_SCHEDULER_CHECK_UPDATE?.()}catch(e){console.warn(`Mission Vector ${VERSION}: update check failed.`,e)}
 },true);
+// CrewSense's scheduler uses a hash. Assigning #YYYY-MM-DD only changes the
+// address bar in the existing document; it does not reliably load that day.
+// Capture the date-button click before the older assisted handler and force ONE
+// real document reload, retaining the sync/lock boundary and never editing data.
+document.addEventListener('click',ev=>{
+  const btn=ev.target?.closest?.('#rs0300-open');
+  if(!btn||loader()!==EXPECTED_LOADER)return;
+  ev.preventDefault();ev.stopImmediatePropagation();
+  const status=()=>document.getElementById('rs0300-status');
+  const say=message=>{const el=status();if(el)el.textContent=message;};
+  try{
+    const date=String(document.getElementById('rs0300-date')?.value||'');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||new Date(`${date}T12:00:00Z`).toISOString().slice(0,10)!==date)throw new Error('Invalid date; no navigation.');
+    const parse=key=>{try{return JSON.parse(localStorage.getItem(key)||'{}')}catch(_){throw new Error('Cannot read safety state; no navigation.')}};
+    const sync=parse('mvciServerDrivenSync_v0290'),lock=parse('mvciDataSyncOwner_v0290');
+    if(sync.active===true||Number(lock.expiresAt||0)>Date.now())throw new Error('Sync or assignment lock active; no navigation.');
+    const url=`${location.origin}/Application/ControlPanel/Schedule/#${date}`;
+    say(`Reloading Crew Scheduler for ${date}. Confirm the visible heading before arming trace.`);
+    if(!/^\/Application\/ControlPanel\/Schedule\/?$/i.test(location.pathname)){location.assign(url);return;}
+    history.replaceState(history.state,'',url);
+    location.reload();
+  }catch(e){say(`STOPPED: ${String(e?.message||e)} Do not arm trace.`);}
+},true);
 new MutationObserver(()=>patch()).observe(document.documentElement,{childList:true,subtree:true});
 setTimeout(patch,250);setTimeout(patch,1000);
 // The assisted 0.30.0 module can rewrite shared identity after the original
