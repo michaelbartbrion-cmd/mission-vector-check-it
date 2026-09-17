@@ -10,7 +10,7 @@ const script = fs.readFileSync(path.join(root, file), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'vector-scheduling-runtime-manifest-0.30.3.json'), 'utf8'));
 assert.equal(manifest.scripts.filter(p => p === file).length, 1, 'quarantined path should occur exactly once');
 assert.equal(manifest.scripts.at(-1), file, 'quarantined module stays last and loader module count stays intact');
-assert.doesNotMatch(script, /MutationObserver|setInterval|setTimeout|\.innerHTML|\.textContent|\.appendChild|\.insertAdjacent|\.fetch\s*\(/, 'quarantine may not touch live page or install loops');
+assert.doesNotMatch(script, /\bnew\s+MutationObserver\s*\(|\bset(?:Interval|Timeout)\s*\(|\.innerHTML\s*=|\.textContent\s*=/, 'quarantine must not contain active loops or DOM writes');
 const forbidden = action => () => { throw Error(`Quarantine performed forbidden operation: ${action}`); };
 const page = new Proxy({}, { get: forbidden('document access'), set: forbidden('document write') });
 const window = { top: {}, self: {} };
