@@ -65,11 +65,31 @@ function ensureVerifyButton(){
   button.addEventListener('click',verifyTraceModal);
   trace.insertAdjacentElement('afterend',button);
 }
+function polishScout(){
+  // Presentation only: keep exact IDs, listeners, lock guards and verification intact.
+  const p=document.getElementById('rebel-scout-assisted-v0300');
+  if(!p||p.dataset.mvciScoutPolished==='1')return;
+  p.dataset.mvciScoutPolished='1';
+  const header=p.firstElementChild;if(header)header.textContent='REBEL SCOUT · READ-ONLY';
+  const notice=p.querySelector('div[style*="#fff8e8"]');if(notice)notice.textContent='READ ONLY · No CrewSense assignments, fields, or saves are changed by these controls.';
+  const prep=p.querySelector('#rs0300-prepare');if(prep){prep.disabled=true;prep.hidden=true;prep.style.display='none';}
+  const label=(id,name)=>{const el=p.querySelector('#'+id);if(el)el.setAttribute('aria-label',name);return el;};
+  label('rs0300-date','CrewSense schedule date');label('rs0300-person','Person');label('rs0300-role','Proposed role (trace reference only)');
+  const open=label('rs0300-open','Open CrewSense date with full reload');if(open)open.textContent='OPEN DATE';
+  const trace=label('rs0300-trace','Arm exact-person read-only trace');if(trace)trace.textContent='1 · ARM TRACE';
+  const verify=label(VERIFY_ID,'Verify opened CrewSense modal without writing');if(verify)verify.textContent='2 · VERIFY MODAL · READ ONLY';
+  const cancel=label('rs0300-cancel','Cancel and release the collection lock');if(cancel)cancel.textContent='CANCEL · RELEASE LOCK';
+  label('rs0300-kill','Emergency kill switch for all assisted writes');
+  const style=document.createElement('style');style.id='mvci-scout-polish-style';
+  style.textContent='#rebel-scout-assisted-v0300{border:1px solid #806a44!important;border-radius:10px!important;background:#f7f2e8!important;color:#2b2923!important;padding:12px!important;font:12px/1.4 Arial,sans-serif!important;box-shadow:0 4px 14px #15151520}#rebel-scout-assisted-v0300 input,#rebel-scout-assisted-v0300 select,#rebel-scout-assisted-v0300 button{border:1px solid #a49b89;border-radius:6px;padding:6px;box-sizing:border-box;font:inherit}#rebel-scout-assisted-v0300 button{cursor:pointer;font-weight:700}#rebel-scout-assisted-v0300 button:disabled{cursor:not-allowed;opacity:.55}#rebel-scout-assisted-v0300 #rs0300-open{background:#e6d0a5;color:#332314;font-weight:800}#rebel-scout-assisted-v0300 #rs0300-trace{background:#354152;color:#fff}#rebel-scout-assisted-v0300 #rs0303-verify-modal{background:#17643e;color:#fff}#rebel-scout-assisted-v0300 #rs0300-cancel{background:#fff}#rebel-scout-assisted-v0300 #rs0300-kill{background:#fff2f0;color:#9b1c1c}#rebel-scout-assisted-v0300 #rs0300-status{font-size:11px;line-height:1.5;overflow-wrap:anywhere}';
+  p.appendChild(style);
+}
 function patch(){
   if(loader()!==EXPECTED_LOADER)return;
   repairRuntimeIdentity();
   const root=document.getElementById(ROOT_ID);if(!root)return;
   ensureVerifyButton();
+  polishScout();
   const update=root.querySelector('#mvci29-update');
   if(update&&update.textContent!=='Update')update.textContent='Update';
   const settings=root.querySelector('.settings');
