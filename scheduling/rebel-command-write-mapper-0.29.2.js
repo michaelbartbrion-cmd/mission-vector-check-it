@@ -20,8 +20,8 @@ function inspectTruck504(person=''){const section=sectionByHeading('Truck 504');
 function mappingFor(position){const p=clean(position).toUpperCase();if(p==='TILLER'||p==='TM')return{workType:'Salary Step [1010]',workSubtype:null,qualifier:'[TM] Tillerman',label:null};if(p==='FIREFIGHTER'||p==='FF'||p==='FFB')return{workType:'Salary Step [1010]',workSubtype:null,qualifier:'[FFB] Firefighter',label:null};if(p==='SWING'||p==='SWING-DESIGNATED'||p==='FF/SWING')return{workType:'Salary Step [1010]',workSubtype:null,qualifier:'[FFB] Firefighter',label:'SWING'};if(p==='TADE')return{workType:'Salary Step [1010]',workSubtype:'Temporary Fire Engineer',qualifier:'[DE-A] Engineer-Aerial',label:'TADE'};if(p==='TAC')return{workType:'Salary Step [1010]',workSubtype:'Temporary Captain',qualifier:'[Capt] Captain',label:'TAC'};return null}
 function report(){return{version:VERSION,url:location.href,overtime:inspectOvertime(),truck504:inspectTruck504(),knownMappings:{tillerman:mappingFor('TM'),firefighter:mappingFor('FF'),swingDesignated:mappingFor('SWING'),tade:mappingFor('TADE'),tac:mappingFor('TAC')}}}
 function cleanVersionLabels(){for(const host of all('[id^="mvci-"],#mvci-command-center-v0290')){const w=document.createTreeWalker(host,NodeFilter.SHOW_TEXT);let n;while((n=w.nextNode()))if(/0\.29\.[01]-dev/.test(n.nodeValue||''))n.nodeValue=(n.nodeValue||'').replace(/0\.29\.[01]-dev/g,VERSION)}}
+// Inspector remains callable; cosmetic version labels are a one-shot operation.
 cleanVersionLabels();
-new MutationObserver(cleanVersionLabels).observe(document.documentElement,{childList:true,subtree:true});
 window.REBEL_COMMAND_WRITE_MAPPER_0292={version:VERSION,inspectOvertime,inspectTruck504,mappingFor,modalSnapshot,report};
 try{window.dispatchEvent(new CustomEvent('rebel-command-write-mapper-ready',{detail:{version:VERSION}}))}catch(_){ }
 })();

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mission Vector Check It - Vector Scheduling LIVE Loader
 // @namespace    mission-vector-check-it-scheduling-loader
-// @version      1.0.5
+// @version      1.0.5.1
 // @description  Quiet Tampermonkey loader for the current Mission Vector CrewSense runtime.
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
 // @supportURL   https://github.com/michaelbartbrion-cmd/mission-vector-check-it/issues
@@ -19,6 +19,7 @@
   'use strict';
   if (window.top !== window.self) return;
 
+  // Keep the manifest protocol identity pinned to 1.0.5; userscript patch version is 1.0.5.1.
   const LOADER_VERSION = '1.0.5';
   const BASE = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/feature/vector-scheduling-mvp/scheduling/';
   // Version the manifest path itself so a stale branch-path response cannot strand the browser on an older runtime.
@@ -128,6 +129,26 @@
   }
 
   window.MVCI_SCHEDULER_CHECK_UPDATE = checkUpdateAndReload;
+
+  // INCIDENT RECOVERY HOLD: disabled by default even if Tampermonkey is re-enabled.
+  // An offline test pass is not permission to resume 28 scripts inside CrewSense.
+  // Only remove this gate after an explicit, limited human-approved browser test.
+  const STABILITY_HOLD = true;
+  if (STABILITY_HOLD) {
+    publish({
+      loaderVersion: LOADER_VERSION,
+      runtimeVersion: 'stability-hold',
+      loadedAt: new Date().toISOString(),
+      manifestUrl: MANIFEST_URL,
+      loadedScripts: [],
+      failures: [],
+      complete: false,
+      disabled: true,
+      reason: 'Rebel Scout stability incident; no CrewSense modules loaded'
+    });
+    console.warn('Rebel Scout is in stability hold. No CrewSense modules loaded; leave the userscript disabled pending approval.');
+    return;
+  }
 
   boot().catch(err => {
     console.error('Mission Vector LIVE Loader failed:', err);

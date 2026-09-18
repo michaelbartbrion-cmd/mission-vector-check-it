@@ -1,0 +1,36 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const vm=require('node:vm');
+const source=name=>fs.readFileSync(path.join(__dirname,'..',name),'utf8');
+const loader=source('vector-scheduling-loader.user.js');
+let requests=0,loads=0;
+const self={};const win={self,top:self};const dataset={};
+const document={getElementById:()=>null,documentElement:{dataset}};
+vm.runInNewContext(loader,{window:win,document,GM_xmlhttpRequest:()=>{requests++},console:{warn:()=>{},error:()=>{}},Date,setTimeout:()=>{loads++}}, {timeout:1000});
+assert.equal(requests,0,'loader must not make any network requests in stability hold');
+assert.equal(loads,0,'loader must not schedule script startup in stability hold');
+assert.equal(win.__mvciLiveLoader?.disabled,true);
+assert.equal(win.__mvciLiveLoader?.runtimeVersion,'stability-hold');
+assert.equal(win.__mvciLiveLoader?.complete,false);
+assert.deepEqual(Array.from(win.__mvciLiveLoader.loadedScripts),[]);
+const assisted=source('rebel-scout-assisted-input-0.30.0.js');
+assert.match(assisted,/const PREPARATION_ENABLED=false/);
+assert.doesNotMatch(assisted,/^installPageProbe\(\);/m,'no automatic interception of CrewSense XHR/fetch');
+assert.doesNotMatch(assisted,/new MutationObserver\([^\n]*\)\.observe\(document\.documentElement/,'no global Scout observer');
+assert.doesNotMatch(assisted,/document\.querySelectorAll\('\*'\)/,'no full document walk');
+assert.doesNotMatch(assisted,/window\.__mvciLiveLoader\.runtimeVersion\s*=\s*VERSION/,'Scout must not falsify shared loader identity');
+assert.match(assisted,/scoutRootWatch\.observe\(root,\{childList:true\}\)/);
+assert.match(source('rebel-scout-ui-fix-0.29.3.js'),/relabelRootWatch\.observe\(root,\{childList:true\}\)/);
+for(const name of ['rebel-scout-ui-fix-0.29.3.js','rebel-command-loader-ui-patch-0.30.3.js','rebel-command-dst-ui-patch-0.29.1.js','rebel-command-write-mapper-0.29.2.js']){
+ assert.doesNotMatch(source(name),/new MutationObserver\([^\n]*\)\.observe\(document\.documentElement/,'global visual observer: '+name);
+}
+const command=source('mission-vector-command-center-0.29.0.js');
+assert.doesNotMatch(command,/setTimeout\(safeAuto/,'automatic sync prohibited at startup');
+assert.doesNotMatch(command,/setTimeout\(\(\)=>\{const q=queue\(\);if\(q\.active\)runQueue\(\)\}/,'no old queue resume at startup');
+assert.match(command,/async function startSync\(automatic=false\)/,'manual read-only sync code retained');
+const core=source('rebel-core-scheduling-sync-0.21.0.js');
+assert.doesNotMatch(core,/setInterval\(\(\)\s*=>\s*\{\s*if\s*\(paired\(\)\)\s*syncNow/,'no background ledger sends');
+assert.doesNotMatch(core,/setTimeout\(\(\)\s*=>\s*\{\s*if\s*\(paired\(\)\)\s*syncNow/,'no boot ledger sends');
+console.log('rebel-scout-incident-guards: PASS (loader no-op, no background sends, no broad UI observers, no page interception)');

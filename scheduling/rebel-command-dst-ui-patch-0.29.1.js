@@ -51,6 +51,6 @@ function cleanBrowserLabels(root=document){
     }
   }
 }
+// Cosmetic labels are best-effort and must never watch the live CrewSense DOM.
 cleanBrowserLabels();
-new MutationObserver(()=>cleanBrowserLabels()).observe(document.documentElement,{childList:true,subtree:true});
 })();

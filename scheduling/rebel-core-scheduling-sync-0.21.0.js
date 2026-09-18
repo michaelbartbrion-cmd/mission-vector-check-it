@@ -263,6 +263,9 @@
     let card = panel.querySelector(`#${CARD_ID}`);
     if (!card) { card = document.createElement('div'); card.id = CARD_ID; card.className = 'vs-card'; panel.appendChild(card); }
     const c = pendingCounts(), st = status(), isPaired = paired();
+    const signature=JSON.stringify({c,st,isPaired});
+    if(card.dataset.renderSignature===signature)return;
+    card.dataset.renderSignature=signature;
     const health = st.lastError ? `Error: ${esc(st.lastError)}` : st.lastSuccessAt ? `Last sync ${new Date(st.lastSuccessAt).toLocaleString()}` : 'Not synced yet';
     card.innerHTML = `<h3>Rebel Core scheduling sync <span class="vs-muted">${VERSION}</span></h3>
       <div class="vs-muted" style="margin-bottom:7px">${c.totalCredits} verified current-era credits · ${c.totalPlans} plans · ${c.totalCases} reconciliation cases · ${c.totalObservations} factual segments</div>
@@ -281,9 +284,9 @@
   }
 
   setInterval(refreshCard, 1800);
-  setInterval(() => { if (paired()) syncNow().catch(() => {}); }, 300000);
+  // Stability quarantine: no periodic network synchronization without a user action.
   setTimeout(refreshCard, 1000);
-  setTimeout(() => { if (paired()) syncNow().catch(() => {}); }, 20000);
+  // Stability quarantine: no automatic synchronization at startup.
 
   window.MVCI_REBEL_CORE_SCHEDULING_SYNC_0210 = { version: VERSION, syncNow, pendingCounts };
 })();

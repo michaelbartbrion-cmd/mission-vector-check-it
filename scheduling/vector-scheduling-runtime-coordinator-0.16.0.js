@@ -35,6 +35,6 @@ function syncMetadata(){
  localStorage.setItem(STATE_KEY,JSON.stringify(s));
 }
 function tick(){ensureStyle();syncMetadata();}
-setInterval(tick,600);setTimeout(tick,100);
+setInterval(tick,5000);setTimeout(tick,100); // Stable metadata only; do not rescan state ten times a second.
 window.MVCI_VECTOR_RUNTIME_COORDINATOR_0160={version:VERSION,syncMetadata};
 })();

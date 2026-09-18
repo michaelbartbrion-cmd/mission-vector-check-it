@@ -149,7 +149,7 @@
     };
   }
 
-  const observer = new MutationObserver(() => setTimeout(injectRatioCard, 0));
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  // A once-per-five-second panel check avoids an unbounded timer for each CrewSense mutation.
   injectRatioCard();
+  setInterval(() => { const panel=document.getElementById('mvci-vs-panel'); if(panel&&!panel.querySelector('#vs-ratio-period-card'))injectRatioCard(); }, 5000);
 })();

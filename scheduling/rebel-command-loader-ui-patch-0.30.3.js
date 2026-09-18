@@ -132,7 +132,7 @@ document.addEventListener('click',ev=>{
     location.reload();
   }catch(e){say(`STOPPED: ${String(e?.message||e)} Do not arm trace.`);}
 },true);
-new MutationObserver(()=>patch()).observe(document.documentElement,{childList:true,subtree:true});
+// Bounded two-second existing checker below replaces the broad page mutation observer.
 setTimeout(patch,250);setTimeout(patch,1000);
 // The assisted 0.30.0 module can rewrite shared identity after the original
 // startup timers, even when the DOM does not mutate again. Re-check the exact
