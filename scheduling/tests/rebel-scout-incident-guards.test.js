@@ -50,4 +50,16 @@ assert.match(staffing,/try\{startObservation\(\);const stableBefore=/);
 assert.match(staffing,/finally\{stopObservation\(\);state\.running=false/);
 assert.match(staffing,/patchStaffingCapture\?\./);
 assert.doesNotMatch(staffing,/window\.fetch\s*=/);
+// With a browser body present, the stability hold displays only a dismissible,
+// inert status. It must not boot any module, network request or background timer.
+const made=[],body={appendChild:el=>made.push(el)};
+function element(tag){return {tag,style:{},setAttribute(){},append(){},appendChild(){},addEventListener(){},remove(){},set textContent(v){this.text=v},get textContent(){return this.text}}}
+let holdRequests=0,holdTimers=0;const safetyWindow={};safetyWindow.self=safetyWindow;safetyWindow.top=safetyWindow;
+const safetyDoc={body,documentElement:{dataset:{}},createElement:element,getElementById:()=>null};
+vm.runInNewContext(loader,{window:safetyWindow,document:safetyDoc,GM_xmlhttpRequest:()=>holdRequests++,console:{warn(){},error(){}},Date,setTimeout:()=>holdTimers++},{timeout:1000});
+assert.equal(made.length,1,'one compact recovery status, no old operational panel');
+assert.equal(made[0].id,'mvci-scout-recovery');
+assert.equal(safetyWindow.__mvciLiveLoader.disabled,true);
+assert.equal(holdRequests,0);assert.equal(holdTimers,0);
+assert.equal(safetyWindow.__mvciLiveLoader.loadedScripts.length,0);
 console.log('rebel-scout-incident-guards: PASS (loader no-op, no background sends, no broad UI observers, no page interception)');
