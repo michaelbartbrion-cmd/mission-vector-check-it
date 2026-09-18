@@ -30,3 +30,8 @@
 3. When Michael authorizes a controlled test, first verify a fresh loader 1.0.5.1 delivers `stability-hold` with **zero modules loaded** and Vector remains stable; do not test collection or assignments.
 4. A separate, reviewable branch/version and explicit approval are required before lifting the hold and staging individual modules. Test idle navigation, CPU/memory and repeated DOM changes without writes or year-long scans. Stop immediately for a freeze or stale-date mismatch.
 5. Do not describe Scout as operational, deployed or the incident as resolved based on source tests alone. Base44 changes to Postmaster and Scheduling are separate and do not verify browser safety.
+
+## Additional offline containment
+- Replaced the DST correction's global `window.fetch` interception with a dedicated `patchStaffingCapture` function called only by the read-only staffing bridge when a capture is explicitly submitted. The existing 23/24/25-hour daylight-saving normalization remains covered by a regression test.
+- The staffing bridge's document-wide mutation observer is now created only during an explicitly initiated capture and disconnected in `finally`; it does not observe Vector while idle. Failed observer initialization also reaches cleanup.
+- The regression suite checks both protections; all seven offline scheduling test files pass. The fail-closed loader hold remains in place, and no authenticated browser stability test has been run. Do not re-enable Scout or treat the incident as resolved.

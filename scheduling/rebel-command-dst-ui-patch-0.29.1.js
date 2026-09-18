@@ -4,7 +4,6 @@ const VERSION='0.29.1-dev';
 if(window.top!==window.self||window.REBEL_COMMAND_DST_UI_PATCH_0291)return;
 window.REBEL_COMMAND_DST_UI_PATCH_0291={version:VERSION};
 
-const originalFetch=window.fetch.bind(window);
 const excluded=/Sub\s*\[1010\]|Additional Time|Overtime|OT Sign|Force Hire|Backfill|Disaster Relief|Trade|Swap|Vacation|Sick|Leave|Time Off/i;
 const isDutyDayHours=v=>[23,24,25].includes(Number(v));
 
@@ -28,17 +27,8 @@ function patchStaffingCapture(body){
   return body;
 }
 
-window.fetch=async function(input,init){
-  try{
-    const url=typeof input==='string'?input:String(input?.url||'');
-    if(/\/functions\/telemetryBridge/i.test(url)&&init?.method?.toUpperCase()==='POST'&&typeof init.body==='string'){
-      const parsed=JSON.parse(init.body);
-      patchStaffingCapture(parsed);
-      init={...init,body:JSON.stringify(parsed)};
-    }
-  }catch(_){ }
-  return originalFetch(input,init);
-};
+// Explicit capture normalization only: never override the host page fetch.
+window.REBEL_COMMAND_DST_UI_PATCH_0291.patchStaffingCapture=patchStaffingCapture;
 
 function cleanBrowserLabels(root=document){
   const hosts=[...root.querySelectorAll('[id^="mvci-"],#mvci-command-center-v0290')];

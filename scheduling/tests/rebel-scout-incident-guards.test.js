@@ -36,4 +36,18 @@ assert.doesNotMatch(core,/setTimeout\(\(\)\s*=>\s*\{\s*if\s*\(paired\(\)\)\s*syn
 const backfill=source('vector-scheduling-runtime-backfill-0.13.0.js');
 assert.doesNotMatch(backfill,/if\(loadRun\(\)\?\.active\)setTimeout\(runBackfill/,'old historical scan must not resume');
 assert.match(backfill,/interrupted\.active=false/,'interrupted run is explicitly paused');
+const dst=source('rebel-command-dst-ui-patch-0.29.1.js');
+assert.doesNotMatch(dst,/window\.fetch\s*=/,'DST normalizer must never intercept global fetch');
+assert.match(dst,/patchStaffingCapture=patchStaffingCapture/);
+const dstSelf={};const dstWindow={top:dstSelf,self:dstSelf};
+vm.runInNewContext(dst,{window:dstWindow,document:{querySelectorAll:()=>[]},console}, {timeout:1000});
+const payload={staffingCapture:{sourceVersion:'vector-bridge-0.29.0-dev',days:[{rows:Array.from({length:24},(_,i)=>({scheduleType:'Salary Step [1010]',lengthHours:i<20?23:12,rawText:'Work Shift'}))}],diagnostics:{groupCount:6,pageStable:true,allVisibleGroupsScanned:true,scrollSweepComplete:true,noLoadingIndicator:true}}};
+assert.equal(dstWindow.REBEL_COMMAND_DST_UI_PATCH_0291.patchStaffingCapture(payload).staffingCapture.captureComplete,true,'DST 23-hour capture adjustment must survive without fetch patching');
+const staffing=source('vector-staffing-bridge-0.29.0.js');
+assert.match(staffing,/function startObservation\(\)/);
+assert.match(staffing,/async function performScrape\(options=\{\}\)\{state\.running=true;/);
+assert.match(staffing,/try\{startObservation\(\);const stableBefore=/);
+assert.match(staffing,/finally\{stopObservation\(\);state\.running=false/);
+assert.match(staffing,/patchStaffingCapture\?\./);
+assert.doesNotMatch(staffing,/window\.fetch\s*=/);
 console.log('rebel-scout-incident-guards: PASS (loader no-op, no background sends, no broad UI observers, no page interception)');
