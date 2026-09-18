@@ -1,0 +1,3 @@
+# Historical Outlook Work Email Reader - source preservation
+
+Exact recovered source is saved as `.user.js.txt` to avoid accidental userscript installation. The filename in the temporary checkout said 0.1.6, while the Tampermonkey header says version 0.1.7 and the visible runtime version says 0.1.6-discovery; retain these labels for provenance. It includes a paired telemetry POST capture and should not be installed, enabled, or used while work-mail permission is unavailable. No credentials, mailbox messages, or Tampermonkey settings were copied into this archive. Visual styling is separately maintained in `scheduling/outlook-rebel-postmaster-ui.user.js`; styling alone cannot create the reader.
