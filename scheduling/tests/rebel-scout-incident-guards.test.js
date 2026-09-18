@@ -33,4 +33,7 @@ assert.match(command,/async function startSync\(automatic=false\)/,'manual read-
 const core=source('rebel-core-scheduling-sync-0.21.0.js');
 assert.doesNotMatch(core,/setInterval\(\(\)\s*=>\s*\{\s*if\s*\(paired\(\)\)\s*syncNow/,'no background ledger sends');
 assert.doesNotMatch(core,/setTimeout\(\(\)\s*=>\s*\{\s*if\s*\(paired\(\)\)\s*syncNow/,'no boot ledger sends');
+const backfill=source('vector-scheduling-runtime-backfill-0.13.0.js');
+assert.doesNotMatch(backfill,/if\(loadRun\(\)\?\.active\)setTimeout\(runBackfill/,'old historical scan must not resume');
+assert.match(backfill,/interrupted\.active=false/,'interrupted run is explicitly paused');
 console.log('rebel-scout-incident-guards: PASS (loader no-op, no background sends, no broad UI observers, no page interception)');
