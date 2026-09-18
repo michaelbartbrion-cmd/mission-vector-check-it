@@ -19,6 +19,11 @@
 - Rate-limited metadata polling and ratio-card reattachment; cached the Rebel Core card render signature to avoid rewriting unchanged markup.
 - Preserved trace-only field-preparation gate (`PREPARATION_ENABLED=false`) and prohibited CrewSense writes.
 
+## Known remaining integration risks
+- `rebel-command-dst-ui-patch-0.29.1.js` still wraps the page's `window.fetch` for read-only staffing capture normalization, and `vector-staffing-bridge-0.29.0.js` still observes relevant schedule DOM mutations. These are **not cleared** by the presentation patch changes.
+- Other older modules have periodic UI refreshes. Static checks cannot establish their behavior against a real authenticated CrewSense session or exclude a second crash source.
+- The loader stability hold prevents all modules from executing; it must stay in place while these remaining integrations are isolated and tested.
+
 ## Offline acceptance / Ready Room
 1. Run `node --check` on the userscript loader and every pinned manifest file, `node scheduling/tests/*.test.js` individually, plus `git diff --check`.
 2. Keep installed Scout scripts **disabled**. Recovery code on GitHub alone does not stop a previously running browser tab.
