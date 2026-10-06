@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.5
+// @version      3.2.6
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -24,12 +24,12 @@
     // uses the clean production identity after the September 2026 Tampermonkey reset.
     if (window.__vectorRebelInstance) {
         console.warn(
-            `Vector Rebel 3.2.5: another instance (${window.__vectorRebelInstance.version || 'unknown'}) is already active on this page.`
+            `Vector Rebel 3.2.6: another instance (${window.__vectorRebelInstance.version || 'unknown'}) is already active on this page.`
         );
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.5',
+        version: '3.2.6',
         startedAt: Date.now()
     };
 
@@ -37,7 +37,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.5';
+    const VERSION = '3.2.6';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -7983,9 +7983,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             line.style.cssText = 'font-size:12px;line-height:1.55;margin:8px 0;';
             line.innerHTML =
                 `<b>Installed:</b> v${escapeHtml(VERSION)}<br>` +
-                '<b>Update mode:</b> manual replacement only<br>' +
+                '<b>Update mode:</b> managed automatic updates<br>' +
                 '<b>Runtime holds:</b> none';
             updates.appendChild(line);
+            const privacyNote = document.createElement('div');
+            privacyNote.style.cssText = 'font-size:10px;line-height:1.4;color:#718896;margin-top:7px;';
+            privacyNote.textContent = 'Vector Rebel may collect limited technical and usage information for support, reliability, and improvement.';
+            updates.appendChild(privacyNote);
             content.appendChild(updates);
 
             const run = getRun();
@@ -8568,7 +8572,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         panel.style.cssText =
             'position:fixed;' +
             'right:16px;' +
-            'bottom:64px;' +
+            'bottom:16px;' +
             'width:430px;' +
             'max-width:calc(100vw - 28px);' +
             'z-index:2147483646;' +
@@ -8601,13 +8605,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         const minimize = document.createElement('button');
         minimize.type = 'button';
-        minimize.textContent = '−';
-        minimize.title = 'Minimize';
+        minimize.innerHTML = rebelStarbirdSvg();
+        minimize.title = 'Minimize Vector Rebel';
         minimize.setAttribute('aria-label', 'Minimize Vector Rebel');
         minimize.style.cssText =
-            'width:31px;height:31px;border:1px solid rgba(255,255,255,.25);border-radius:7px;' +
-            'background:rgba(255,255,255,.08);color:#fff;font:400 21px/27px Arial,sans-serif;' +
-            'padding:0;cursor:pointer;';
+            'width:43px;height:43px;min-width:43px;border:2px solid rgba(255,255,255,.72);border-radius:50%;' +
+            'background:#fff;color:#153e5c;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center;' +
+            'overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.18);';
         minimize.onclick = () => applyPanelMinimizedState(true);
         titleRow.append(titleWrap, minimize);
 
@@ -8678,7 +8682,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         panel.append(full, mini);
         document.body.appendChild(panel);
-        applyPanelMinimizedState(isPanelMinimized(), false);
+        applyPanelMinimizedState(true, false);
         refreshPanelInfo();
     }
 
