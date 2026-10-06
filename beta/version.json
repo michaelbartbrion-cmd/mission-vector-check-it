@@ -2,12 +2,13 @@
   "schemaVersion": 1,
   "project": "Mission Vector Check It",
   "channel": "beta",
-  "latestVersion": "2.3.10",
+  "latestVersion": "3.2.5",
   "minimumSupportedVersion": "2.3.1",
   "status": "testing",
-  "message": "Vector Rebel v2.3.10 beta is current.",
-  "releaseNotes": "Final Item Log verification fix. The parser now reconstructs real history rows across semantic tables, ARIA grids, and sibling-cell layouts using deterministic row text with separators; preserves duplicate same-day rows; supports smart apostrophes; detects table layouts without semantic headers; and retains conservative baseline + exactly-one-new-COMPLETE-row confirmation.",
-  "installUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
+  "message": "Vector Rebel v3.2.5 is the current managed release.",
+  "releaseNotes": "Adds automatic per-installation usage telemetry keyed to the configured My Tour PPE profile name; reports installed version, liveness, My Tour PPE / After-Fire / Captain Monthly / Daily Captain Check usage, and sanitized program errors without intentionally transmitting gear details, signatures, notes, asset IDs, or individual PASS/FAIL answers. Managed Tampermonkey update URLs are restored.",
+  "installUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js",
+  "legacyUpdateUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
   "repoUrl": "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
-  "publishedAt": "2026-09-11"
+  "publishedAt": "2026-10-06"
 }

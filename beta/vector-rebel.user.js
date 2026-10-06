@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Vector Check It - PPE Helper
-// @namespace    mission-ppe
+// @name         Vector Rebel
+// @namespace    mission-vector-check-it-vector-rebel
 // @version      3.2.5
-// @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js
-// @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js
+// @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
+// @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
 // @supportURL   https://github.com/michaelbartbrion-cmd/mission-vector-check-it/issues
 // @description  Vector Rebel production PPE checker — physical PASS/FAIL review, signatures, sequential submission, and Item Log completion verification
