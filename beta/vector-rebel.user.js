@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.6
+// @version      3.2.7
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -24,12 +24,12 @@
     // uses the clean production identity after the September 2026 Tampermonkey reset.
     if (window.__vectorRebelInstance) {
         console.warn(
-            `Vector Rebel 3.2.6: another instance (${window.__vectorRebelInstance.version || 'unknown'}) is already active on this page.`
+            `Vector Rebel 3.2.7: another instance (${window.__vectorRebelInstance.version || 'unknown'}) is already active on this page.`
         );
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.6',
+        version: '3.2.7',
         startedAt: Date.now()
     };
 
@@ -37,7 +37,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.6';
+    const VERSION = '3.2.7';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -247,6 +247,93 @@
             });
         });
     }
+
+    async function submitRebelCommandFeedback(details) {
+        const message = String(details == null ? '' : details).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 2000);
+        if (!message) return false;
+        if (!rebelCommandPaired()) {
+            const enrolled = await ensureRebelCommandEnrollment(false);
+            if (!enrolled || !rebelCommandPaired()) return false;
+        }
+        const p = rebelCommandPairing();
+        const body = {
+            version: VERSION,
+            suggestions: [{
+                suggestionId: `feedback:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`,
+                title: 'Vector Rebel feedback',
+                details: message,
+                sourceVersion: VERSION,
+                category: 'feedback',
+                priority: 'medium',
+                sourceContext: 'settings_general',
+                timestamp: new Date().toISOString()
+            }]
+        };
+        return new Promise(resolve => {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: REBEL_COMMAND_ENDPOINT,
+                headers: {
+                    Authorization: `Bearer ${p.token}`,
+                    'X-Rebel-Device-ID': p.deviceId,
+                    'Content-Type': 'application/json'
+                },
+                data: JSON.stringify(body),
+                timeout: 12000,
+                onload: response => resolve(response.status >= 200 && response.status < 300),
+                onerror: () => resolve(false),
+                ontimeout: () => resolve(false)
+            });
+        });
+    }
+
+    function telemetrySafeErrorMessage(value) {
+        return String(value == null ? '' : value)
+            .replace(/[\u0000-\u001f\u007f]/g, ' ')
+            .replace(/\b\d{5,}\b/g, '[id]')
+            .replace(/\b[A-Z][A-Z0-9]{2,}-\d{2,}\b/g, '[id]')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 300);
+    }
+
+    function looksLikeVectorRebelRuntime(error, source = '') {
+        const haystack = `${source || ''} ${error?.stack || ''} ${error?.fileName || ''}`.toLowerCase();
+        if (!haystack.trim()) return false;
+        return haystack.includes('vector rebel') ||
+            haystack.includes('vector-rebel') ||
+            haystack.includes('vector-ppe-helper') ||
+            haystack.includes('userscript');
+    }
+
+    let lastUnexpectedErrorSignature = '';
+    let lastUnexpectedErrorAt = 0;
+    function reportUnexpectedVectorRebelError(kind, error, source = '') {
+        if (!looksLikeVectorRebelRuntime(error, source)) return;
+        const message = telemetrySafeErrorMessage(error?.message || error || kind || 'Unexpected Vector Rebel runtime error.');
+        if (!message) return;
+        const signature = `${kind}:${message}`;
+        const now = Date.now();
+        if (signature === lastUnexpectedErrorSignature && now - lastUnexpectedErrorAt < 60000) return;
+        lastUnexpectedErrorSignature = signature;
+        lastUnexpectedErrorAt = now;
+        void rebelCommandEvent('runtime_error', {
+            success: false,
+            action: 'unexpected_runtime',
+            description: 'Unexpected Vector Rebel runtime error.',
+            errorType: kind,
+            errorMessage: message,
+            metadata: { stage: 'global' }
+        });
+    }
+
+    window.addEventListener('error', event => {
+        reportUnexpectedVectorRebelError('UnhandledError', event?.error || event?.message || '', event?.filename || '');
+    });
+
+    window.addEventListener('unhandledrejection', event => {
+        reportUnexpectedVectorRebelError('UnhandledRejection', event?.reason || '', '');
+    });
 
     function verifyRebelCommandPairing() {
         if (!rebelCommandPaired()) return Promise.resolve(false);
@@ -7991,6 +8078,34 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             privacyNote.textContent = 'Vector Rebel may collect limited technical and usage information for support, reliability, and improvement.';
             updates.appendChild(privacyNote);
             content.appendChild(updates);
+
+            const feedback = card('Feedback', 'Send a comment or problem report to the Vector Rebel maintainer.');
+            const feedbackBox = document.createElement('textarea');
+            feedbackBox.placeholder = 'Type feedback here...';
+            feedbackBox.maxLength = 2000;
+            feedbackBox.style.cssText = 'width:100%;min-height:88px;resize:vertical;border:1px solid #cbd9e2;border-radius:7px;padding:8px 9px;font:12px/1.4 Arial,sans-serif;color:#233b4a;background:#fff;';
+            const feedbackStatus = document.createElement('div');
+            feedbackStatus.style.cssText = 'min-height:16px;margin-top:6px;font-size:10px;color:#607483;';
+            const feedbackSend = makeButton('Send Feedback');
+            feedbackSend.onclick = async () => {
+                const message = String(feedbackBox.value || '').trim();
+                if (!message) {
+                    feedbackStatus.textContent = 'Enter a comment first.';
+                    return;
+                }
+                feedbackSend.disabled = true;
+                feedbackStatus.textContent = 'Sending...';
+                const sent = await submitRebelCommandFeedback(message);
+                feedbackSend.disabled = false;
+                if (sent) {
+                    feedbackBox.value = '';
+                    feedbackStatus.textContent = 'Feedback sent.';
+                } else {
+                    feedbackStatus.textContent = 'Feedback could not be sent. Try again later.';
+                }
+            };
+            feedback.append(feedbackBox, feedbackSend, feedbackStatus);
+            content.appendChild(feedback);
 
             const run = getRun();
             const runCard = card('Run Controls', run ? 'An inspection run is currently stored on this browser.' : 'No inspection run is currently active.');
