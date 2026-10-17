@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.10
+// @version      3.2.11
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -14,6 +14,7 @@
 // @grant        GM_deleteValue
 // @grant        GM_xmlhttpRequest
 // @grant        GM_openInTab
+// @grant        GM_setClipboard
 // @connect      base44.app
 // @run-at       document-idle
 // ==/UserScript==
@@ -39,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.10';
+    const VERSION = '3.2.11';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -676,12 +677,13 @@
     const MANAGED_UPDATE_URL = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js';
 
     function openManagedUpdate() {
+        const tmUtilities = 'chrome-extension://dhdgffkkebhmkfjojejmpbldmpobfkfo/options.html#nav=utils';
+        try { GM_setClipboard(MANAGED_UPDATE_URL, 'text'); } catch {}
         try {
-            GM_openInTab(MANAGED_UPDATE_URL, { active: true, insert: true, setParent: true });
-            setStatus('Opened the managed Vector Rebel update page in Tampermonkey.');
+            GM_openInTab(tmUtilities, { active: true, insert: true, setParent: true });
+            setStatus('Update URL copied. In Tampermonkey Utilities, paste into Import from URL and click Install.');
         } catch (error) {
-            window.open(MANAGED_UPDATE_URL, '_blank', 'noopener');
-            setStatus('Opened the managed Vector Rebel update page.');
+            alert('Update URL copied to your clipboard. Open Tampermonkey → Utilities → Import from URL, paste, then click Install.');
         }
     }
 
