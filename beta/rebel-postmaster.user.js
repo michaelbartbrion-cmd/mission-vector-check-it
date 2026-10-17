@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Postmaster
 // @namespace    mission-vector-check-it-rebel-postmaster
-// @version      1.2.10
+// @version      1.2.11
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @description  Minimal read-only Outlook Web collector for Rebel Command with whole-mailbox indexing and automatic capture of messages the user opens.
@@ -12,6 +12,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
+// @grant        GM_openInTab
 // @connect      base44.app
 // @run-at       document-idle
 // @noframes
@@ -20,8 +21,11 @@
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_POSTMASTER)return;
-const VERSION='rebel-postmaster-1.2.10';
+const VERSION='rebel-postmaster-1.2.11';
 const DEFAULT_ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
+const MANAGED_UPDATE_URL='https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js';
+function openManagedUpdate(){try{GM_openInTab(MANAGED_UPDATE_URL,{active:true,insert:true,setParent:true});state.msg='Opened the managed Rebel Postmaster update page in Tampermonkey.';state.kind='info';render()}catch(_){window.open(MANAGED_UPDATE_URL,'_blank','noopener');state.msg='Opened the managed Rebel Postmaster update page.';state.kind='info';render()}}
+
 const REBEL_SYMBOL_HTML="<svg aria-hidden=\"true\" viewBox=\"0 0 64 64\" width=\"39\" height=\"39\" style=\"display:block;width:39px;height:39px;pointer-events:none\"><circle cx=\"32\" cy=\"32\" r=\"29\" fill=\"#123a7a\"/><path fill=\"#ffffff\" d=\"M31.8 10c2.4 7.2 7.8 11.2 13.5 13.9-2.7.5-5.4.3-7.8-.6 3.2 3.8 5.1 8.6 5.1 13.8 0 10.4-7 16.9-10.6 19.4-3.8-2.5-10.8-9.1-10.8-19.4 0-5.2 1.9-10 5.1-13.8-2.4.9-5.1 1.1-7.8.6C24 21.2 29.4 17.2 31.8 10Zm0 12.5c-3.6 4.1-5.7 8.4-5.7 13.7 0 6.6 3.3 11.4 5.8 13.8 2.5-2.4 5.8-7.2 5.8-13.8 0-5.3-2.1-9.6-5.9-13.7Z\"/></svg>";
 const ROOT_ID='mvci-rebel-postmaster';
 const CFG_KEY='mvciWorkEmailPairingV1';
@@ -166,6 +170,7 @@ async function handleUiAction(action){
     if(action==='capture-list'){await captureList();return}
     if(action==='capture-open'){await captureOpen({automatic:false});return}
     if(action==='configure'){await configure();return}
+    if(action==='update'){openManagedUpdate();return}
     if(action==='copy-diagnostics'){if(!navigator.clipboard?.writeText)throw new Error('Clipboard API unavailable.');await navigator.clipboard.writeText(traceExport());state.msg=`Copied ${traceRows().length} diagnostic trace rows.`;state.kind='success';render();return}
     if(action==='clear-diagnostics'){clearTrace();state.msg='Postmaster diagnostic trace cleared.';state.kind='info';render();return}
     if(action==='mailbox-sync'){const ms=mailboxState(),retryErrors=mailboxMatches(ms)&&ms?.status==='complete_with_errors';await runMailboxSync({fresh:!(mailboxMatches(ms)&&['paused','error','running','complete_with_errors'].includes(ms?.status)),retryErrors});return}
@@ -191,7 +196,7 @@ function render(){
     state.last=snapshot();const r=ensureUi();r.replaceChildren();const cs=crawlState(),same=crawlMatchesPage(cs),ms=mailboxState(),mb=mailboxSummary(ms);
     if(state.open){
         const p=add(r,'div',null,'p'),h=add(p,'div',null,'h'),title=add(h,'div');add(title,'b','REBEL POSTMASTER');
-        const sub=add(title,'div','v1.2.10 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
+        const sub=add(title,'div','v1.2.11 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
         const close=add(h,'button','','orb header-orb');close.type='button';close.dataset.pmAction='close';close.title='Minimize Rebel Postmaster';close.setAttribute('aria-label','Minimize Rebel Postmaster');close.innerHTML=REBEL_SYMBOL_HTML;
         const b=add(p,'div',null,'b');
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');
@@ -203,6 +208,7 @@ function render(){
         const tools=add(b,'details');tools.style.marginTop='8px';const toolsTitle=add(tools,'summary','DIAGNOSTICS / CONNECTION','note');toolsTitle.style.cursor='pointer';toolsTitle.style.fontWeight='700';const toolBody=add(tools,'div');
         const sync=add(toolBody,'button',same&&cs&&['paused','error','running'].includes(cs.status)?(cs.status==='running'?'FOLDER SYNC RUNNING':'RESUME CURRENT FOLDER'):'SYNC CURRENT FOLDER','s');sync.type='button';sync.dataset.pmAction='sync';sync.disabled=state.busy||!paired();sync.style.width='100%';sync.style.marginTop='8px';
         const conf=add(toolBody,'button','CONNECTION','s');conf.type='button';conf.dataset.pmAction='configure';conf.style.width='100%';conf.style.marginTop='8px';
+        const upd=add(toolBody,'button','CHECK FOR UPDATE','s');upd.type='button';upd.dataset.pmAction='update';upd.style.width='100%';upd.style.marginTop='8px';
         add(b,'div',state.msg,`m ${state.kind==='success'?'ok':state.kind==='error'?'err':''}`);
         add(b,'div','Read-only collector. SYNC MAIL indexes Outlook folders for Rebel Command. Messages you personally open are captured automatically; Postmaster never opens unread mail for you.','note');
     }
