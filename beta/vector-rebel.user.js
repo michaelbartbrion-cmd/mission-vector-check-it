@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.8
+// @version      3.2.9
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -25,12 +25,12 @@
     // uses the clean production identity after the September 2026 Tampermonkey reset.
     if (window.__vectorRebelInstance) {
         console.warn(
-            `Vector Rebel 3.2.8: another instance (${window.__vectorRebelInstance.version || 'unknown'}) is already active on this page.`
+            `Vector Rebel 3.2.9: another instance (${window.__vectorRebelInstance.version || 'unknown'}) is already active on this page.`
         );
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.8',
+        version: '3.2.9',
         startedAt: Date.now()
     };
 
@@ -38,7 +38,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.8';
+    const VERSION = '3.2.9';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -64,6 +64,15 @@
     const TAB_SESSION_KEY = 'vectorRebelTabSession_v1';
     const RUN_OWNER_STALE_MS = 45 * 1000;
     const RUN_OWNER_HEARTBEAT_MS = 10 * 1000;
+    const PORTABLE_STORAGE_SENTINEL = '__VECTOR_REBEL_PORTABLE_MISSING__';
+    const PORTABLE_SNAPSHOT_KEY = 'vectorRebelPortableSnapshot_v1';
+    const PORTABLE_BACKUP_KEYS = [
+        CONFIG_KEY, LEGACY_CONFIG_KEY, SIGNATURE_LIBRARY_KEY, SIGNATURE_CURSOR_KEY,
+        LAST_SUMMARY_KEY, LEGACY_LAST_SUMMARY_KEY, RUN_HISTORY_KEY, GEAR_SNAPSHOTS_KEY,
+        LAST_DIAGNOSTIC_KEY, STOPPED_RUN_KEY, MIGRATION_NOTICE_KEY, PANEL_MINIMIZED_KEY,
+        CAPTAIN_LAST_SET_KEY, CAPTAIN_DAILY_CHECK_KEY, CAPTAIN_DAILY_REPORT_KEY,
+        MASTER_ROSTER_OVERRIDE_KEY, MASTER_ROSTER_REVIEW_KEY
+    ];
 
     function getOrCreateTabId() {
         let id = '';
@@ -576,17 +585,87 @@
         }
     }
 
+    function refreshPortableSnapshot() {
+        try {
+            const items = {};
+            for (const key of PORTABLE_BACKUP_KEYS) {
+                const raw = GM_getValue(key, PORTABLE_STORAGE_SENTINEL);
+                if (raw !== PORTABLE_STORAGE_SENTINEL) items[key] = String(raw);
+            }
+            GM_setValue(PORTABLE_SNAPSHOT_KEY, {
+                schema: 'vector-rebel-portable-snapshot',
+                schemaVersion: 1,
+                helperVersion: VERSION,
+                savedAt: new Date().toISOString(),
+                items
+            });
+        } catch {}
+    }
+
+    function persistentGetRaw(key) {
+        try {
+            const gmValue = GM_getValue(key, PORTABLE_STORAGE_SENTINEL);
+            if (gmValue !== PORTABLE_STORAGE_SENTINEL) {
+                const raw = String(gmValue);
+                try {
+                    if (localStorage.getItem(key) !== raw) localStorage.setItem(key, raw);
+                } catch {}
+                return raw;
+            }
+        } catch {}
+        try {
+            const localValue = localStorage.getItem(key);
+            if (localValue !== null) {
+                try { GM_setValue(key, localValue); } catch {}
+                if (PORTABLE_BACKUP_KEYS.includes(key)) refreshPortableSnapshot();
+                return localValue;
+            }
+        } catch {}
+        return null;
+    }
+
+    function persistentSetRaw(key, value) {
+        const raw = String(value);
+        try { GM_setValue(key, raw); } catch {}
+        try { localStorage.setItem(key, raw); } catch {}
+        if (PORTABLE_BACKUP_KEYS.includes(key)) refreshPortableSnapshot();
+    }
+
+    function persistentRemoveRaw(key) {
+        try { GM_deleteValue(key); } catch {}
+        try { localStorage.removeItem(key); } catch {}
+        if (PORTABLE_BACKUP_KEYS.includes(key)) refreshPortableSnapshot();
+    }
+
+    function migrateCurrentOriginIntoPortableStorage() {
+        for (const key of PORTABLE_BACKUP_KEYS) {
+            try {
+                const gmValue = GM_getValue(key, PORTABLE_STORAGE_SENTINEL);
+                if (gmValue !== PORTABLE_STORAGE_SENTINEL) {
+                    const raw = String(gmValue);
+                    if (localStorage.getItem(key) !== raw) localStorage.setItem(key, raw);
+                    continue;
+                }
+                const localValue = localStorage.getItem(key);
+                if (localValue !== null) GM_setValue(key, localValue);
+            } catch {}
+        }
+        refreshPortableSnapshot();
+    }
+
     function loadJSON(key, fallback) {
         try {
-            return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
+            return JSON.parse(persistentGetRaw(key) || JSON.stringify(fallback));
         } catch {
             return fallback;
         }
     }
 
     function saveJSON(key, value) {
-        localStorage.setItem(key, JSON.stringify(value));
+        persistentSetRaw(key, JSON.stringify(value));
     }
+
+    migrateCurrentOriginIntoPortableStorage();
 
     // ============================================================
     // ============================================================
@@ -938,7 +1017,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             GEAR_SNAPSHOTS_KEY
         ];
         const before = Object.fromEntries(
-            affectedKeys.map(storageKey => [storageKey, localStorage.getItem(storageKey)])
+            affectedKeys.map(storageKey => [storageKey, persistentGetRaw(storageKey)])
         );
 
         try {
@@ -949,8 +1028,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         } catch (error) {
             for (const storageKey of affectedKeys) {
                 const prior = before[storageKey];
-                if (prior === null) localStorage.removeItem(storageKey);
-                else localStorage.setItem(storageKey, prior);
+                if (prior === null) persistentRemoveRaw(storageKey);
+                else persistentSetRaw(storageKey, prior);
             }
             configCache = null;
             throw new Error(`PPE mapping correction was rolled back: ${error.message}`);
@@ -1209,8 +1288,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     function clearLocalMasterRoster() {
-        localStorage.removeItem(MASTER_ROSTER_OVERRIDE_KEY);
-        localStorage.removeItem(MASTER_ROSTER_REVIEW_KEY);
+        persistentRemoveRaw(MASTER_ROSTER_OVERRIDE_KEY);
+        persistentRemoveRaw(MASTER_ROSTER_REVIEW_KEY);
     }
 
     function rosterPersonByPrefix(prefix) {
@@ -1576,7 +1655,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     function releaseRunOwnership() {
         const owner = getRunOwner();
         if (owner?.tabId === TAB_ID) {
-            localStorage.removeItem(RUN_OWNER_KEY);
+            persistentRemoveRaw(RUN_OWNER_KEY);
         }
     }
 
@@ -1598,7 +1677,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     function clearRun() {
-        localStorage.removeItem(RUN_KEY);
+        persistentRemoveRaw(RUN_KEY);
         releaseRunOwnership();
         refreshPanelInfo();
     }
@@ -2029,6 +2108,74 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
 
         return { peopleDirectory: people, departmentProfile: profile, legacyImport: false };
+    }
+
+    function buildPortableBackupPayload() {
+        const items = {};
+        for (const key of PORTABLE_BACKUP_KEYS) {
+            const raw = persistentGetRaw(key);
+            if (raw !== null) items[key] = raw;
+        }
+        return {
+            schema: 'vector-rebel-portable-backup',
+            schemaVersion: 1,
+            helperVersion: VERSION,
+            exportedAt: new Date().toISOString(),
+            note: 'Personal Vector Rebel backup. May contain names, signatures, PPE preferences, Captain Sets, roster data, local rules, and local history. Keep private.',
+            items
+        };
+    }
+
+    function exportPortableBackup() {
+        const payload = buildPortableBackupPayload();
+        downloadTextFile(
+            `vector-rebel-full-backup-${new Date().toISOString().slice(0, 10)}.json`,
+            JSON.stringify(payload, null, 2)
+        );
+        setStatus('Portable Vector Rebel backup exported. Keep this file private.');
+    }
+
+    function validatePortableBackupPayload(payload) {
+        if (!payload || payload.schema !== 'vector-rebel-portable-backup' || Number(payload.schemaVersion) !== 1) {
+            throw new Error('This is not a supported Vector Rebel full backup file.');
+        }
+        if (!payload.items || typeof payload.items !== 'object' || Array.isArray(payload.items)) {
+            throw new Error('Backup items are missing or invalid.');
+        }
+        const allowed = new Set(PORTABLE_BACKUP_KEYS);
+        const items = {};
+        for (const [key, value] of Object.entries(payload.items)) {
+            if (!allowed.has(key)) continue;
+            if (typeof value !== 'string') throw new Error(`Backup value for ${key} is invalid.`);
+            items[key] = value;
+        }
+        if (!Object.keys(items).length) throw new Error('Backup contains no restorable Vector Rebel settings.');
+        return { ...payload, items };
+    }
+
+    function readPortableBackupFile(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = () => reject(new Error('Could not read the Vector Rebel backup file.'));
+            reader.onload = () => {
+                try {
+                    resolve(validatePortableBackupPayload(JSON.parse(String(reader.result || ''))));
+                } catch (error) {
+                    reject(error);
+                }
+            };
+            reader.readAsText(file);
+        });
+    }
+
+    function restorePortableBackup(payload) {
+        const validated = validatePortableBackupPayload(payload);
+        for (const key of PORTABLE_BACKUP_KEYS) persistentRemoveRaw(key);
+        for (const [key, value] of Object.entries(validated.items)) persistentSetRaw(key, value);
+        configCache = null;
+        refreshPortableSnapshot();
+        setStatus('Portable Vector Rebel backup restored. Reloading...');
+        setTimeout(() => location.reload(), 700);
     }
 
     function exportDepartmentProfile() {
@@ -2629,7 +2776,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
             const clear = makeButton('CLEAR DIAGNOSTIC', { background: '#fff0f0', color: '#8b1e1e' });
             clear.onclick = () => {
-                localStorage.removeItem(LAST_DIAGNOSTIC_KEY);
+                persistentRemoveRaw(LAST_DIAGNOSTIC_KEY);
                 overlay.remove();
                 setStatus('Diagnostic cleared.');
             };
@@ -2662,7 +2809,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 createdAt: new Date().toISOString(),
                 strokes: legacy
             }]);
-            localStorage.setItem(SIGNATURE_CURSOR_KEY, '0');
+            persistentSetRaw(SIGNATURE_CURSOR_KEY, '0');
         }
     }
 
@@ -2674,11 +2821,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function saveSignatureLibrary(library) {
         saveJSON(SIGNATURE_LIBRARY_KEY, library);
-        const cursor = Number(localStorage.getItem(SIGNATURE_CURSOR_KEY) || 0);
+        const cursor = Number(persistentGetRaw(SIGNATURE_CURSOR_KEY) || 0);
         if (!library.length) {
-            localStorage.setItem(SIGNATURE_CURSOR_KEY, '0');
+            persistentSetRaw(SIGNATURE_CURSOR_KEY, '0');
         } else if (cursor >= library.length) {
-            localStorage.setItem(SIGNATURE_CURSOR_KEY, '0');
+            persistentSetRaw(SIGNATURE_CURSOR_KEY, '0');
         }
         refreshPanelInfo();
     }
@@ -2689,7 +2836,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             throw new Error('No saved signature variants. Open Settings → Signatures and add at least one signature you personally drew.');
         }
 
-        let cursor = Number(localStorage.getItem(SIGNATURE_CURSOR_KEY) || 0);
+        let cursor = Number(persistentGetRaw(SIGNATURE_CURSOR_KEY) || 0);
         if (!Number.isFinite(cursor) || cursor < 0) cursor = 0;
         const index = cursor % library.length;
         return { variant: library[index], index, total: library.length };
@@ -2697,7 +2844,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function advanceSignatureCursor(index, total) {
         if (!Number.isInteger(total) || total <= 0) return;
-        localStorage.setItem(SIGNATURE_CURSOR_KEY, String((index + 1) % total));
+        persistentSetRaw(SIGNATURE_CURSOR_KEY, String((index + 1) % total));
     }
 
     function showSignatureManager() {
@@ -2722,7 +2869,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const renderList = () => {
             listWrap.innerHTML = '';
             const library = getSignatureLibrary();
-            const cursor = Number(localStorage.getItem(SIGNATURE_CURSOR_KEY) || 0);
+            const cursor = Number(persistentGetRaw(SIGNATURE_CURSOR_KEY) || 0);
 
             const header = document.createElement('div');
             header.style.cssText = 'font-weight:700;margin:8px 0;';
@@ -2861,7 +3008,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         const resetRotation = makeButton('Reset rotation to Signature 1');
         resetRotation.onclick = () => {
-            localStorage.setItem(SIGNATURE_CURSOR_KEY, '0');
+            persistentSetRaw(SIGNATURE_CURSOR_KEY, '0');
             renderList();
         };
 
@@ -4143,7 +4290,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     function clearCaptainDailyCheck() {
-        localStorage.removeItem(CAPTAIN_DAILY_CHECK_KEY);
+        persistentRemoveRaw(CAPTAIN_DAILY_CHECK_KEY);
     }
 
     async function cancelCaptainDailyCheckForRealInspection() {
@@ -4772,7 +4919,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             option.textContent = `${set.name} (${set.people.length})`;
             select.appendChild(option);
         });
-        const last = localStorage.getItem(CAPTAIN_LAST_SET_KEY) || '';
+        const last = persistentGetRaw(CAPTAIN_LAST_SET_KEY) || '';
         if (usableSets.some(set => set.id === last)) select.value = last;
         box.append(selectLabel, select);
 
@@ -4803,7 +4950,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 setStatus('Daily Captain Check needs a valid audit-through date.', false);
                 return;
             }
-            localStorage.setItem(CAPTAIN_LAST_SET_KEY, set.id);
+            persistentSetRaw(CAPTAIN_LAST_SET_KEY, set.id);
             overlay.remove();
             await startCaptainDailyCheck(set, auditAsOfDate);
         };
@@ -5598,7 +5745,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 }
             });
             const stopped = loadJSON(STOPPED_RUN_KEY, null);
-            if (stopped?.modeKey === run.modeKey) localStorage.removeItem(STOPPED_RUN_KEY);
+            if (stopped?.modeKey === run.modeKey) persistentRemoveRaw(STOPPED_RUN_KEY);
             clearRun();
 
             const archiveNote = archiveWarnings.length
@@ -6609,7 +6756,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             opt.textContent = `${set.name} (${set.people.length})`;
             select.appendChild(opt);
         });
-        const last = localStorage.getItem(CAPTAIN_LAST_SET_KEY) || '';
+        const last = persistentGetRaw(CAPTAIN_LAST_SET_KEY) || '';
         if (usableSets.some(s => s.id === last)) select.value = last;
         setLabel.appendChild(select);
         box.appendChild(setLabel);
@@ -6624,7 +6771,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         function renderPeople() {
             peopleHost.innerHTML = '';
             const set = currentSet();
-            localStorage.setItem(CAPTAIN_LAST_SET_KEY, set.id);
+            persistentSetRaw(CAPTAIN_LAST_SET_KEY, set.id);
 
             const bar = document.createElement('div');
             bar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin:12px 0 7px;';
@@ -6677,7 +6824,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 alert('Select at least one person whose PPE you inspected.');
                 return;
             }
-            localStorage.setItem(CAPTAIN_LAST_SET_KEY, set.id);
+            persistentSetRaw(CAPTAIN_LAST_SET_KEY, set.id);
             overlay.remove();
             try {
                 await buildPreview('captain', selected);
@@ -7517,7 +7664,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const localNote = document.createElement('div');
         localNote.style.cssText = 'font-size:12px;background:#f5f6f7;padding:9px;margin:8px 0;line-height:1.45;';
         localNote.innerHTML =
-            '<b>Personal/local data:</b> Inspector identity, signatures, My gear prefix, Tour coat comment, your saved Captain list, and local asset defaults stay on this browser. ' +
+            '<b>Personal/local data:</b> Inspector identity, signatures, My gear prefix, Tour coat comment, your saved Captain list, and local asset defaults stay with Vector Rebel in this browser profile and are mirrored outside the Vector website origin. ' +
             'Existing v2.2 personal failure defaults are migrated here automatically.';
         box.appendChild(localNote);
 
@@ -8080,6 +8227,37 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             updates.appendChild(privacyNote);
             content.appendChild(updates);
 
+            const backup = card(
+                'Backup & Recovery',
+                'Vector Rebel now keeps its primary settings in script-owned storage so a Vector hostname change does not strand them. Export a private backup for protection against browser/profile loss or moving to another computer.'
+            );
+            const backupInfo = document.createElement('div');
+            backupInfo.style.cssText = 'font-size:11px;line-height:1.45;margin:8px 0;color:#526b79;';
+            backupInfo.innerHTML = '<b>Included:</b> profile, roster, Captain Sets, signatures, PPE preferences/local rules, local history, and related Vector Rebel settings. <b>Keep the exported file private.</b>';
+            const exportBackup = makeButton('EXPORT FULL VECTOR REBEL BACKUP', { background: '#e8f3f7' });
+            exportBackup.onclick = exportPortableBackup;
+            const importBackup = makeButton('RESTORE FULL VECTOR REBEL BACKUP');
+            const importBackupFile = document.createElement('input');
+            importBackupFile.type = 'file';
+            importBackupFile.accept = '.json,application/json';
+            importBackupFile.style.display = 'none';
+            importBackupFile.onchange = async () => {
+                const file = importBackupFile.files?.[0];
+                if (!file) return;
+                try {
+                    const payload = await readPortableBackupFile(file);
+                    if (!confirm('Restore this Vector Rebel backup?\n\nThis replaces the current local Vector Rebel profile/settings on this browser. It does not change Vector itself.')) return;
+                    restorePortableBackup(payload);
+                } catch (error) {
+                    alert(error.message);
+                } finally {
+                    importBackupFile.value = '';
+                }
+            };
+            importBackup.onclick = () => importBackupFile.click();
+            backup.append(backupInfo, exportBackup, importBackup, importBackupFile);
+            content.appendChild(backup);
+
             const feedback = card('Feedback', 'Send a comment or problem report to the Vector Rebel maintainer.');
             const feedbackBox = document.createElement('textarea');
             feedbackBox.placeholder = 'Type feedback here...';
@@ -8577,7 +8755,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
 
     function isPanelMinimized() {
-        return localStorage.getItem(PANEL_MINIMIZED_KEY) === '1';
+        return persistentGetRaw(PANEL_MINIMIZED_KEY) === '1';
     }
 
     function rebelStarbirdSvg() {
@@ -8602,7 +8780,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const mini = panel.querySelector('[data-vector-ppe-panel-mini]');
         if (!full || !mini) return;
 
-        if (persist) localStorage.setItem(PANEL_MINIMIZED_KEY, minimized ? '1' : '0');
+        if (persist) persistentSetRaw(PANEL_MINIMIZED_KEY, minimized ? '1' : '0');
         full.style.display = minimized ? 'none' : 'block';
         mini.style.display = minimized ? 'flex' : 'none';
 
@@ -8818,7 +8996,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     const migrationNotice = loadJSON(MIGRATION_NOTICE_KEY, null);
     if (migrationNotice?.message) {
         setTimeout(() => alert(`Vector PPE Helper migration notice:\n\n${migrationNotice.message}`), 400);
-        localStorage.removeItem(MIGRATION_NOTICE_KEY);
+        persistentRemoveRaw(MIGRATION_NOTICE_KEY);
     }
 
     // Resume a read-only Daily Captain Check or a stored inspection run after page load/navigation.
