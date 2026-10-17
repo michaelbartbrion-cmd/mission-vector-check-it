@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.9
+// @version      3.2.10
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -13,6 +13,7 @@
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @grant        GM_xmlhttpRequest
+// @grant        GM_openInTab
 // @connect      base44.app
 // @run-at       document-idle
 // ==/UserScript==
@@ -38,7 +39,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.9';
+    const VERSION = '3.2.10';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -671,6 +672,18 @@
     // ============================================================
     // LOCAL PRODUCTION BUILD STATUS
     // ============================================================
+
+    const MANAGED_UPDATE_URL = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js';
+
+    function openManagedUpdate() {
+        try {
+            GM_openInTab(MANAGED_UPDATE_URL, { active: true, insert: true, setParent: true });
+            setStatus('Opened the managed Vector Rebel update page in Tampermonkey.');
+        } catch (error) {
+            window.open(MANAGED_UPDATE_URL, '_blank', 'noopener');
+            setStatus('Opened the managed Vector Rebel update page.');
+        }
+    }
 
     function updateStatusHtml() {
         const telemetry = rebelCommandPaired() ? 'usage telemetry connected' : (rebelCommandProfileName() ? 'usage telemetry enrolling' : 'set My Tour PPE profile name to enable usage telemetry');
@@ -8225,6 +8238,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             privacyNote.style.cssText = 'font-size:10px;line-height:1.4;color:#718896;margin-top:7px;';
             privacyNote.textContent = 'Vector Rebel may collect limited technical and usage information for support, reliability, and improvement.';
             updates.appendChild(privacyNote);
+            const updateNow = makeButton('CHECK FOR UPDATE', { background: '#176b8e', color: '#fff' });
+            updateNow.onclick = openManagedUpdate;
+            updates.appendChild(updateNow);
             content.appendChild(updates);
 
             const backup = card(
