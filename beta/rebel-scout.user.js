@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Scout
 // @namespace    mission-vector-check-it-rebel-scout
-// @version      1.1.43
+// @version      1.1.44
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-scout.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-scout.user.js
 // @description  Read-only CrewSense staffing and overtime collector for Mission Vector Check It.
@@ -22,7 +22,7 @@
 (function(){
 'use strict';
 if (window.top !== window.self || window.MVCI_REBEL_SCOUT_CORE) return;
-const VERSION='1.1.43';
+const VERSION='1.1.44';
 const ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const PAIR_KEY='rebelScoutPairingV1';
 const LEGACY_PAIR_KEYS=['vectorStaffingCollectorPairing_v1','vectorOvertimeCollectorPairing_v1'];
@@ -44,7 +44,7 @@ migrateLegacy();
 /* --- Staffing collector: consolidated from verified vector-staffing-bridge 0.29.0 --- */
 (function(){
 'use strict';
-const VERSION='1.1.43';
+const VERSION='1.1.44';
 const ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const PAIR_KEY='vectorStaffingCollectorPairing_v1';
 const STABLE_MS=900;
@@ -416,7 +416,7 @@ GM_deleteValue('rebelScoutActionInputV1');
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_SCOUT_ACTIONS)return;
-const VERSION='1.1.43';
+const VERSION='1.1.44';
 const core=window.MVCI_REBEL_SCOUT_CORE;
 const STATE_KEY='rebelScoutActionInputV1';
 const SYNC_KEY='rebelScoutSyncQueueV1';
@@ -772,7 +772,7 @@ window.MVCI_REBEL_SCOUT_ACTIONS=Object.freeze({
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_SCOUT)return;
-const VERSION='1.1.43';
+const VERSION='1.1.44';
 const core=window.MVCI_REBEL_SCOUT_CORE;
 const REBEL_SYMBOL_HTML="<img alt=\"\" aria-hidden=\"true\" draggable=\"false\" width=\"39\" height=\"39\" style=\"display:block;width:39px;height:39px;object-fit:contain;pointer-events:none;user-select:none\" src=\"data:image/png;base64,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\">";
 const ROOT_ID='mvci-rebel-scout';
@@ -807,12 +807,128 @@ function actualVisibleDate(){if(isListView()){const d=clean(window.MVCI_REBEL_SC
 async function waitForTargetDate(target,mode,timeout=120000){const started=Date.now();let stable=0,last='';while(Date.now()-started<timeout){const pathOk=mode==='staffing'?isListView():isRankingPage(),d=actualVisibleDate();last=d;if(pathOk&&d===target){stable++;if(stable>=3)return true}else stable=0;await wait(document.hidden?900:300)}throw new Error(`CrewSense did not finish rendering ${target}${last?` (still showed ${last})`:''}.`)}
 async function syncPlan(){const p=await core.request('?action=range-sync-plan');state.plan=p;return p}
 const REPORT_COLUMNS=['First Name','Last Name','Activity','Assignment','Project','Type','Subtype','Start Date','End Date','Length','Overtime','Shift'];
-function parseCsvText(text){const rows=[];let row=[],field='',quoted=false;const src=String(text||'').replace(/^\uFEFF/,'');for(let i=0;i<src.length;i++){const ch=src[i];if(quoted){if(ch==='"'){if(src[i+1]==='"'){field+='"';i++}else quoted=false}else field+=ch;continue}if(ch==='"'){quoted=true;continue}if(ch===','){row.push(field);field='';continue}if(ch==='\n'){row.push(field);rows.push(row);row=[];field='';continue}if(ch==='\r')continue;field+=ch}if(field.length||row.length){row.push(field);rows.push(row)}return rows}
-function reportStamp(value){const m=clean(value).match(/^(\d{1,2})\/(\d{1,2})\/(20\d{2})\s+(\d{1,2}):(\d{2})$/);if(!m)return null;const mm=String(Number(m[1])).padStart(2,'0'),dd=String(Number(m[2])).padStart(2,'0'),hh=String(Number(m[4])).padStart(2,'0'),mi=String(Number(m[5])).padStart(2,'0');return{date:`${m[3]}-${mm}-${dd}`,clock:`${hh}:${mi}`}}
-function reportPersonId(name){let h=2166136261;for(const ch of name.toLowerCase()){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return`report-${(h>>>0).toString(16)}`}
-function normalizeReportRow(rec){const first=clean(rec['First Name']),last=clean(rec['Last Name']),personName=clean(`${first} ${last}`),start=reportStamp(rec['Start Date']),end=reportStamp(rec['End Date']);if(!personName||!start||!end)throw new Error(`Invalid report row for ${personName||'unknown person'}: expected MM/DD/YYYY HH:MM start/end values.`);const length=Number(rec['Length']);if(!Number.isFinite(length)||length<0||length>48)throw new Error(`Invalid Length for ${personName} on ${rec['Start Date']}.`);const assignment=clean(rec['Assignment']),activity=clean(rec['Activity']),type=clean(rec['Type']),subtype=clean(rec['Subtype']),project=clean(rec['Project']),overtime=clean(rec['Overtime']),shift=clean(rec['Shift']);const rawText=[activity,assignment,project,type,subtype,`${start.clock} - ${end.clock}`,`${length} hrs`,overtime].filter(Boolean).join(' | ');return{workDate:start.date,shiftLabel:shift,row:{personName,personId:reportPersonId(personName),activity,assignment,assignmentGroup:assignment,dutyCode:subtype,scheduleType:type,lengthHours:length,captureQuality:'row+group',locked:false,rawText}}}
-async function importStaffingReport(file){if(!core.paired())throw new Error('Pair Rebel Scout before importing a report.');if(queue().active)throw new Error('Scout sync is still running. Let it finish or stop it before importing the report.');state.busy=true;state.open=true;render();try{saveStatus(`Reading staffing report ${file.name}...`,'info');const text=await file.text();const parsed=parseCsvText(text);if(parsed.length<2)throw new Error('The CSV is empty.');const header=parsed.shift().map(x=>clean(x));if(header.length!==REPORT_COLUMNS.length||header.some((x,i)=>x!==REPORT_COLUMNS[i]))throw new Error(`Unexpected report columns. Expected exactly: ${REPORT_COLUMNS.join(', ')}.`);const byDate=new Map(),people=new Set();let dataRows=0;for(let i=0;i<parsed.length;i++){const values=parsed[i];if(values.length===1&&!clean(values[0]))continue;if(values.length!==REPORT_COLUMNS.length)throw new Error(`CSV row ${i+2} has ${values.length} columns; expected ${REPORT_COLUMNS.length}.`);const rec={};REPORT_COLUMNS.forEach((h,j)=>rec[h]=values[j]??'');const item=normalizeReportRow(rec);if(!byDate.has(item.workDate))byDate.set(item.workDate,{workDate:item.workDate,shiftLabel:item.shiftLabel,rows:[]});const day=byDate.get(item.workDate);if(!day.shiftLabel&&item.shiftLabel)day.shiftLabel=item.shiftLabel;day.rows.push(item.row);people.add(item.row.personName.toLowerCase());dataRows++}const dates=[...byDate.keys()].sort();if(!dates.length)throw new Error('No valid staffing dates were found in the CSV.');if(dataRows>50000)throw new Error(`Report has ${dataRows} rows; safety ceiling is 50,000.`);const capturedAt=new Date().toISOString(),importId=`report-${Date.now().toString(36)}-${dataRows}`,chunkDays=45;let sentRows=0,chunks=0;for(let i=0;i<dates.length;i+=chunkDays){const dateChunk=dates.slice(i,i+chunkDays),days=dateChunk.map(d=>byDate.get(d)),rowCount=days.reduce((n,d)=>n+d.rows.length,0),groups=new Set(days.flatMap(d=>d.rows.map(r=>clean(r.assignmentGroup)).filter(Boolean))).size,batchId=`${importId}:${dateChunk[0]}:${dateChunk[dateChunk.length-1]}`;saveStatus(`Importing staffing report: ${Math.min(i+dateChunk.length,dates.length)}/${dates.length} dates · ${sentRows}/${dataRows} rows sent...`,'info');const payload={batchId,capturedAt,sourceVersion:`vector-bridge-${VERSION}`,pageMode:'staffing-report-csv',reportValidated:true,captureComplete:true,diagnostics:{reportSchemaValid:true,reportColumns:REPORT_COLUMNS.length,visibleScheduleRows:rowCount,groupCount:groups,dateConfidence:'high',sourceFileName:file.name,sourceRowCount:dataRows,sourceDateCount:dates.length},days};const res=await core.post({version:`vector-bridge-${VERSION}`,staffingCapture:payload});if(!res?.staffing?.accepted)throw new Error(`Rebel Command rejected report chunk ${dateChunk[0]} to ${dateChunk[dateChunk.length-1]}: ${res?.staffing?.error||res?.staffing?.reason||'unknown reason'}.`);if(res.staffing.quality!=='good')throw new Error(`Report chunk ${dateChunk[0]} to ${dateChunk[dateChunk.length-1]} was stored as ${res.staffing.quality||'unknown'} instead of trusted baseline.`);sentRows+=rowCount;chunks++}const plan=await syncPlan(),remain=Number(plan?.summary?.total)||0;saveStatus(`Staffing report imported: ${dataRows} rows · ${people.size} people · ${dates.length} dates · ${chunks} chunks. Rebel Command now requests ${remain} targeted direct check${remain===1?'':'s'}.`,'success');return{rows:dataRows,people:people.size,dates:dates.length,chunks,remainingChecks:remain}}finally{state.busy=false;render()}}
-function chooseStaffingReport(){if(state.busy)return;const input=document.createElement('input');input.type='file';input.accept='.csv,text/csv';input.style.display='none';input.onchange=async()=>{const file=input.files?.[0];input.remove();if(!file)return;try{await importStaffingReport(file)}catch(e){saveStatus(`Report import stopped: ${clean(e?.message||e)}`,'error')}};document.documentElement.appendChild(input);input.click()}
+function parseCsvText(text){
+  const rows=[];let row=[],field='',quoted=false;
+  const src=String(text||'').replace(/^\uFEFF/,'');
+  for(let i=0;i<src.length;i++){
+    const ch=src[i];
+    if(quoted){if(ch==='"'){if(src[i+1]==='"'){field+='"';i++}else quoted=false}else field+=ch;continue}
+    if(ch==='"'){quoted=true;continue}
+    if(ch===','){row.push(field);field='';continue}
+    if(ch==='\n'){row.push(field);rows.push(row);row=[];field='';continue}
+    if(ch==='\r')continue;
+    field+=ch;
+  }
+  if(quoted)throw new Error('The CSV contains an unfinished quoted field.');
+  if(field.length||row.length){row.push(field);rows.push(row)}
+  return rows;
+}
+function reportStamp(value){
+  const m=clean(value).match(/^(\d{1,2})\/(\d{1,2})\/(20\d{2})\s+(\d{1,2}):(\d{2})$/);
+  if(!m)return null;
+  const mo=Number(m[1]),da=Number(m[2]),year=Number(m[3]),hour=Number(m[4]),minute=Number(m[5]);
+  const ms=Date.UTC(year,mo-1,da,hour,minute),check=new Date(ms);
+  if(check.getUTCFullYear()!==year||check.getUTCMonth()!==mo-1||check.getUTCDate()!==da||check.getUTCHours()!==hour||check.getUTCMinutes()!==minute)return null;
+  return {date:String(year)+'-'+String(mo).padStart(2,'0')+'-'+String(da).padStart(2,'0'),
+    clock:String(hour).padStart(2,'0')+':'+String(minute).padStart(2,'0'),ms};
+}
+function reportPersonId(name){
+  let h=2166136261;for(const ch of name.toLowerCase()){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}
+  return'report-'+(h>>>0).toString(16);
+}
+function normalizeReportRow(rec){
+  const first=clean(rec['First Name']),last=clean(rec['Last Name']),personName=clean(first+' '+last);
+  const start=reportStamp(rec['Start Date']),end=reportStamp(rec['End Date']);
+  if(!personName||!start||!end||end.ms<=start.ms)throw new Error('Invalid start/end for '+(personName||'unknown person')+': '+rec['Start Date']+' to '+rec['End Date']);
+  const length=Number(rec['Length']);
+  if(!Number.isFinite(length)||length<0||length>48)throw new Error('Invalid Length for '+personName+' on '+rec['Start Date']);
+  const assignment=clean(rec['Assignment']),activity=clean(rec['Activity']),type=clean(rec['Type']),subtype=clean(rec['Subtype']);
+  const project=clean(rec['Project']),overtime=clean(rec['Overtime']),shift=clean(rec['Shift']);
+  if(!activity)throw new Error('Missing Activity for '+personName+' on '+start.date);
+  const rawText=[activity,assignment,project,type,subtype,start.clock+' - '+end.clock,length+' hrs',overtime].filter(Boolean).join(' | ');
+  return {workDate:start.date,shiftLabel:shift,row:{
+    personName,personId:reportPersonId(personName),activity,assignment,assignmentGroup:assignment,
+    dutyCode:subtype,scheduleType:type,lengthHours:length,shiftLabel:shift,
+    captureQuality:'row-only',locked:false,rawText
+  }};
+}
+function nextReportDate(date){
+  const ms=Date.parse(date+'T12:00:00Z')+86400000;
+  return new Date(ms).toISOString().slice(0,10);
+}
+async function reportDigest(text){
+  if(!crypto?.subtle?.digest)throw new Error('Browser SHA-256 is unavailable. No report import was started.');
+  const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));
+  return [...new Uint8Array(hash)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function importStaffingReport(file){
+  if(!core.paired())throw new Error('Pair Rebel Scout before importing a report.');
+  if(queue().active)throw new Error('Scout sync is running. Finish or stop it before importing the report.');
+  state.busy=true;state.open=true;render();
+  try{
+    saveStatus('Reading staffing report '+file.name+'...','info');
+    const text=await file.text(),parsed=parseCsvText(text);
+    if(parsed.length<2)throw new Error('The staffing report CSV is empty.');
+    const header=parsed.shift().map(clean);
+    if(header.length!==REPORT_COLUMNS.length||header.some((x,i)=>x!==REPORT_COLUMNS[i]))
+      throw new Error('Unexpected CSV columns. Required: '+REPORT_COLUMNS.join(', '));
+    const byDate=new Map(),people=new Set();let dataRows=0;
+    for(let i=0;i<parsed.length;i++){
+      const values=parsed[i];
+      if(values.length===1&&!clean(values[0]))continue;
+      if(values.length!==REPORT_COLUMNS.length)throw new Error('CSV row '+(i+2)+' has '+values.length+' columns, expected 12.');
+      const rec={};REPORT_COLUMNS.forEach((h,j)=>rec[h]=values[j]??'');
+      const item=normalizeReportRow(rec);
+      if(!byDate.has(item.workDate))byDate.set(item.workDate,{workDate:item.workDate,shiftLabel:item.shiftLabel,rows:[]});
+      const day=byDate.get(item.workDate);
+      if(!day.shiftLabel&&item.shiftLabel)day.shiftLabel=item.shiftLabel;
+      day.rows.push(item.row);people.add(item.row.personName.toLowerCase());dataRows++;
+    }
+    if(dataRows>50000)throw new Error('The report exceeds the 50,000-row safety ceiling.');
+    const dates=[...byDate.keys()].sort();
+    if(!dates.length)throw new Error('No valid staffing dates found.');
+    const chunks=[];let pending=[],pendingRows=0,previous='';
+    for(const date of dates){
+      const day=byDate.get(date),count=day.rows.length;
+      if(count>1600)throw new Error('A single day exceeds the 1,600-row import limit: '+date);
+      if(pending.length&&(pending.length>=35||pendingRows+count>1600||nextReportDate(previous)!==date)){
+        chunks.push(pending);pending=[];pendingRows=0;
+      }
+      pending.push(day);pendingRows+=count;previous=date;
+    }
+    if(pending.length)chunks.push(pending);
+    if(chunks.length>500)throw new Error('Too many report chunks.');
+    const digest=await reportDigest(text),reportId='report:'+digest,capturedAt=new Date().toISOString();
+    let sentRows=0,writtenRows=0,existingRows=0;
+    for(let i=0;i<chunks.length;i++){
+      const days=chunks[i],expectedRows=days.reduce((n,d)=>n+d.rows.length,0);
+      saveStatus('Report import '+(i+1)+'/'+chunks.length+' chunks; '+sentRows+'/'+dataRows+' rows accepted...','info');
+      const res=await core.post({version:'vector-bridge-'+VERSION,staffingReportChunk:{
+        reportId,chunkIndex:i,totalChunks:chunks.length,expectedRows,capturedAt,
+        sourceVersion:'vector-bridge-'+VERSION,days
+      }});
+      const accepted=res?.staffingReport;
+      if(accepted?.accepted!==true||accepted?.quality!=='good'||accepted?.evidence!=='report_baseline'||accepted?.directlyVerified!==false){
+        throw new Error('Rebel Command rejected report chunk '+(i+1)+': '+clean(accepted?.error||accepted?.reason||'invalid acknowledgment'));
+      }
+      sentRows+=Number(accepted.rows||0);
+      if(accepted.duplicate)existingRows+=Number(accepted.rows||0);
+      else writtenRows+=Number(accepted.written||0);
+    }
+    if(sentRows!==dataRows)throw new Error('Report upload did not acknowledge every row.');
+    const plan=await syncPlan(),remain=Number(plan?.summary?.total)||0;
+    saveStatus('Report baseline imported: '+dataRows+' rows / '+people.size+' people / '+dates.length+' dates / '+chunks.length+' chunks ('+writtenRows+' new, '+existingRows+' already accepted). '+remain+' targeted ListView checks remain. Report alone does not verify staffing or OT ranking.','success');
+    return {rows:dataRows,people:people.size,dates:dates.length,chunks:chunks.length,writtenRows,existingRows,remainingChecks:remain};
+  }finally{state.busy=false;render()}
+}
+function chooseStaffingReport(){
+  if(state.busy)return;
+  const input=document.createElement('input');input.type='file';input.accept='.csv,text/csv';input.style.display='none';
+  input.onchange=async()=>{const file=input.files?.[0];input.remove();if(!file)return;
+    try{await importStaffingReport(file)}catch(e){saveStatus('Report import stopped: '+clean(e?.message||e),'error')}
+  };
+  document.documentElement.appendChild(input);input.click();
+}
 function mergeNewNeeded(q,plan){const hardSafety=Math.max(1,Number(q.hardSafetyMax)||250),budget=Number(q.schemaVersion)>=3?Math.max(1,Math.min(hardSafety,Number(q.sessionBudget)||18)):hardSafety,done=new Set(q.successKeys||[]),failed=new Set((q.finalFailures||[]).map(x=>x.key)),existing=new Set((q.items||[]).slice(q.index||0).map(itemKey)),session=new Set(q.sessionKeys||[]);for(const k of done)session.add(k);for(const k of failed)session.add(k);for(const k of existing)session.add(k);let added=0;for(const raw of(plan?.worklist||[])){if(session.size>=budget)break;const type=raw.type==='staffing'?'staffing':raw.type==='overtime'?'overtime':raw.type==='ranking'?'overtime':raw.type;const item={...raw,type};if(!['staffing','overtime'].includes(item.type)||!/^(20\d{2})-\d{2}-\d{2}$/.test(clean(item.workDate)))continue;const k=itemKey(item);if(done.has(k)||failed.has(k)||existing.has(k)||session.has(k))continue;q.items.push(item);existing.add(k);session.add(k);added++}q.sessionKeys=[...session];q.totalAdded=session.size;return added}
 async function navigateFor(item,q){const date=item.workDate,key=itemKey(item);if(item.type==='staffing'){if(!isListView()){location.assign(listViewUrl(date));return false}if(actualVisibleDate()===date)return true;const h=targetHash(date);q.navReloads=q.navReloads||{};if(location.hash===h){try{await waitForTargetDate(date,'staffing',30000);if(q.navReloads)delete q.navReloads[key];saveQueue(q);return true}catch(e){q.navReloads[key]=(Number(q.navReloads[key])||0)+1;saveQueue(q);if(q.navReloads[key]>2)throw new Error(`CrewSense did not render ${date} after waiting on the already-correct ListView URL (${actualVisibleDate()||'no rendered date detected'}).`);location.reload();return false}}location.hash=h;await waitForTargetDate(date,'staffing');if(q.navReloads)delete q.navReloads[key];saveQueue(q);return true}
 if(!isRankingPage()||actualVisibleDate()!==date){const target=rankingUrl(date);q.navReloads=q.navReloads||{};if(location.href===target){try{await waitForTargetDate(date,'overtime',30000);if(q.navReloads)delete q.navReloads[key];saveQueue(q);return true}catch(e){q.navReloads[key]=(Number(q.navReloads[key])||0)+1;saveQueue(q);if(q.navReloads[key]>2)throw new Error(`OT Rankings did not render ${date} after waiting on the already-correct URL (${actualVisibleDate()||'no rendered date detected'}).`);location.reload();return false}}location.assign(target);return false}return true}
