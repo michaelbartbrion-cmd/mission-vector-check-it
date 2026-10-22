@@ -4809,6 +4809,19 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         if (!isAssetPageFor(item)) throw new Error(`${item.assetId}: wrong PPE asset page.`);
         if (!(await verifyExpectedAssetPage(item))) throw new Error(`${item.assetId}: asset identity could not be verified.`);
 
+        if (item.inspectionModeKey === 'scbaTour') {
+            const scbaMode = getMode('scbaTour');
+            if (!scbaMode || item.pool !== SCBA_FACE_MASK_POOL ||
+                item.template !== scbaMode.templates[item.pool]) {
+                throw new Error(item.assetId + ': SCBA pool/template mismatch; history not trusted.');
+            }
+            await revealAssetHistory(item, scbaMode.title, 600);
+            const tour = await readModeCompletionHistory(item, 'scbaTour');
+            return {
+                captain: { dates: [], latestDate: '', notApplicable: true },
+                tour
+            };
+        }
         await revealAssetHistory(item, captainMode.title, 600);
         const captain = await readModeCompletionHistory(item, 'captain');
         const tour = await readModeCompletionHistory(item, 'tour');
@@ -4830,9 +4843,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const captainDates = Array.isArray(result?.captain?.dates) ? result.captain.dates : [];
                 const tourHistoryDates = Array.isArray(result?.tour?.dates) ? result.tour.dates : [];
                 const readable = result?.status === 'ok';
+                const captainApplicable = item.inspectionModeKey !== 'scbaTour';
                 const monthlyChecks = monthKeys.map(month => {
+                    if (!captainApplicable) return { month, date: '', ok: true, applicable: false };
                     const date = captainDates.find(value => value.startsWith(`${month}-`) && value <= window.asOfDate) || '';
-                    return { month, date, ok: readable && !!date };
+                    return { month, date, ok: readable && !!date, applicable: true };
                 });
                 const tourChecks = tourWindows.map(tourWindow => {
                     const eligible = new Set(tourWindow.eligibleDates || []);
@@ -4852,6 +4867,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 return {
                     assetId: item.assetId,
                     type: item.type,
+                    inspectionModeKey: item.inspectionModeKey || 'captain',
                     status: result?.status || 'missing',
                     latestCaptainDate: result?.captain?.latestDate || '',
                     captainDates,
@@ -4868,7 +4884,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
             const discovery = (check.discovery || []).find(x => x.prefix === owner.prefix) || {};
             const allReadable = itemRows.length > 0 && itemRows.every(row => row.status === 'ok') && !(discovery.unknown || []).length && !discovery.error;
-            const monthlyRequirementCount = itemRows.length * monthKeys.length;
+            const monthlyRequirementCount = itemRows.reduce((sum, row) =>
+                sum + row.monthlyChecks.filter(check => check.applicable !== false).length, 0);
             const tourRequirementCount = itemRows.length * dueTourWindows.length;
             const monthlyPassedCount = itemRows.reduce((sum, row) => sum + row.monthlyChecks.filter(x => x.ok).length, 0);
             const tourPassedCount = itemRows.reduce((sum, row) => sum + row.tourChecks.filter(x => x.due && x.ok).length, 0);
@@ -4895,7 +4912,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
 
         return {
-            schemaVersion: 5,
+            schemaVersion: 6,
             reportId: check.checkId,
             generatedAt: new Date().toISOString(),
             setId: check.setId,
@@ -4911,8 +4928,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             setStatus('No Daily Captain Check report is stored yet.');
             return;
         }
-        if (Number(report.schemaVersion || 0) < 5) {
-            setStatus('The stored Daily Captain Check report uses the older layout/rules. Run it again for the grouped two-month Captain + tour grid.', false);
+        if (Number(report.schemaVersion || 0) < 6) {
+            setStatus('This stored Daily Captain report predates SCBA Tour compliance. Run the read-only audit again for the complete grid.', false);
             return;
         }
         const auditWindow = report.auditWindow || captainAuditWindow(report.generatedAt?.slice(0, 10));
@@ -4930,7 +4947,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         const months = Array.isArray(auditWindow.months) ? auditWindow.months.slice(0, 2) : [];
         const allItems = (report.owners || []).flatMap(owner => (owner.items || []).map(item => ({ owner, item })));
-        const missingMonthly = allItems.reduce((sum, row) => sum + (row.item.monthlyChecks || []).filter(check => !check.ok).length, 0);
+        const missingMonthly = allItems.reduce((sum, row) =>
+            sum + (row.item.monthlyChecks || [])
+                .filter(check => check.applicable !== false && !check.ok).length, 0);
         const missingTours = allItems.reduce((sum, row) => sum + (row.item.tourChecks || []).filter(check => check.due && !check.ok).length, 0);
         const unreadable = allItems.filter(row => row.item.status !== 'ok').length;
         const hasProblems = missingMonthly > 0 || missingTours > 0 || unreadable > 0;
@@ -4969,7 +4988,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     .map(check => [check.startDate, check])
             );
             const monthly = (item.monthlyChecks || []).find(check => check.month === month);
-            const capOk = item.status === 'ok' && !!(monthly && monthly.ok);
+            const capApplicable = monthly?.applicable !== false;
+            const capOk = capApplicable && item.status === 'ok' && !!(monthly && monthly.ok);
             td.style.cssText = 'padding:5px 7px;' + topBorder + 'vertical-align:middle;background:' + rowBackground +
                 ';min-width:' + (78 + monthTourColumns * 38) + 'px;';
 
@@ -4978,11 +4998,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
             const cap = document.createElement('div');
             cap.style.cssText = 'height:27px;display:flex;align-items:center;justify-content:center;border-radius:5px;border:1px solid ' +
-                (capOk ? '#78b684' : '#dc7f7f') + ';background:' + (capOk ? '#e5f5e8' : '#ffe3e3') +
-                ';color:' + (capOk ? '#176b32' : '#b42318') + ';font-size:11px;font-weight:800;white-space:nowrap;';
-            cap.textContent = capOk ? shortDate(monthly.date) : '✕';
-            cap.title = capOk
-                ? 'Captain monthly completed ' + monthly.date
+                (!capApplicable ? '#d8e1e6' : capOk ? '#78b684' : '#dc7f7f') + ';background:' +
+                (!capApplicable ? '#fafcfd' : capOk ? '#e5f5e8' : '#ffe3e3') +
+                ';color:' + (!capApplicable ? '#8c9da6' : capOk ? '#176b32' : '#b42318') +
+                ';font-size:11px;font-weight:800;white-space:nowrap;';
+            cap.textContent = !capApplicable ? '—' : capOk ? shortDate(monthly.date) : '✕';
+            cap.title = !capApplicable
+                ? 'Not applicable: SCBA Face Mask uses a Tour Checklist, not Captain Monthly'
+                : capOk ? 'Captain monthly completed ' + monthly.date
                 : 'Captain monthly missing for ' + month;
             grid.appendChild(cap);
 
@@ -5258,7 +5281,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             await startCaptainDailyCheck(set, auditAsOfDate);
         };
         const prior = getCaptainDailyReport();
-        if (Number(prior?.schemaVersion || 0) >= 5) {
+        if (Number(prior?.schemaVersion || 0) >= 6) {
             const view = makeButton('View Last Report');
             view.onclick = () => { overlay.remove(); showCaptainDailyReport(prior); };
             box.append(run, view);
@@ -5343,6 +5366,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         ownerName: owner.name,
                         ownerPrefix: owner.prefix
                     }));
+                    // The separately verified mask has Tour history only.
+                    for (const mask of found.supplemental || []) {
+                        if (mask.pool !== SCBA_FACE_MASK_POOL) continue;
+                        const template = getMode('scbaTour')?.templates?.[mask.pool];
+                        if (template !== SCBA_TOUR_TEMPLATE) {
+                            throw new Error(mask.assetId + ': SCBA Tour template is unverified.');
+                        }
+                        items.push({
+                            ...mask, template, inspectionModeKey: 'scbaTour',
+                            ownerName: owner.name, ownerPrefix: owner.prefix
+                        });
+                    }
                 } catch (error) {
                     discovery.push({ name: owner.name, prefix: owner.prefix, unknown: [], error: error.message });
                 }
