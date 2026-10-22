@@ -54,6 +54,50 @@ test('reads numeric PPE Name field and Responsible Party instead of Location', (
     const none = api.responsiblePartyPpeRow(makeRow('10237642','-','Daniel Guerra-Herrera'));
     assert.equal(none.ownerName,'');
 });
+test('accepts real department asset names containing periods, spaces and punctuation', () => {
+    const api = createHarness([]);
+    for (const label of [
+        'B.SMITH-10237612-FL',
+        'B.SMITH-15784262-BU',
+        'A. SMITH-0012',
+        'WATER-RESCUE / 123',
+        '0029381',
+        'M-1470-000000038'
+    ]) {
+        const row = api.responsiblePartyPpeRow(makeRow(label,'Maggie Smith'));
+        assert.equal(row.assetId,label.toUpperCase());
+        assert.equal(row.ownerName,'Maggie Smith');
+        assert.match(row.url,/\/app\/equipment\/PPE\/pool\//);
+    }
+});
+
+test('unusable PPE name is rejected with the precise item identity, not an invented asset ID', () => {
+    const api = createHarness([]);
+    assert.throws(
+        () => api.responsiblePartyPpeRow(makeRow('---','Maggie Smith')),
+        /PPE Name missing or unusable for item 300045:/
+    );
+    assert.throws(
+        () => api.responsiblePartyPpeRow(makeRow('','Maggie Smith')),
+        /PPE Name missing or unusable for item 300045:/
+    );
+});
+
+test('roster includes personnel with dotted asset IDs without stealing assignments', async () => {
+    const api = createHarness([
+        makeRow('B.SMITH-10237612-FL','Beth Smith'),
+        makeRow('B.SMITH-15784262-BU','Beth Smith'),
+        makeRow('ANDREW-4051221-FL','Andrew Jones')
+    ]);
+    const roster = await api.scanPpeRosterCandidates();
+    assert.deepEqual(roster.people.map(p=>p.name).sort(), ['Andrew Jones','Beth Smith']);
+    const inventory = await api.scanPpeOwnerInventory();
+    const gear = await api.discoverOwnerGear({name:'Beth Smith'},'captain',inventory);
+    assert.deepEqual(gear.items.map(x=>x.assetId).sort(),[
+        'B.SMITH-10237612-FL','B.SMITH-15784262-BU'
+    ]);
+});
+
 test('never turns M and WS0122 equipment series into the wrong person', async () => {
     const rows = [
         makeRow('M-1470-000000038','-','Christopher Hoogerwerf'),
