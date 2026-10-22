@@ -1376,7 +1376,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     function resolveCaptainSetPeople(set, config = getConfig()) {
         const seen = new Set();
         return (set?.memberPrefixes || [])
-            .map(prefix => rosterPersonByPrefix(prefix))
+            .map(prefix => {
+                const person = rosterPersonByPrefix(prefix);
+                if (!person) return null;
+                return {
+                    ...person,
+                    gearSearchPrefix: clean(
+                        set?.gearSearchPrefixes?.[person.prefix] ||
+                        set?.gearSearchPrefixes?.[prefix] ||
+                        person.gearSearchPrefix
+                    ).toUpperCase()
+                };
+            })
             .filter(person => {
                 if (!person || seen.has(person.prefix)) return false;
                 seen.add(person.prefix);
@@ -1437,6 +1448,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 id: clean(raw?.id) || `set-${Date.now()}-${out.length}-${Math.random().toString(36).slice(2, 8)}`,
                 name,
                 memberPrefixes: members,
+                gearSearchPrefixes: Object.fromEntries(
+                    Object.entries(raw?.gearSearchPrefixes || {})
+                        .map(([id,term]) => [clean(id).toUpperCase(), clean(term).toUpperCase()])
+                        .filter(([id,term]) => id && term && term.length <= 60 &&
+                            /^[A-Z0-9._-]+$/.test(term) && !term.startsWith('PERSON-'))
+                ),
                 orphanedPrefixes: members.filter(prefix => !validPrefixes.has(prefix))
             });
             seenNames.add(name.toLowerCase());
@@ -5119,9 +5136,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 throw new Error('Captain Set membership is incomplete or unresolved. Edit the Captain Set before auditing PPE.');
             }
             const owners = (set.people || [])
-                .map((person, index) => ({ name: person.name, prefix: person.prefix, setOrder: index }))
+                .map((person, index) => ({
+                    name: person.name,
+                    prefix: person.prefix,
+                    gearSearchPrefix: person.gearSearchPrefix,
+                    legacyPrefix: person.legacyPrefix,
+                    setOrder: index
+                }))
                 .sort((a, b) => {
-                    const rank = owner => owner.prefix === selfPrefix ? 0 : /\bbaldree\b/i.test(owner.name || '') ? 1 : 2;
+                    const rank = owner => masterNameKey(owner.name) === masterNameKey(config.inspectorName)
+                        ? 0 : /\bbaldree\b/i.test(owner.name || '') ? 1 : 2;
                     return rank(a) - rank(b) || a.setOrder - b.setOrder;
                 })
                 .map(({ setOrder, ...owner }) => owner);
@@ -6385,7 +6409,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const mode = getMode(modeKey);
         const config = getConfig();
         const owners = (Array.isArray(ownerInput) ? ownerInput : [ownerInput])
-            .map(normalizePerson)
+            .map(raw => {
+                const basic = normalizePerson(raw);
+                if (!basic) return null;
+                return {
+                    ...basic,
+                    gearSearchPrefix: clean(raw?.gearSearchPrefix).toUpperCase(),
+                    legacyPrefix: clean(raw?.legacyPrefix).toUpperCase(),
+                    role: clean(raw?.role)
+                };
+            })
             .filter(Boolean);
 
         if (!owners.length) throw new Error('Select at least one gear owner.');
@@ -6940,11 +6973,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         go.onclick = async () => {
             const set = currentSet();
             const selected = [...peopleHost.querySelectorAll('input[type="checkbox"][data-prefix]:checked')]
-                .map(cb => rosterPersonByPrefix(cb.dataset.prefix))
+                .map(cb => set.people.find(person => person.prefix === cb.dataset.prefix) || null)
                 .filter(Boolean)
                 .map(person => ({
                     name: person.name,
-                    prefix: person.prefix
+                    prefix: person.prefix,
+                    gearSearchPrefix: person.gearSearchPrefix,
+                    legacyPrefix: person.legacyPrefix
                 }));
             if (!selected.length) {
                 alert('Select at least one person whose PPE you inspected.');
@@ -7289,6 +7324,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 /^[A-Z0-9._-]+$/.test(term) &&
                 !term.startsWith('PERSON-');
         };
+        const override = clean(owner?.gearSearchPrefix).toUpperCase();
+        if (override) {
+            if (!valid(override)) throw new Error(owner.name + ': invalid configured PPE search prefix "' +
+                override + '". Edit Settings → Captain Sets.');
+            return { prefix: override, source: 'captain-set-override' };
+        }
         const inspectorPrefix = masterNameKey(config.inspectorName) === nameKey
             ? clean(config.selfPrefix).toUpperCase() : '';
         if (valid(inspectorPrefix)) return { prefix: inspectorPrefix, source: 'inspector-profile' };
@@ -8537,6 +8578,45 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
                 const selected = new Set((currentSet?.memberPrefixes || [])
                     .map(prefix => rosterPersonByPrefix(prefix)?.prefix || prefix));
+                const savedSearchPrefixes = new Map(
+                    Object.entries(currentSet?.gearSearchPrefixes || {})
+                        .map(([key, value]) => [clean(rosterPersonByPrefix(key)?.prefix || key).toUpperCase(), clean(value).toUpperCase()])
+                );
+                const prefixHost = document.createElement('div');
+                prefixHost.style.cssText =
+                    'margin:10px 0;padding:10px;background:#f5f9fc;border:1px solid #d5e3eb;border-radius:7px;';
+                editor.appendChild(prefixHost);
+
+                function drawPrefixEditors() {
+                    prefixHost.innerHTML = '';
+                    const title = document.createElement('div');
+                    title.style.cssText = 'font:700 12px Arial,sans-serif;margin-bottom:6px;';
+                    title.textContent = 'PPE asset search prefixes for selected crew (optional overrides)';
+                    const note = document.createElement('div');
+                    note.style.cssText = 'font:11px/1.4 Arial,sans-serif;color:#597184;margin-bottom:8px;';
+                    note.textContent = 'The helper searches equipment IDs by prefix and verifies actual ownership using Responsible Party. Leave blank to try the saved gear prefix or surname. For unusual IDs (e.g. B.SMITH), enter the actual searchable prefix.';
+                    prefixHost.append(title, note);
+                    for (const prefix of selected) {
+                        const person = rosterPersonByPrefix(prefix);
+                        if (!person) continue;
+                        const row = document.createElement('label');
+                        row.style.cssText = 'display:flex;align-items:center;gap:9px;margin:6px 0;font-size:11px;';
+                        const name = document.createElement('span');
+                        name.style.cssText = 'flex:1;';
+                        name.textContent = person.name;
+                        const input = document.createElement('input');
+                        input.type = 'text';
+                        input.value = savedSearchPrefixes.get(prefix) || '';
+                        input.placeholder = expectedSurnamePrefix(person.name) || 'PPE prefix';
+                        input.maxLength = 60;
+                        input.style.cssText =
+                            'width:160px;box-sizing:border-box;padding:6px;border:1px solid #beced8;border-radius:5px;';
+                        input.addEventListener('input', () =>
+                            savedSearchPrefixes.set(prefix, clean(input.value).toUpperCase()));
+                        row.append(name, input);
+                        prefixHost.appendChild(row);
+                    }
+                }
 
                 function drawPeople() {
                     const q = clean(searchWrap.input.value).toLowerCase();
@@ -8565,6 +8645,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             else selected.delete(person.prefix);
                             count.textContent =
                                 `${roster.length} people available · ${filtered.length} shown · ${selected.size} selected`;
+                            drawPrefixEditors();
                         };
 
                         const text = document.createElement('div');
@@ -8577,6 +8658,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
                 searchWrap.input.addEventListener('input', drawPeople);
                 drawPeople();
+                drawPrefixEditors();
 
                 const save = makeButton('Save Captain Set', { background: '#176b8e', color: '#fff' });
                 save.style.cssText += 'margin-top:9px;';
@@ -8615,12 +8697,25 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             });
                         }
                         latest.peopleDirectory = assertNoPrefixOverlap(snapshots);
+                        const gearSearchPrefixes = {};
+                        for (const prefix of selected) {
+                            const searchTerm = clean(savedSearchPrefixes.get(prefix)).toUpperCase();
+                            if (!searchTerm) continue;
+                            if (searchTerm.length < 2 || searchTerm.length > 60 ||
+                                !/^[A-Z0-9._-]+$/.test(searchTerm) ||
+                                searchTerm.startsWith('PERSON-')) {
+                                throw new Error('Invalid PPE search prefix for ' +
+                                    (rosterPersonByPrefix(prefix)?.name || prefix) + ': ' + searchTerm);
+                            }
+                            gearSearchPrefixes[prefix] = searchTerm;
+                        }
                         latest.captainSets = [
                             ...otherSets,
                             {
                                 id: editingSetId || `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                                 name,
                                 memberPrefixes: [...selected],
+                                gearSearchPrefixes,
                                 orphanedPrefixes: []
                             }
                         ];
