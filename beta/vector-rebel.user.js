@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.32
+// @version      3.2.33
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.32',
+        version: '3.2.33',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.32';
+    const VERSION = '3.2.33';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -6956,7 +6956,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     row.appendChild(head);
                     const instruction = document.createElement('div');
                     instruction.style.cssText = 'font-size:11px;color:#35596b;margin:6px 0 10px;';
-                    instruction.textContent = 'Physically inspect all seven SCBA components. Select PASS or FAIL for EACH; nothing is pre-passed. A failed mask must be handled using Vector’s original SCBA inspection, not automatically submitted.';
+                    instruction.textContent = 'PASS is the initial selection, just as with other PPE. Physically inspect all seven SCBA components and change any problem to FAIL before confirming. Failed masks must be handled using Vector’s original SCBA inspection.';
                     row.appendChild(instruction);
                     const scbaSelects = SCBA_TOUR_QUESTIONS.map((question, index) => {
                         const label = document.createElement('label');
@@ -6966,7 +6966,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         name.textContent = (index + 1) + '. ' + question;
                         const select = document.createElement('select');
                         select.style.cssText = 'min-width:100px;padding:6px;';
-                        select.innerHTML = '<option value="">SELECT</option><option value="pass">PASS</option><option value="fail">FAIL</option>';
+                        select.innerHTML = '<option value="pass">PASS</option><option value="fail">FAIL</option>';
+                        select.value = 'pass'; // Default selection only; inspector must still inspect and certify.
                         select.addEventListener('change', () => {
                             row.style.borderColor = scbaSelects.some(x => x.value === 'fail')
                                 ? '#b32c2c' : '#3c7b9a';
@@ -6975,27 +6976,6 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         row.appendChild(label);
                         return select;
                     });
-                    // Never assume SCBA is safe. The inspector can attest once
-                    // AFTER physically checking each listed component; this is an
-                    // explicit action rather than seven pre-populated PASS values.
-                    const inspectedAll = makeButton('I physically verified all 7 — mark PASS', {
-                        background:'#e8f4ec', color:'#175b2e'
-                    });
-                    inspectedAll.onclick = () => {
-                        if (scbaSelects.some(select => select.value === 'fail')) {
-                            alert(item.assetId + ': a failed SCBA check cannot be changed in bulk. Review and record the failure manually.');
-                            return;
-                        }
-                        const confirmed = confirm(
-                            item.assetId + ': Have you physically checked ALL SEVEN SCBA Face Mask items and confirmed each one PASSES? This action records your answers, not an automatic equipment assessment.'
-                        );
-                        if (!confirmed) return;
-                        for (const select of scbaSelects) {
-                            select.value = 'pass';
-                            select.dispatchEvent(new Event('change', {bubbles:true}));
-                        }
-                    };
-                    row.appendChild(inspectedAll);
                     box.appendChild(row);
                     rows.push({ item, include, scbaSelects });
                     return;

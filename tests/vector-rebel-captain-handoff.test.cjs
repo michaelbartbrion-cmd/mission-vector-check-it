@@ -74,13 +74,16 @@ test('Verified completion opens queued audit only after local archive and clearR
     assert.ok(i > 0 && j>i && k>j && l>k);
     assert.match(src,/if \(deferred\?\.runId === run\.runId\) persistentRemoveRaw\(CAPTAIN_DAILY_DEFERRED_KEY\)/);
 });
-test('SCBA answers are never pre-PASS; one-click PASS requires inspector attestation', () => {
-    assert.match(src, /select\.innerHTML = '<option value="">SELECT<\/option><option value="pass">PASS<\/option>/);
-    assert.match(src, /I physically verified all 7 — mark PASS/);
-    assert.match(src, /const confirmed = confirm\(/);
-    assert.match(src, /if \(!confirmed\) return;/);
-    assert.match(src, /if \(scbaSelects\.some\(select => select\.value === 'fail'\)\)/);
-    assert.match(src,/scbaAnswers\.some\(value => !value\)/);
+test('SCBA preview starts with PASS for each question; inspector can set FAIL and must certify', () => {
+    const preview = extract('async function buildPreview(modeKey, ownerInput) {',
+        'async function launchMyInspectionFromAnywhere(modeKey) {');
+    assert.match(preview, /select\.innerHTML = '<option value="pass">PASS<\/option><option value="fail">FAIL<\/option>'/);
+    assert.match(preview, /select\.value = 'pass'/);
+    assert.match(preview, /scbaSelects\.map\(select => select\.value\)/);
+    assert.match(preview, /scbaAnswers\.some\(value => value === 'fail'\)/);
+    assert.match(preview, /SCBA has one or more FAILED checks/);
+    assert.match(preview, /if \(!certBox\.checked\)/);
+    assert.doesNotMatch(preview, /I physically verified all 7 — mark PASS/);
 });
 test('A verified archived run cannot be resurrected by stale multi-tab localStorage', () => {
     const getRunSource = extract('function getRun() {','function getRunOwner() {');
