@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.19
+// @version      3.2.20
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -27,12 +27,12 @@
     // uses the clean production identity after the September 2026 Tampermonkey reset.
     if (window.__vectorRebelInstance) {
         console.warn(
-            `Vector Rebel ${window.__vectorRebelInstance.version || 'unknown'}: another instance (${window.__vectorRebelInstance.version || 'unknown'}) is already active on this page.`
+            `Vector Rebel: another instance (${window.__vectorRebelInstance.version || 'unknown'}) is already active on this page.`
         );
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.19',
+        version: '3.2.20',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.19';
+    const VERSION = '3.2.20';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
