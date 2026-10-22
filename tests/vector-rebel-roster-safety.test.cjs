@@ -27,7 +27,12 @@ function makeRow(assetId, responsibleParty, location = 'Flower Mound Fire Depart
         closest: q => q === 'table' ? table : null,
         querySelectorAll: () => cells
     };
-    return {row, getAttribute: () => '/app/equipment/PPE/pool/300045/' + assetId.length + assetId.charCodeAt(0) + '/item'};
+    // A stable Vector item URL exists independently of how a PPE name is formatted.
+    // Different names must not collide merely because they have equal lengths.
+    let id = 2166136261;
+    for (const ch of assetId) id = Math.imul(id ^ ch.charCodeAt(0), 16777619) >>> 0;
+    const itemId = String((id % 2000000000) + 1);
+    return {row, getAttribute: () => '/app/equipment/PPE/pool/300045/' + itemId + '/item'};
 }
 function createHarness(anchors) {
     const fn = new Function('clean','masterNameKey','ppeRowForAnchor','isOrganizationOrBadRosterName',
