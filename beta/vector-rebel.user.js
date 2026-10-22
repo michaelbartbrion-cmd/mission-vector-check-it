@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.12
+// @version      3.2.13
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.12';
+    const VERSION = '3.2.13';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -753,6 +753,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const prefix = clean(person?.prefix).toUpperCase();
         if (!name || !prefix) return null;
 
+        if (rosterHasPersonSpecificPrefix(person)) return null;
         const expected = expectedSurnamePrefix(name);
         const reasons = [];
 
@@ -793,10 +794,22 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // Legacy PPE gear discovery uses a surname-style unique equipment prefix.
     // Generic inventory series are NOT a person's identity and must not be
     // auto-linked to a firefighter without verified assignment evidence.
+    // Synthetic personnel identity, never an equipment serial prefix.
+    function ownerRosterKey(name) {
+        const key = masterNameKey(name);
+        if (!key) return '';
+        function h(seed) {
+            let n = seed >>> 0;
+            for (let i = 0; i < key.length; i++) {
+                n = Math.imul(n ^ key.charCodeAt(i), 16777619) >>> 0;
+            }
+            return n.toString(16).toUpperCase().padStart(8, '0');
+        }
+        return 'PERSON-' + h(2166136261) + h(0x9e3779b9);
+    }
     function rosterHasPersonSpecificPrefix(person) {
-        const expected = expectedSurnamePrefix(person?.name);
-        const actual = clean(person?.prefix).toUpperCase().replace(/[^A-Z0-9]/g, '');
-        return !!expected && !!actual && actual === expected && actual.length >= 2;
+        return !!clean(person?.name) &&
+            clean(person?.prefix).toUpperCase() === ownerRosterKey(person.name);
     }
 
     function rosterNeedsReview(people) {
@@ -2736,7 +2749,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const cells = row ? [...row.querySelectorAll(':scope > td, :scope > [role="cell"]')] : [];
                 const table = row?.closest('table');
                 const headers = table ? [...table.querySelectorAll('thead th')].map(h => clean(h.innerText || h.textContent || '').slice(0, 90)) : [];
-                const assetId = genericAssetIdFromAnchor(a);
+                const ni = headers.findIndex(h => h.toLowerCase() === 'name');
+                const assetId = ni >= 0 ? clean(cells[ni]?.innerText || cells[ni]?.textContent || '') : '';
                 return {
                     assetId,
                     columns: cells.map((cell, index) => ({
@@ -3407,23 +3421,30 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         );
     }
 
-    async function discoverOwnerGear(prefix, modeKey) {
-        const searchResult = await searchPrefix(prefix);
-        const items = searchResult.items || [];
+    async function discoverOwnerGear(owner, modeKey, inventory) {
+        if (!inventory || inventory.source !== 'Vector PPE Responsible Party column' ||
+            !Array.isArray(inventory.items)) {
+            throw new Error('Fresh PPE Responsible Party scan is required.');
+        }
+        const ownerKey = masterNameKey(owner?.name);
+        if (!ownerKey) throw new Error('Missing inspector-selected owner name.');
+        const items = inventory.items.filter(item => item.ownerName &&
+            masterNameKey(item.ownerName) === ownerKey &&
+            clean(item.status).toLowerCase() === 'in service');
         const mode = getMode(modeKey);
-
-        const unknown = items.filter(item => !mode?.templates?.[item.pool] || getPoolType(item.pool) === 'UNKNOWN');
-        const mapped = items
-            .filter(item => !unknown.some(u => u.pool === item.pool && u.itemId === item.itemId))
-            .map(item => ({
-                ...item,
-                template: mode.templates[item.pool]
-            }));
-
+        const unknown = items.filter(item =>
+            !mode?.templates?.[item.pool] || getPoolType(item.pool) === 'UNKNOWN');
+        const mapped = items.filter(item => !unknown.some(u =>
+            u.pool === item.pool && u.itemId === item.itemId
+        )).map(item => ({...item, template: mode.templates[item.pool]}));
         return {
-            items: mapped,
-            unknown,
-            searchMeta: searchResult
+            items: mapped, unknown,
+            searchMeta: {
+                source: inventory.source,
+                capturedAt: inventory.capturedAt,
+                pageCount: inventory.pageCount,
+                verifiedBy: 'Responsible Party'
+            }
         };
     }
 
@@ -5059,10 +5080,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 .map(({ setOrder, ...owner }) => owner);
             const items = [];
             const discovery = [];
+            const freshInventory = await scanPpeOwnerInventory(message => setStatus(message));
             for (const owner of owners) {
                 setStatus(`Daily Captain Check — finding current PPE for ${owner.name}…`);
                 try {
-                    const found = await discoverOwnerGear(owner.prefix, 'captain');
+                    const found = await discoverOwnerGear(owner, 'captain', freshInventory);
                     discovery.push({
                         name: owner.name,
                         prefix: owner.prefix,
@@ -6330,11 +6352,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         const groups = [];
         let fatalIssue = false;
+        setStatus('Verifying live Responsible Party ownership for the PPE inventory...');
+        const freshInventory = await scanPpeOwnerInventory(message => setStatus(message));
 
         for (const owner of owners) {
             setStatus(`Searching ${owner.name}'s assigned PPE...`);
             try {
-                const result = await discoverOwnerGear(owner.prefix, modeKey);
+                const result = await discoverOwnerGear(owner, modeKey, freshInventory);
                 const gear = result.items.map(item => ({
                     ...item,
                     ownerName: owner.name,
@@ -7017,6 +7041,100 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return repeated[0]?.text || '';
     }
 
+    // PPE preflight confirmed the authoritative "Responsible Party" header.
+    // Do not use Location, duplicate name cells, or asset prefix for ownership.
+    function responsiblePartyPpeRow(anchor) {
+        const row = ppeRowForAnchor(anchor);
+        const table = row?.closest('table');
+        const heads = table ? [...table.querySelectorAll('thead th')].map(h =>
+            clean(h.innerText || h.textContent || '').toLowerCase()) : [];
+        const cells = row ? [...row.querySelectorAll(':scope > td, :scope > [role="cell"]')] : [];
+        const nameIndex = heads.indexOf('name'), partyIndex = heads.indexOf('responsible party');
+        const statusIndex = heads.indexOf('item status');
+        if (!row || nameIndex < 0 || partyIndex < 0 || !cells[nameIndex] || !cells[partyIndex]) {
+            throw new Error('PPE Name and Responsible Party columns were not found or aligned. Scan stopped.');
+        }
+        const val = index => index >= 0 && cells[index]
+            ? clean(cells[index].innerText || cells[index].textContent || '') : '';
+        const assetId = val(nameIndex).toUpperCase();
+        if (!/^[A-Z0-9][A-Z0-9-]{0,119}$/.test(assetId)) {
+            throw new Error('PPE Name column does not contain a verifiable asset ID.');
+        }
+        const href = anchor.getAttribute('href') || '';
+        const ids = href.match(/\/app\/equipment\/PPE\/pool\/(\d+)\/(\d+)\/item/i);
+        if (!ids) throw new Error('PPE equipment row has no verifiable item URL.');
+        const party = val(partyIndex);
+        return {
+            assetId, pool: ids[1], itemId: ids[2],
+            url: new URL(href, location.origin).href,
+            ownerName: party && party !== '-' && !isOrganizationOrBadRosterName(party) ? party : '',
+            status: val(statusIndex),
+            type: getPoolType(ids[1])
+        };
+    }
+
+    async function scanPpeOwnerInventory(progress = null) {
+        await ensurePpeEquipmentPage(progress);
+        const search = getSearchInput();
+        if (!search) throw new Error('PPE search control unavailable.');
+        const original = search.value || '';
+        try {
+            if (clean(original)) {
+                nativeSetInput(search, '');
+                let prior = '', stable = 0;
+                const start = Date.now();
+                while (Date.now() - start < 10000) {
+                    await sleep(200);
+                    const sig = visibleAssetLinksSignature();
+                    stable = sig && sig === prior ? stable + 1 : 0;
+                    prior = sig;
+                    if (stable >= 4) break;
+                }
+                if (stable < 4) throw new Error('PPE results failed to settle after clearing search.');
+            }
+            await goToFirstPpePage(progress);
+            const items = new Map(), seenPages = new Set();
+            let pageCount = 0, rowCount = 0, unassignedCount = 0;
+            for (let guard = 0; guard < 1000; guard++) {
+                const sig = visibleAssetLinksSignature();
+                if (!sig || seenPages.has(sig)) {
+                    throw new Error('PPE pagination repeated or failed to load; inventory incomplete.');
+                }
+                seenPages.add(sig);
+                pageCount++;
+                const anchors = getVisiblePpeAnchors(getPpeResultsContainer() || document);
+                if (!anchors.length) throw new Error('PPE page contained no verifiable equipment links.');
+                for (const anchor of anchors) {
+                    const item = responsiblePartyPpeRow(anchor);
+                    rowCount++;
+                    if (!item.ownerName) unassignedCount++;
+                    const key = item.pool + ':' + item.itemId;
+                    const old = items.get(key);
+                    if (old && (old.assetId !== item.assetId ||
+                        masterNameKey(old.ownerName) !== masterNameKey(item.ownerName))) {
+                        throw new Error('PPE item ' + key + ' has conflicting ownership rows.');
+                    }
+                    items.set(key, item);
+                }
+                if (progress) progress('PPE page ' + pageCount + ' · ' +
+                    items.size + ' assets · ' + unassignedCount + ' unassigned');
+                const next = getPaginationControl('next');
+                if (!paginationControlEnabled(next)) return {
+                    items: [...items.values()],
+                    pageCount, rowCount, unassignedCount,
+                    source: 'Vector PPE Responsible Party column',
+                    capturedAt: new Date().toISOString()
+                };
+                if (guard === 999) throw new Error('PPE census exceeds 1000 pages, incomplete.');
+                next.click();
+                await waitForPpePageChange(sig);
+            }
+            throw new Error('PPE census ended without a verified last page.');
+        } finally {
+            if (clean(original) && search.isConnected) nativeSetInput(search, original);
+        }
+    }
+
     function getPaginationControl(kind) {
         const testIds = {
             first: ['first-page-button', 'pagination-first-button'],
@@ -7284,132 +7402,43 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     async function scanPpeRosterCandidates(progress = null) {
-        await ensurePpeEquipmentPage(progress);
-
-        const search = getSearchInput();
-        const root = getPpeResultsContainer();
-        if (!search || !root) {
-            throw new Error('Vector Rebel could not confirm the Equipment → PPE list. No scan was started.');
-        }
-
-        const originalSearch = search.value || '';
-        if (clean(originalSearch)) {
-            nativeSetInput(search, '');
-            const started = Date.now();
-            let prior = '';
-            let stable = 0;
-            while (Date.now() - started < 8000) {
-                await sleep(180);
-                const current = visibleAssetLinksSignature();
-                if (current === prior && current) stable += 1;
-                else {
-                    prior = current;
-                    stable = 0;
-                }
-                if (stable >= 4) break;
+        const inventory = await scanPpeOwnerInventory(progress);
+        const byName = new Map(), byId = new Map(), unverified = [];
+        for (const item of inventory.items) {
+            if (!item.ownerName) {
+                if (unverified.length < 60) unverified.push({
+                    assetId: item.assetId, reason: 'Responsible Party is blank or unassigned'
+                });
+                continue;
             }
-        }
-
-        if (progress) progress('Reading the complete PPE list…');
-        await goToFirstPpePage(progress);
-
-        const peopleByPrefix = new Map();
-        const seenPageSignatures = new Set();
-        let pageCount = 0;
-        let assetCount = 0;
-        const unverifiedByAsset = new Map();
-
-        for (let guard = 0; guard < 300; guard++) {
-            const signature = visibleAssetLinksSignature();
-            if (!signature) {
-                throw new Error('No PPE asset rows were visible while scanning.');
+            const nameKey = masterNameKey(item.ownerName);
+            const prefix = ownerRosterKey(item.ownerName);
+            if (byId.has(prefix) && byId.get(prefix) !== nameKey) {
+                throw new Error('Conflicting people have the same personnel key.');
             }
-            if (seenPageSignatures.has(signature)) {
-                throw new Error('Vector pagination repeated a page while scanning. Scan stopped instead of returning an incomplete list.');
-            }
-            seenPageSignatures.add(signature);
-
-            pageCount += 1;
-            const page = scanCurrentPpePagePeople();
-            assetCount += page.visibleAssetCount;
-            for (const item of page.unverified || []) unverifiedByAsset.set(item.assetId, item);
-
-            for (const person of page.people) {
-                const old = peopleByPrefix.get(person.prefix);
-                if (!old) {
-                    peopleByPrefix.set(person.prefix, {
-                        ...person,
-                        equipmentSamples: [...(person.equipmentSamples || [])]
-                    });
-                } else {
-                    old.assetCount += person.assetCount;
-                    old.nameVariants ||= [old.name];
-                    for (const variant of person.nameVariants || [person.name]) {
-                        if (!old.nameVariants.some(value => masterNameKey(value) === masterNameKey(variant))) {
-                            old.nameVariants.push(variant);
-                        }
-                    }
-                    if (person.name.length > old.name.length) old.name = person.name;
-                    for (const sample of person.equipmentSamples || []) {
-                        old.equipmentSamples ||= [];
-                        if (!old.equipmentSamples.some(x => x.assetId === sample.assetId) && old.equipmentSamples.length < 12) {
-                            old.equipmentSamples.push(sample);
-                        }
-                    }
-                }
-            }
-
-            if (progress) {
-                progress(`Scanning PPE page ${pageCount} · ${peopleByPrefix.size} people found · ${assetCount} gear items read`);
-            }
-
-            const next = getPaginationControl('next');
-            if (!paginationControlEnabled(next)) break;
-
-            const before = signature;
-            next.click();
-            await waitForPpePageChange(before);
-        }
-
-        // Restore the user's search text. We intentionally do not attempt to recreate
-        // the exact starting page because Vector may reset pagination when search changes.
-        if (clean(originalSearch)) {
-            nativeSetInput(search, originalSearch);
-        }
-
-        const config = getConfig();
-        const savedByPrefix = new Map((config.peopleDirectory || []).map(p => [p.prefix, p]));
-        const rawPeople = [...peopleByPrefix.values()]
-            .map(person => {
-                const saved = savedByPrefix.get(person.prefix);
-                return {
-                    ...person,
-                    name: clean(person.name || saved?.name || titleCasePrefix(person.prefix)),
-                };
+            byId.set(prefix, nameKey);
+            const existing = byName.get(nameKey);
+            if (existing) existing.assetCount++;
+            else byName.set(nameKey, {
+                name: item.ownerName, prefix, active: true, assetCount: 1
             });
-
-        const cleaned = normalizeMasterRoster(rawPeople);
-        const people = cleaned.people;
-
-        if (!people.length) {
-            throw new Error('The PPE list was scanned, but no assigned personnel names could be read from the gear rows.');
         }
-
+        const cleaned = normalizeMasterRoster([...byName.values()]);
+        if (!cleaned.people.length) throw new Error(
+            'Responsible Party supplied no people. Master roster was not changed.'
+        );
         return {
-            people,
-            pageCount,
-            visibleAssetCount: assetCount,
+            people: cleaned.people,
+            pageCount: inventory.pageCount,
+            visibleAssetCount: inventory.rowCount,
             rejected: cleaned.rejected,
             merged: cleaned.merged,
-            rawUniqueCandidates: rawPeople.length,
-            needsReview: rosterNeedsReview(rawPeople),
-            unverified: [...unverifiedByAsset.values()]
+            rawUniqueCandidates: byName.size,
+            needsReview: rosterNeedsReview(cleaned.people),
+            unverified,
+            unassignedCount: inventory.unassignedCount
         };
     }
-
-    // ============================================================
-    // SETTINGS / PEOPLE DIRECTORY / SAVED CAPTAIN LIST
-    // ============================================================
 
     function peopleDirectoryToText(people) {
         return (people || []).map(p => `${p.name}|${p.prefix}`).join('\n');
@@ -8367,7 +8396,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         function renderAdmin() {
             const rosterCard = card(
                 'Master Roster',
-                'Admin-only roster maintenance. Generic inventory-series asset prefixes are excluded from automatic personnel assignment. Run Live DOM Preflight on Equipment → PPE to verify owner columns before mapping unusual identifiers.'
+                'Master roster and inspection discovery use the explicit Responsible Party column, not inventory-number prefixes or Location. Inspections reread ownership live.'
             );
 
             const rosterStatus = document.createElement('div');
@@ -8508,7 +8537,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     `<b>People:</b> ${state.people.length}<br>` +
                     `<b>Source:</b> ${state.source === 'local-admin' ? 'Local admin-maintained roster' : 'Embedded with Vector Rebel'}<br>` +
                     `${state.updatedAt ? `<b>Updated:</b> ${escapeHtml(state.updatedAt)}<br>` : ''}` +
-                    `<span style="color:#6a7f8c">PPE prefixes are kept internally for gear matching.</span>`;
+                    `<span style="color:#6a7f8c">Personnel identity is independent from equipment numbers; PPE ownership is verified separately.</span>`;
                 renderNeedsReview();
             };
 
@@ -8558,7 +8587,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         `Missing from scan: ${missing.length}\n` +
                         `Prefix changes: ${prefixChanges.length}\n` +
                         `Needs prefix review: ${result.needsReview.length}\n` +
-                        `Unverified gear-to-person mappings excluded: ${result.unverified.length}\n\n` +
+                        `Unassigned PPE rows: ${result.unassignedCount}\n` +
+                        `Ownership verified using: Responsible Party\n\n` +
                         `Save this cleaned scan as your local master roster?`;
 
                     if (!confirm(summary)) {
@@ -8575,7 +8605,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     rosterProgress.textContent =
                         `Saved local master: ${saved.people.length} people. ` +
                         `${result.merged.length} duplicate value(s) merged; ${result.rejected.length} non-person value(s) rejected; ` +
-                        `${result.unverified.length} unverified gear assignment(s) excluded.`;
+                        `${result.unassignedCount} unassigned PPE rows excluded.`;
                     refreshRosterStatus();
                     renderTabs();
                 } catch (error) {
@@ -8634,11 +8664,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             edit.style.cssText += 'padding:6px 8px;font-size:11px;';
                             edit.onclick = () => {
                                 const name = prompt('Name', person.name);
-                                if (name === null) return;
-                                const prefix = prompt('PPE prefix', person.prefix);
-                                if (prefix === null) return;
+                                if (name === null || !clean(name)) return;
                                 person.name = clean(name);
-                                person.prefix = clean(prefix).toUpperCase();
+                                person.prefix = ownerRosterKey(name);
                                 draw();
                             };
 
@@ -8660,14 +8688,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const add = makeButton('Add Person');
                 add.onclick = () => {
                     const name = prompt('Name');
-                    if (name === null) return;
-                    const prefix = prompt('PPE prefix');
-                    if (prefix === null) return;
-                    working.push({
-                        name: clean(name),
-                        prefix: clean(prefix).toUpperCase(),
-                        active: true
-                    });
+                    if (name === null || !clean(name)) return;
+                    working.push({ name: clean(name), prefix: ownerRosterKey(name), active: true });
                     draw();
                 };
 
