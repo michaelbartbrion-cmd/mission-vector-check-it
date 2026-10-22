@@ -64,7 +64,7 @@ test('Daily Captain history audit is read-only and still reaches the item-histor
 test('Monthly and personal gear discovery remain independent and bounded',()=>{
  const preview=body('buildPreview');
  assert.match(preview,/modeKey === 'tour' \|\| modeKey === 'afterFire'/);
- assert.match(preview,/scanPpeOwnerSearch\(owners\[0\]/);
+ assert.match(preview,/scanPpeByResponsibleParty\(owners\[0\]\.name/);
  assert.match(preview,/scanPpeCrewOwners\(owners,/);
  assert.doesNotMatch(preview,/scanPpeOwnerInventory\(/);
 });
