@@ -3607,13 +3607,26 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             masterNameKey(item.ownerName) === ownerKey &&
             clean(item.status).toLowerCase() === 'in service');
         const mode = getMode(modeKey);
-        const unknown = items.filter(item =>
+        const unmatched = items.filter(item =>
             !mode?.templates?.[item.pool] || getPoolType(item.pool) === 'UNKNOWN');
-        const mapped = items.filter(item => !unknown.some(u =>
-            u.pool === item.pool && u.itemId === item.itemId
-        )).map(item => ({...item, template: mode.templates[item.pool]}));
+        // Responsible Party covers ALL assigned equipment. SCBA, water-rescue,
+        // and other distinct equipment pools have their own inspections and
+        // must not block a routine structural PPE mode, but a newly introduced
+        // structural PPE pool without a mapped template MUST block.
+        const structural = /\\b(?:bunker|structural|turnout|hood|helmet|glove|boot|coat|pant)\\b/i;
+        const supplemental = unmatched.filter(item => {
+            const type = clean(item.type);
+            return type && type.toUpperCase() !== 'UNKNOWN' && !structural.test(type);
+        });
+        const supplementalIds = new Set(supplemental.map(item =>
+            item.pool + ':' + item.itemId));
+        const unknown = unmatched.filter(item =>
+            !supplementalIds.has(item.pool + ':' + item.itemId));
+        const blocked = new Set(unmatched.map(item => item.pool + ':' + item.itemId));
+        const mapped = items.filter(item => !blocked.has(item.pool + ':' + item.itemId))
+            .map(item => ({...item, template: mode.templates[item.pool]}));
         return {
-            items: mapped, unknown,
+            items: mapped, unknown, supplemental,
             searchMeta: {
                 source: inventory.source,
                 capturedAt: inventory.capturedAt,
@@ -6546,7 +6559,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
         if (!mode) throw new Error(`Unknown inspection mode: ${modeKey}`);
         if (!config.initialized) {
-            throw new Error('First-time setup required. Open Settings, confirm the inspector name / gear prefix, and save before running inspections.');
+            throw new Error('First-time setup required. Open Settings → Profile, confirm the inspector name, and save before running inspections.');
         }
         if (!getSignatureLibrary().length) {
             throw new Error('No saved signature variants. Open Settings → Signatures first.');
@@ -6578,14 +6591,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     ownerPrefix: owner.prefix,
                     ownerRole: owner.role || ''
                 }));
-                const currentAll = [...gear, ...unknown];
-                const diff = compareGearSnapshot(owner.prefix, currentAll);
+                const supplemental = (result.supplemental || []).map(item => ({
+                    ...item, ownerName: owner.name
+                }));
+                const diff = compareGearSnapshot(owner.prefix, [...gear, ...unknown]);
 
-                if (unknown.length) fatalIssue = true;
+                if (unknown.length || !gear.length) fatalIssue = true;
                 groups.push({
                     owner,
                     gear,
                     unknown,
+                    supplemental,
                     diff,
                     searchMeta: result.searchMeta,
                     error: null
@@ -6596,6 +6612,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     owner,
                     gear: [],
                     unknown: [],
+                    supplemental: [],
                     diff: compareGearSnapshot(owner.prefix, []),
                     searchMeta: null,
                     error: error.message
@@ -6648,7 +6665,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
             const ownerHeader = document.createElement('div');
             ownerHeader.style.cssText = 'margin:14px 0 6px;padding:8px 10px;background:#eaf0f7;border-left:4px solid #173f70;font-weight:700;';
-            ownerHeader.textContent = `${owner.name} — ${owner.role || 'Personnel'} — ${owner.prefix} — ${totalFound} item(s) found`;
+            ownerHeader.textContent = `${owner.name} — ${owner.role || 'Personnel'} — ${totalFound} item(s) for this inspection mode` +
+                (group.supplemental?.length
+                    ? ` · ${group.supplemental.length} other assigned item(s)` : '');
             box.appendChild(ownerHeader);
 
             if (group.error) {
@@ -6681,6 +6700,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
             renderGearChangeNotice(box, owner, group.diff, totalFound);
 
+            if (group.supplemental?.length) {
+                const info = document.createElement('div');
+                info.style.cssText = 'background:#e9f4ff;border:1px solid #9bbfd8;padding:9px;margin:6px 0;border-radius:5px;font-size:12px;';
+                info.innerHTML =
+                    '<b>OTHER ASSIGNED EQUIPMENT — NOT PART OF THIS INSPECTION:</b><br>' +
+                    group.supplemental.map(x =>
+                        `${escapeHtml(x.assetId)} — ${escapeHtml(x.type)}`
+                    ).join('<br>') +
+                    '<br>These belong to this Responsible Party but require their own applicable check; no inspection is submitted for them here.';
+                box.appendChild(info);
+            }
             if (group.unknown.length) {
                 const unknown = document.createElement('div');
                 unknown.style.cssText = 'background:#ffe5e5;border:2px solid #b93636;padding:9px;margin:6px 0;border-radius:5px;';
@@ -8680,50 +8710,30 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         function renderProfile() {
             const config = getConfig();
-            const intro = card('My Profile', 'This identifies the inspector using this computer. Signatures stored here must belong only to this person.');
-            const name = field('Name', config.inspectorName, { placeholder: 'First Last' });
-            const prefix = field('My PPE asset prefix', config.selfPrefix, { placeholder: 'SMITH' });
-            const coat = field('Tour Bunker Coat assignment comment', config.tourCoatComment, { placeholder: 'Name / identifier written into the coat inspection' });
-            intro.append(name.wrap, prefix.wrap, coat.wrap);
-
-            const save = makeButton('Save Profile', { background: '#176b8e', color: '#fff' });
+            const intro = card('My Profile',
+                'Your name identifies the Responsible Party for all PPE. ' +
+                'Gear IDs and surname prefixes are not required. Saved signatures must belong to the inspector.');
+            const name = field('Inspector name / Responsible Party',
+                config.inspectorName, {placeholder:'First Last'});
+            const coat = field('Tour Bunker Coat assignment comment',
+                config.tourCoatComment, {placeholder:'Name / identifier written into the coat inspection'});
+            intro.append(name.wrap,coat.wrap);
+            const save = makeButton('Save Profile', {background:'#176b8e',color:'#fff'});
             save.onclick = () => {
                 try {
                     const next = cloneConfig();
-                    const oldPrefix = next.selfPrefix;
                     const newName = clean(name.input.value);
-                    const newPrefix = clean(prefix.input.value).toUpperCase();
-                    if (!newName) throw new Error('Name is required.');
-                    if (!newPrefix) throw new Error('My PPE asset prefix is required.');
-                    if (!/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(newPrefix)) {
-                        throw new Error('PPE prefix may contain only letters, numbers, and internal hyphens.');
-                    }
-
-                    // If this inspector already exists in the locally saved People list, keep that record synchronized.
-                    const selfIndex = next.peopleDirectory.findIndex(p => p.prefix === oldPrefix);
-                    if (selfIndex >= 0) {
-                        if (newPrefix !== oldPrefix && next.peopleDirectory.some((p, i) => i !== selfIndex && p.prefix === newPrefix)) {
-                            throw new Error(`PPE prefix ${newPrefix} is already assigned to another saved person.`);
-                        }
-                        next.peopleDirectory[selfIndex] = { name: newName, prefix: newPrefix };
-                        next.captainSets = (next.captainSets || []).map(set => ({
-                            ...set,
-                            memberPrefixes: (set.memberPrefixes || []).map(p => p === oldPrefix ? newPrefix : p)
-                        }));
-                        next.captainRosterPrefixes = (next.captainRosterPrefixes || []).map(p => p === oldPrefix ? newPrefix : p);
-                    }
-
+                    if (!newName) throw new Error('Inspector name is required.');
+                    // Preserve legacy prefixes and local rules only for backup /
+                    // backwards compatibility. PPE discovery no longer uses them.
                     next.initialized = true;
                     next.inspectorName = newName;
-                    next.selfPrefix = newPrefix;
                     next.tourCoatComment = clean(coat.input.value);
                     saveConfig(next);
                     refreshPanelInfo();
-                    setStatus('Profile saved.');
+                    setStatus('Profile saved. PPE discovery uses Responsible Party.');
                     renderContent();
-                } catch (error) {
-                    alert(error.message);
-                }
+                } catch (error) { alert(error.message); }
             };
             intro.appendChild(save);
             content.appendChild(intro);
@@ -8742,9 +8752,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 if (!owners.has(nameKey)) owners.set(nameKey, clean(person.name));
             }
             const cardEl = card('Assigned PPE — Exact Equipment IDs',
-                'For gear with serial-like IDs (SCBA masks, numeric equipment, etc.) that a surname-prefix search cannot find. ' +
-                'Enter its complete PPE Name and verify its Responsible Party before linking it to a person. ' +
-                'These local links DO NOT change Vector assignments or add unknown items to existing Tour/Captain inspection templates.');
+                'Optional shortcuts to individual equipment records. Main inspections already find ALL gear automatically using Responsible Party, including SCBA masks and numeric IDs. ' +
+                'Use this to bookmark a specific item. Local links do not change Vector assignments or inspection templates.');
             const personSelect = document.createElement('select');
             personSelect.style.cssText =
                 'display:block;width:100%;padding:10px;margin:10px 0;border:1px solid #bdccd7;border-radius:7px;';
@@ -8860,7 +8869,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
             const c = card(
                 'Captain Sets',
-                'Choose your crew from the department master roster. Your saved Captain Sets stay only on this computer.'
+                'Choose your crew from the master roster. Their PPE is found automatically through the Responsible Party filter; no equipment prefixes are needed.'
             );
 
             const source = document.createElement('div');
@@ -8993,45 +9002,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
                 const selected = new Set((currentSet?.memberPrefixes || [])
                     .map(prefix => rosterPersonByPrefix(prefix)?.prefix || prefix));
-                const savedSearchPrefixes = new Map(
-                    Object.entries(currentSet?.gearSearchPrefixes || {})
-                        .map(([key, value]) => [clean(rosterPersonByPrefix(key)?.prefix || key).toUpperCase(), clean(value).toUpperCase()])
-                );
-                const prefixHost = document.createElement('div');
-                prefixHost.style.cssText =
-                    'margin:10px 0;padding:10px;background:#f5f9fc;border:1px solid #d5e3eb;border-radius:7px;';
-                editor.appendChild(prefixHost);
-
-                function drawPrefixEditors() {
-                    prefixHost.innerHTML = '';
-                    const title = document.createElement('div');
-                    title.style.cssText = 'font:700 12px Arial,sans-serif;margin-bottom:6px;';
-                    title.textContent = 'PPE asset search prefixes for selected crew (optional overrides)';
-                    const note = document.createElement('div');
-                    note.style.cssText = 'font:11px/1.4 Arial,sans-serif;color:#597184;margin-bottom:8px;';
-                    note.textContent = 'The helper searches equipment IDs by prefix and verifies actual ownership using Responsible Party. Leave blank to try the saved gear prefix or surname. For unusual IDs (e.g. B.SMITH), enter the actual searchable prefix.';
-                    prefixHost.append(title, note);
-                    for (const prefix of selected) {
-                        const person = rosterPersonByPrefix(prefix);
-                        if (!person) continue;
-                        const row = document.createElement('label');
-                        row.style.cssText = 'display:flex;align-items:center;gap:9px;margin:6px 0;font-size:11px;';
-                        const name = document.createElement('span');
-                        name.style.cssText = 'flex:1;';
-                        name.textContent = person.name;
-                        const input = document.createElement('input');
-                        input.type = 'text';
-                        input.value = savedSearchPrefixes.get(prefix) || '';
-                        input.placeholder = expectedSurnamePrefix(person.name) || 'PPE prefix';
-                        input.maxLength = 60;
-                        input.style.cssText =
-                            'width:160px;box-sizing:border-box;padding:6px;border:1px solid #beced8;border-radius:5px;';
-                        input.addEventListener('input', () =>
-                            savedSearchPrefixes.set(prefix, clean(input.value).toUpperCase()));
-                        row.append(name, input);
-                        prefixHost.appendChild(row);
-                    }
-                }
+                // Crew selection is person-based. Vector's Responsible Party
+                // filter finds every equipment ID; no gear prefix inputs.
 
                 function drawPeople() {
                     const q = clean(searchWrap.input.value).toLowerCase();
@@ -9060,7 +9032,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             else selected.delete(person.prefix);
                             count.textContent =
                                 `${roster.length} people available · ${filtered.length} shown · ${selected.size} selected`;
-                            drawPrefixEditors();
+
                         };
 
                         const text = document.createElement('div');
@@ -9073,7 +9045,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
                 searchWrap.input.addEventListener('input', drawPeople);
                 drawPeople();
-                drawPrefixEditors();
+
 
                 const save = makeButton('Save Captain Set', { background: '#176b8e', color: '#fff' });
                 save.style.cssText += 'margin-top:9px;';
@@ -9112,25 +9084,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             });
                         }
                         latest.peopleDirectory = assertNoPrefixOverlap(snapshots);
-                        const gearSearchPrefixes = {};
-                        for (const prefix of selected) {
-                            const searchTerm = clean(savedSearchPrefixes.get(prefix)).toUpperCase();
-                            if (!searchTerm) continue;
-                            if (searchTerm.length < 2 || searchTerm.length > 60 ||
-                                !/^[A-Z0-9._-]+$/.test(searchTerm) ||
-                                searchTerm.startsWith('PERSON-')) {
-                                throw new Error('Invalid PPE search prefix for ' +
-                                    (rosterPersonByPrefix(prefix)?.name || prefix) + ': ' + searchTerm);
-                            }
-                            gearSearchPrefixes[prefix] = searchTerm;
-                        }
                         latest.captainSets = [
                             ...otherSets,
                             {
                                 id: editingSetId || `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                                 name,
                                 memberPrefixes: [...selected],
-                                gearSearchPrefixes,
                                 orphanedPrefixes: []
                             }
                         ];
@@ -9807,7 +9766,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         } else {
             info.innerHTML =
                 `<b>${escapeHtml(config.inspectorName)}</b>` +
-                `<br>${escapeHtml(config.selfPrefix)} · ${sigCount} signature variant${sigCount === 1 ? '' : 's'}`;
+                `<br>${sigCount} signature variant${sigCount === 1 ? '' : 's'} · PPE by Responsible Party`;
         }
 
         updateMinimizedPanelBadge(run);
