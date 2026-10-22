@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.16
+// @version      3.2.17
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.16';
+    const VERSION = '3.2.17';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -6353,6 +6353,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             .filter(Boolean);
 
         if (!owners.length) throw new Error('Select at least one gear owner.');
+        if ((modeKey === 'tour' || modeKey === 'afterFire') && owners.length !== 1) {
+            throw new Error('Personal PPE mode requires exactly one owner.');
+        }
         if (!mode) throw new Error(`Unknown inspection mode: ${modeKey}`);
         if (!config.initialized) {
             throw new Error('First-time setup required. Open Settings, confirm the inspector name / gear prefix, and save before running inspections.');
@@ -6363,8 +6366,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         const groups = [];
         let fatalIssue = false;
-        setStatus('Verifying live Responsible Party ownership for the PPE inventory...');
-        const freshInventory = await scanPpeOwnerInventory(message => setStatus(message));
+        const personalMode = modeKey === 'tour' || modeKey === 'afterFire';
+        setStatus(personalMode
+            ? 'Searching only your PPE and verifying Responsible Party…'
+            : 'Verifying live Responsible Party ownership for the selected crew…');
+        const freshInventory = personalMode
+            ? await scanPpeOwnerSearch(owners[0], message => setStatus(message))
+            : await scanPpeOwnerInventory(message => setStatus(message));
 
         for (const owner of owners) {
             setStatus(`Searching ${owner.name}'s assigned PPE...`);
@@ -6771,9 +6779,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
 
         const config = getConfig();
-        const self = config.peopleDirectory.find(
-            x => x.prefix.toUpperCase() === config.selfPrefix.toUpperCase()
-        ) || {
+        // Always search as the current signed-in inspector, never a legacy
+        // directory record which could contain somebody else's name.
+        const self = {
             name: config.inspectorName,
             prefix: config.selfPrefix
         };
@@ -7091,6 +7099,128 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             status: val(statusIndex),
             type: getPoolType(ids[1])
         };
+    }
+
+    // Personal PPE modes must not walk the entire department inventory. Try
+    // the person's full name and configured PPE identifier through Vector's
+    // own search field; validate every result against Responsible Party. A
+    // result from searching serials or Locations alone is never ownership.
+    async function scanPpeOwnerSearch(owner, progress = null) {
+        const ownerName = clean(owner?.name);
+        const ownerKey = masterNameKey(ownerName);
+        if (!ownerKey) throw new Error('Set your full inspector name in Settings → Profile first.');
+        await ensurePpeEquipmentPage(progress);
+        const search = getSearchInput();
+        if (!search) throw new Error('Vector PPE search input was not found.');
+        const originalTerm = search.value || '';
+        const searchTerms = [...new Set([ownerName, clean(owner?.prefix).toUpperCase()]
+            .filter(term => term && term.length >= 2))];
+        if (!searchTerms.length) throw new Error('No PPE owner search term was configured.');
+        const byItem = new Map();
+        const searched = [];
+        let scannedPages = 0, scannedRows = 0;
+        try {
+            for (const term of searchTerms) {
+                if (progress) progress('Searching PPE for ' + ownerName + ' using "' + term + '"…');
+                const before = visibleAssetLinksSignature();
+                const priorTerm = clean(search.value);
+                nativeSetInput(search, term);
+                // The form changes immediately, but Vector may fetch/render the
+                // new results considerably later. Wait for an actual transition
+                // or an explicit, settled no-results state.
+                let latest = '', stableSince = 0, readySince = 0;
+                let didSettle = false, empty = false;
+                const started = Date.now();
+                while (Date.now() - started < 24000) {
+                    await sleep(200);
+                    if (clean(search.value) !== clean(term)) continue;
+                    const snap = ppeLoadedRowsSnapshot();
+                    const emptyState = hasExplicitNoResults() && !snap.ready;
+                    const changed = before !== visibleAssetLinksSignature();
+                    const unchangedQuery = priorTerm === clean(term);
+                    if ((snap.ready && (changed || unchangedQuery)) || emptyState) {
+                        const candidate = emptyState ? 'EMPTY' : snap.signature;
+                        const now = Date.now();
+                        if (!readySince) readySince = now;
+                        if (candidate !== latest) {
+                            latest = candidate;
+                            stableSince = now;
+                        }
+                        if (now - readySince >= 1400 && now - stableSince >= 900) {
+                            didSettle = true;
+                            empty = emptyState;
+                            break;
+                        }
+                    } else {
+                        readySince = 0;
+                        stableSince = 0;
+                        latest = '';
+                    }
+                }
+                if (!didSettle) {
+                    throw new Error('Vector did not confirm a settled PPE search for "' +
+                        term + '". Personal inspection stopped before any submission.');
+                }
+                searched.push(term);
+                if (empty) continue;
+                const visitedPages = new Set();
+                for (let page = 0; page < 15; page++) {
+                    const snapshot = ppeLoadedRowsSnapshot();
+                    const signature = visibleAssetLinksSignature();
+                    if (!snapshot.ready || !signature || visitedPages.has(signature)) {
+                        throw new Error('PPE search pagination was incomplete or repeated for "' + term + '".');
+                    }
+                    visitedPages.add(signature);
+                    scannedPages++;
+                    const anchors = getVisiblePpeAnchors(getPpeResultsContainer() || document);
+                    scannedRows += anchors.length;
+                    if (scannedRows > 160) {
+                        throw new Error('PPE owner search returned too many results to trust as a personal filter. No inspection was started.');
+                    }
+                    for (const anchor of anchors) {
+                        const item = responsiblePartyPpeRow(anchor);
+                        if (item.ownerName && masterNameKey(item.ownerName) === ownerKey) {
+                            const key = item.pool + ':' + item.itemId;
+                            const previous = byItem.get(key);
+                            if (previous && (previous.assetId !== item.assetId ||
+                                masterNameKey(previous.ownerName) !== ownerKey)) {
+                                throw new Error('Conflicting PPE assignment for ' + key + '.');
+                            }
+                            byItem.set(key, item);
+                        }
+                    }
+                    if (progress) progress('Verified ' + byItem.size + ' PPE item(s) assigned to ' +
+                        ownerName + ' using Responsible Party…');
+                    const next = getPaginationControl('next');
+                    if (!paginationControlEnabled(next)) break;
+                    if (page === 14) {
+                        throw new Error('PPE owner search exceeded 15 pages. Refusing a department-wide scan.');
+                    }
+                    next.click();
+                    await waitForPpePageChange(signature);
+                    if (clean(search.value) !== clean(term)) {
+                        throw new Error('Vector reset the owner search during pagination. Inspection blocked.');
+                    }
+                }
+            }
+            if (!byItem.size) throw new Error(
+                'No PPE could be verified for ' + ownerName +
+                ' using Responsible Party. Check Settings → Profile and confirm Vector searches by person or PPE asset prefix.'
+            );
+            return {
+                items: [...byItem.values()],
+                pageCount: scannedPages,
+                rowCount: scannedRows,
+                searched,
+                source: 'Vector PPE Responsible Party column',
+                scope: 'verified-owner-search',
+                capturedAt: new Date().toISOString()
+            };
+        } finally {
+            if (search.isConnected && search.value !== originalTerm) {
+                nativeSetInput(search, originalTerm);
+            }
+        }
     }
 
     async function scanPpeOwnerInventory(progress = null) {
