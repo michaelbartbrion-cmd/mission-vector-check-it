@@ -7261,6 +7261,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const cells = row ? [...row.querySelectorAll(':scope > td, :scope > [role="cell"]')] : [];
         const nameIndex = heads.indexOf('name'), partyIndex = heads.indexOf('responsible party');
         const statusIndex = heads.indexOf('item status');
+        const poolIndex = heads.indexOf('pool');
         if (!row || nameIndex < 0 || partyIndex < 0 || !cells[nameIndex] || !cells[partyIndex]) {
             throw new Error('PPE Name and Responsible Party columns were not found or aligned. Scan stopped.');
         }
@@ -7288,7 +7289,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             url: new URL(href, location.origin).href,
             ownerName: party && party !== '-' && !isOrganizationOrBadRosterName(party) ? party : '',
             status: val(statusIndex),
-            type: getPoolType(ids[1])
+            type: getPoolType(ids[1]) === 'UNKNOWN'
+                ? (val(poolIndex) || 'UNKNOWN') : getPoolType(ids[1])
         };
     }
 
