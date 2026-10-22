@@ -8,6 +8,7 @@ const code=script.slice(begin,end)+'\nreturn scanPpeOwnerSearch;';
 function testHarness(data, settings={}) {
  let ms=0;
  let search={value:'',isConnected:true};
+ class FakeDate extends Date {static now(){return ms;}}
  let terms=[], visits=[];
  const rows=()=>{
    const term=search.value;
@@ -15,7 +16,11 @@ function testHarness(data, settings={}) {
  };
  const anchor=(x,index)=>({
    x,
-   getAttribute:()=>'/app/equipment/PPE/pool/300045/'+(index+1)+'/item'
+   getAttribute:()=>{
+     let h=2166136261;
+     for(const ch of x.assetId) h=Math.imul(h^ch.charCodeAt(0),16777619)>>>0;
+     return '/app/equipment/PPE/pool/300045/'+(h+1)+'/item';
+   }
  });
  const norm=s=>String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
  const clean=s=>String(s||'').replace(/\s+/g,' ').trim();
@@ -34,10 +39,10 @@ function testHarness(data, settings={}) {
    (_,term)=>{search.value=term;terms.push(term);currentIndex=0},
    ()=>({ready:rows().length>0,signature:JSON.stringify(pages().map(a=>a.x)),count:pages().length}),
    ()=>rows().length===0,()=>({}),()=>pages(),
-   a=>({...a.x,pool:'300045',itemId:a.getAttribute().split('/')[5],url:'https://app.vectorcheckit.us'+a.getAttribute()}),
+   a=>({...a.x,pool:'300045',itemId:a.getAttribute().split('/')[6],url:'https://app.vectorcheckit.us'+a.getAttribute()}),
    kind=>kind==='next'&&rows().length>(currentIndex+1)*10?{click(){currentIndex++}}:null,
    v=>!!v,async()=>{}, {origin:'https://app.vectorcheckit.us'},
-   {now:()=>ms},async()=>{ms+=200},()=>'',{});
+   FakeDate,async()=>{ms+=200},()=>'',{});
  return {run:f,search,terms,visits,clock:()=>ms};
 }
 const michael={name:'Michael Brion',prefix:'BRION'};
