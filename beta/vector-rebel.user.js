@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.22
+// @version      3.2.23
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.22',
+        version: '3.2.23',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.22';
+    const VERSION = '3.2.23';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -477,6 +477,7 @@
         peopleDirectory: [],
         captainRosterPrefixes: [],
         captainSets: [],
+        linkedPpeAssets: {},
         localAssetRules: {},
         departmentProfile: DEFAULT_DEPARTMENT_PROFILE
     };
@@ -1564,6 +1565,122 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         };
     }
 
+    // Exact-ID supplemental gear directory. This is a verified LOCAL lookup
+    // index, not Vector's assignment database or an inspection completion.
+    // Importantly these entries must not be mixed into Tour/After-Fire/Captain
+    // inspection templates without mapping the appropriate Vector check.
+    function normalizeLinkedPpeAssets(raw) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+        const result = {};
+        let total = 0;
+        for (const [nameRaw, records] of Object.entries(raw)) {
+            const key = masterNameKey(nameRaw);
+            if (!key || !Array.isArray(records) || total >= 1000) continue;
+            const distinct = new Set();
+            const list = [];
+            for (const record of records) {
+                const assetId = clean(record?.assetId).toUpperCase();
+                const pool = clean(record?.pool);
+                const itemId = clean(record?.itemId);
+                const ownerName = clean(record?.ownerName);
+                if (!assetId || assetId.length > 160 ||
+                    !/[A-Z0-9]/.test(assetId) ||
+                    /[\u0000-\u001F\u007F]/.test(assetId) ||
+                    !/^\d+$/.test(pool) || !/^\d+$/.test(itemId) ||
+                    masterNameKey(ownerName) !== key ||
+                    distinct.has(pool + ':' + itemId)) continue;
+                distinct.add(pool + ':' + itemId);
+                list.push({
+                    assetId, pool, itemId, ownerName,
+                    type: clean(record.type).slice(0, 100),
+                    status: clean(record.status).slice(0, 100),
+                    verifiedAt: clean(record.verifiedAt).slice(0, 50)
+                });
+                total++;
+                if (list.length >= 30 || total >= 1000) break;
+            }
+            if (list.length) result[key] = list;
+        }
+        return result;
+    }
+
+    function linkedPpeForPerson(name, config = getConfig()) {
+        return normalizeLinkedPpeAssets(config?.linkedPpeAssets || {})[masterNameKey(name)] || [];
+    }
+
+    function linkVerifiedPpeAsset(config, ownerName, item, expectedId) {
+        const key = masterNameKey(ownerName);
+        const expected = clean(expectedId).toUpperCase();
+        if (!key || !expected || expected.length > 160 ||
+            /[\u0000-\u001F\u007F]/.test(expected) ||
+            !/[A-Z0-9]/.test(expected)) {
+            throw new Error('Select a person and enter a valid exact PPE equipment name.');
+        }
+        if (clean(item?.assetId).toUpperCase() !== expected ||
+            masterNameKey(item?.ownerName) !== key ||
+            !/^\d+$/.test(clean(item?.pool)) ||
+            !/^\d+$/.test(clean(item?.itemId))) {
+            throw new Error('The exact PPE ID and Responsible Party did not both match. No link was saved.');
+        }
+        if (clean(item?.status).toLowerCase() !== 'in service') {
+            throw new Error(expected + ' is not In Service. No active PPE link was saved.');
+        }
+        const directory = normalizeLinkedPpeAssets(config?.linkedPpeAssets || {});
+        // Never silently attach a single item to two different people.
+        for (const [name, records] of Object.entries(directory)) {
+            if (name !== key && records.some(record =>
+                record.pool === clean(item.pool) && record.itemId === clean(item.itemId))) {
+                throw new Error('This PPE item is already linked locally to another person. Remove that old link after verifying the Vector assignment.');
+            }
+        }
+        const current = directory[key] || [];
+        const filtered = current.filter(record => !(
+            record.pool === clean(item.pool) && record.itemId === clean(item.itemId)));
+        if (filtered.length >= 30) throw new Error('30 saved exact-ID links per person is the limit.');
+        directory[key] = [...filtered, {
+            assetId: expected,
+            pool: clean(item.pool), itemId: clean(item.itemId),
+            ownerName: clean(item.ownerName),
+            type: clean(item.type).slice(0, 100),
+            status: clean(item.status).slice(0, 100),
+            verifiedAt: new Date().toISOString()
+        }];
+        config.linkedPpeAssets = directory;
+        return directory[key].length;
+    }
+
+    function unlinkPpeAsset(config, name, pool, itemId) {
+        const directory = normalizeLinkedPpeAssets(config?.linkedPpeAssets || {});
+        const key = masterNameKey(name);
+        if (!key || !directory[key]) return false;
+        const oldLength = directory[key].length;
+        directory[key] = directory[key].filter(record =>
+            record.pool !== clean(pool) || record.itemId !== clean(itemId));
+        if (!directory[key].length) delete directory[key];
+        config.linkedPpeAssets = directory;
+        return (directory[key]?.length || 0) !== oldLength;
+    }
+
+    async function verifyExactPpeOwnership(ownerName, assetId, progress = null) {
+        const name = clean(ownerName);
+        const id = clean(assetId).toUpperCase();
+        if (!name || !id || id.length > 160 || !/[A-Z0-9]/.test(id) ||
+            /[\u0000-\u001F\u007F]/.test(id)) {
+            throw new Error('Choose a valid person and enter the complete equipment ID.');
+        }
+        // This is ONE exact-item search, not a department crawl. The shared
+        // searcher checks Responsible Party before returning any gear.
+        const result = await scanPpeOwnerSearch({ name, prefix: id }, progress);
+        const matches = result.items.filter(item =>
+            clean(item.assetId).toUpperCase() === id &&
+            masterNameKey(item.ownerName) === masterNameKey(name));
+        if (matches.length !== 1) {
+            throw new Error('Vector did not confirm exactly one item named ' + id +
+                ' assigned to ' + name + '. No link was saved.');
+        }
+        return matches[0];
+    }
+
     function migrateV2Config() {
         const existingV3 = loadJSON(CONFIG_KEY, null);
         if (existingV3) return existingV3;
@@ -1612,6 +1729,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             peopleDirectory: people,
             captainRosterPrefixes: deriveCaptainRosterPrefixes(legacy, people, captainSets),
             captainSets,
+            linkedPpeAssets: {},
             localAssetRules: legacyRules,
             departmentProfile: normalizeDepartmentProfile(legacy.departmentProfile)
         };
@@ -1642,6 +1760,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             peopleDirectory: people,
             captainRosterPrefixes: captainSets.length ? deriveCaptainRosterPrefixes(stored, people, captainSets) : [],
             captainSets,
+            linkedPpeAssets: normalizeLinkedPpeAssets(stored.linkedPpeAssets),
             localAssetRules: normalizeLocalAssetRules(
                 stored.localAssetRules || stored.defaultFailures || {},
                 selfPrefix
@@ -8320,6 +8439,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         const tabs = [
             ['profile', 'Profile'],
+            ['equipment', 'Assigned PPE'],
             ['captain', 'Captain Sets'],
             ['signatures', 'Signatures'],
             ['history', 'History'],
@@ -8436,6 +8556,130 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             };
             intro.appendChild(save);
             content.appendChild(intro);
+        }
+
+        function renderLinkedEquipment() {
+            const config = getConfig();
+            const ownerOptions = [
+                ...getActiveMasterRoster(),
+                ...normalizePeopleDirectory(config.peopleDirectory || []),
+                {name: config.inspectorName, prefix: config.selfPrefix}
+            ].filter(person => clean(person?.name) && !isOrganizationOrBadRosterName(person.name));
+            const owners = new Map();
+            for (const person of ownerOptions) {
+                const nameKey = masterNameKey(person.name);
+                if (!owners.has(nameKey)) owners.set(nameKey, clean(person.name));
+            }
+            const cardEl = card('Assigned PPE — Exact Equipment IDs',
+                'For gear with serial-like IDs (SCBA masks, numeric equipment, etc.) that a surname-prefix search cannot find. ' +
+                'Enter its complete PPE Name and verify its Responsible Party before linking it to a person. ' +
+                'These local links DO NOT change Vector assignments or add unknown items to existing Tour/Captain inspection templates.');
+            const personSelect = document.createElement('select');
+            personSelect.style.cssText =
+                'display:block;width:100%;padding:10px;margin:10px 0;border:1px solid #bdccd7;border-radius:7px;';
+            [...owners.entries()].sort((a,b)=>a[1].localeCompare(b[1])).forEach(([key,name]) => {
+                const opt = document.createElement('option');
+                opt.value = key;
+                opt.textContent = name;
+                personSelect.appendChild(opt);
+            });
+            const ownKey = masterNameKey(config.inspectorName);
+            if (owners.has(ownKey)) personSelect.value = ownKey;
+            const input = field('Exact Vector PPE Name / equipment ID', '', {
+                placeholder: 'E004015306F2D8FE'
+            });
+            const msg = document.createElement('div');
+            msg.style.cssText='font-size:11px;line-height:1.5;margin:8px 0;color:#35566d;';
+            const list = document.createElement('div');
+            list.style.cssText='margin:10px 0;';
+            const help = document.createElement('div');
+            help.style.cssText='font-size:11px;line-height:1.45;color:#9a5a10;margin-top:9px;';
+            help.textContent='SCBA inspections are not yet mapped in Vector Rebel. Linking the mask makes it easy to locate and verify, but does not certify its inspection or alter working Tour / After-Fire / Captain checks.';
+            const add = makeButton('Find, Verify & Link This PPE', {
+                background:'#176b8e',color:'#fff'
+            });
+            const linked = () => {
+                list.innerHTML = '';
+                const owner = owners.get(personSelect.value);
+                const rows = linkedPpeForPerson(owner);
+                if (!rows.length) {
+                    list.textContent = 'No exact-ID equipment linked for this person yet.';
+                    return;
+                }
+                for (const record of rows) {
+                    const row = document.createElement('div');
+                    row.style.cssText =
+                        'padding:9px;border:1px solid #d8e5ec;border-radius:7px;margin:6px 0;';
+                    const label = document.createElement('div');
+                    label.style.cssText='font-size:12px;line-height:1.5;';
+                    label.textContent = record.assetId + ' — ' +
+                        (record.type === 'UNKNOWN' ? 'PPE pool '+record.pool : record.type) +
+                        ' · ' + record.status + ' · Verified ' +
+                        (record.verifiedAt.slice(0,10) || 'previously');
+                    const inspect = makeButton('Recheck Owner');
+                    inspect.onclick = async () => {
+                        inspect.disabled = true; msg.textContent = 'Checking ' + record.assetId + '…';
+                        try {
+                            const verified = await verifyExactPpeOwnership(owner, record.assetId,
+                                t=>{msg.textContent=t;});
+                            const next = cloneConfig();
+                            linkVerifiedPpeAsset(next,owner,verified,record.assetId);
+                            saveConfig(next);
+                            msg.textContent = 'Responsible Party verified: ' + verified.ownerName +
+                                ' · ' + verified.assetId + '.';
+                            linked();
+                        } catch(e) {msg.textContent = e.message;}
+                        finally {inspect.disabled = false;}
+                    };
+                    const open = makeButton('Open Item');
+                    open.onclick = () => {
+                        const url = new URL('/app/equipment/PPE/pool/' +
+                            record.pool + '/' + record.itemId + '/item', location.origin);
+                        window.open(url.href, '_blank','noopener,noreferrer');
+                    };
+                    const remove = makeButton('Unlink Local');
+                    remove.onclick = () => {
+                        if (!confirm('Remove the local link for ' + record.assetId +
+                            '? This will NOT change the equipment assignment in Vector.')) return;
+                        const next = cloneConfig();
+                        unlinkPpeAsset(next,owner,record.pool,record.itemId);
+                        saveConfig(next);
+                        msg.textContent = 'Local link removed (Vector unchanged).';
+                        linked();
+                    };
+                    row.append(label,inspect,open,remove);
+                    list.appendChild(row);
+                }
+            };
+            personSelect.addEventListener('change',linked);
+            add.onclick = async () => {
+                const owner = owners.get(personSelect.value);
+                const wanted = clean(input.input.value).toUpperCase();
+                if (!owner) {msg.textContent='Choose a person first.';return;}
+                if (!wanted) {msg.textContent='Enter the exact PPE ID first.';return;}
+                add.disabled = true;
+                msg.textContent = 'Searching Vector PPE for ' + wanted + '…';
+                try {
+                    const verified = await verifyExactPpeOwnership(owner,wanted,
+                        t=>{msg.textContent=t;});
+                    const next = cloneConfig();
+                    const count = linkVerifiedPpeAsset(next,owner,verified,wanted);
+                    saveConfig(next);
+                    msg.textContent = 'Verified & linked: ' + verified.assetId +
+                        ' · Responsible Party: ' + verified.ownerName +
+                        ' · ' + verified.status +
+                        '. (' + count + ' linked item(s) for this person.)';
+                    input.input.value='';
+                    linked();
+                } catch(e) {
+                    msg.textContent = 'NOT LINKED: ' + (e?.message || String(e));
+                } finally {
+                    add.disabled = false;
+                }
+            };
+            cardEl.append(personSelect,input.wrap,add,msg,list,help);
+            content.appendChild(cardEl);
+            linked();
         }
 
         function renderCaptainSets() {
@@ -9252,6 +9496,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         function renderContent() {
             content.innerHTML = '';
             if (active === 'profile') renderProfile();
+            if (active === 'equipment') renderLinkedEquipment();
             else if (active === 'captain') renderCaptainSets();
             else if (active === 'signatures') renderSignatures();
             else if (active === 'history') renderHistory();
