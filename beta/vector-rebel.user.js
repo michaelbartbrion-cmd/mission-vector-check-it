@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.20
+// @version      3.2.21
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.20',
+        version: '3.2.21',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.20';
+    const VERSION = '3.2.21';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -5094,7 +5094,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
         try {
             setStatus('Opening Equipment → PPE for the Daily Captain Check…');
-            await ensurePpeEquipmentPage(message => setStatus(message));
+            await ensurePpeEquipmentPage(message => setStatus(message), false);
             showCaptainDailySetPicker();
         } catch (error) {
             saveDiagnostic(error.message);
@@ -5127,9 +5127,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 .map(({ setOrder, ...owner }) => owner);
             const items = [];
             const discovery = [];
-            const freshInventory = await scanPpeOwnerInventory(message => setStatus(message));
+            const freshInventory = await scanPpeCrewOwners(owners, message => setStatus(message));
             for (const owner of owners) {
-                setStatus(`Daily Captain Check — finding current PPE for ${owner.name}…`);
+                setStatus(`Daily Captain Check — preparing verified PPE for ${owner.name}…`);
                 try {
                     const found = await discoverOwnerGear(owner, 'captain', freshInventory);
                     discovery.push({
@@ -6408,7 +6408,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             : 'Verifying live Responsible Party ownership for the selected crew…');
         const freshInventory = personalMode
             ? await scanPpeOwnerSearch(owners[0], message => setStatus(message))
-            : await scanPpeOwnerInventory(message => setStatus(message));
+            : await scanPpeCrewOwners(owners, message => setStatus(message));
 
         for (const owner of owners) {
             setStatus(`Searching ${owner.name}'s assigned PPE...`);
@@ -6800,7 +6800,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const cancelledDaily = await cancelCaptainDailyCheckForRealInspection();
             if (cancelledDaily) setStatus('Daily Captain Check cancelled. Starting the real Captain PPE inspection…');
             else setStatus('Opening Equipment → PPE…');
-            await ensurePpeEquipmentPage(message => setStatus(message));
+            await ensurePpeEquipmentPage(message => setStatus(message), false);
             showCaptainOwnerPicker();
         } catch (error) {
             saveDiagnostic(error.message);
@@ -7272,6 +7272,113 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 nativeSetInput(search, ownerPrefix);
             }
         }
+    }
+
+    // A PERSON-* identifier is a master-roster key, not a PPE search term.
+    // Prefer an inspector's own saved prefix, then a previous explicit
+    // person-directory gear prefix, then a credible legacy roster gear prefix.
+    // For names not previously configured, search the surname as a candidate
+    // term only; the Responsible Party column must still confirm each result.
+    function crewPpeSearchPrefix(owner, config = getConfig()) {
+        const nameKey = masterNameKey(owner?.name);
+        if (!nameKey) throw new Error('Captain crew member has no name.');
+        const expected = expectedSurnamePrefix(owner.name);
+        const valid = value => {
+            const term = clean(value).toUpperCase();
+            return term.length >= 2 && term.length <= 60 &&
+                /^[A-Z0-9._-]+$/.test(term) &&
+                !term.startsWith('PERSON-');
+        };
+        const inspectorPrefix = masterNameKey(config.inspectorName) === nameKey
+            ? clean(config.selfPrefix).toUpperCase() : '';
+        if (valid(inspectorPrefix)) return { prefix: inspectorPrefix, source: 'inspector-profile' };
+        const configured = (config.peopleDirectory || []).filter(p =>
+            masterNameKey(p.name) === nameKey && valid(p.prefix));
+        if (configured.length === 1) {
+            return { prefix: clean(configured[0].prefix).toUpperCase(), source: 'local-person-directory' };
+        }
+        const legacy = clean(owner.legacyPrefix).toUpperCase();
+        // Legacy M and WS0122 were known generic inventory series incorrectly
+        // linked to people. Never reuse an arbitrary mismatching serial prefix.
+        const legacySurnameMatch = valid(legacy) && expected &&
+            legacy.replace(/[^A-Z]/g, '').endsWith(expected);
+        if (legacySurnameMatch) {
+            return { prefix: legacy, source: 'legacy-surname-matched' };
+        }
+        if (valid(expected)) return { prefix: expected, source: 'surname-candidate' };
+        throw new Error('No safe PPE search prefix for ' + owner.name +
+            '. Configure the person gear prefix; department-wide discovery is disabled for this check.');
+    }
+
+    // Read-only scoped crew discovery: one bounded Vector search per selected
+    // person. Never invoke scanPpeOwnerInventory(), follow general inventory
+    // pagination, or claim that PERSON-* keys identify gear. A missing member
+    // blocks the audit or monthly preview rather than producing false compliance.
+    async function scanPpeCrewOwners(owners, progress = null) {
+        const config = getConfig();
+        if (!Array.isArray(owners) || !owners.length) {
+            throw new Error('Choose at least one crew member.');
+        }
+        const uniqueNames = new Set();
+        const byItem = new Map();
+        const searches = [];
+        let pageCount = 0;
+        let rowCount = 0;
+        for (let i = 0; i < owners.length; i++) {
+            const owner = owners[i];
+            const nameKey = masterNameKey(owner?.name);
+            if (!nameKey || uniqueNames.has(nameKey)) {
+                throw new Error('Captain Set has a missing or duplicate person identity.');
+            }
+            uniqueNames.add(nameKey);
+            const selection = crewPpeSearchPrefix(owner, config);
+            if (progress) progress('Crew PPE ' + (i + 1) + '/' + owners.length + ': searching ' +
+                owner.name + ' with ' + selection.prefix + ' (' + selection.source + ')…');
+            let scoped;
+            try {
+                scoped = await scanPpeOwnerSearch({
+                    name: owner.name,
+                    prefix: selection.prefix
+                }, progress);
+            } catch (error) {
+                throw new Error(owner.name + ' (' + selection.prefix + '): ' +
+                    (error?.message || String(error)) +
+                    '. Crew check stopped; no incomplete roster was accepted.');
+            }
+            if (!scoped.items.length) throw new Error(owner.name +
+                ': no PPE ownership confirmed. Crew check stopped.');
+            searches.push({
+                name: owner.name, prefix: selection.prefix,
+                source: selection.source, assetCount: scoped.items.length
+            });
+            pageCount += scoped.pageCount;
+            rowCount += scoped.rowCount;
+            for (const item of scoped.items) {
+                if (masterNameKey(item.ownerName) !== nameKey) {
+                    throw new Error('PPE ownership conflict for ' + item.assetId);
+                }
+                const key = item.pool + ':' + item.itemId;
+                const previous = byItem.get(key);
+                if (previous && masterNameKey(previous.ownerName) !== nameKey) {
+                    throw new Error('One PPE item was assigned to two selected crew members: ' + key);
+                }
+                if (previous && previous.assetId !== item.assetId) {
+                    throw new Error('PPE asset ID changed during crew discovery: ' + key);
+                }
+                byItem.set(key, item);
+            }
+        }
+        if (progress) progress('Verified ' + byItem.size + ' assigned PPE item(s) for ' +
+            owners.length + ' crew members using targeted searches.');
+        return {
+            items: [...byItem.values()],
+            pageCount,
+            rowCount,
+            searches,
+            source: 'Vector PPE Responsible Party column',
+            scope: 'verified-crew-search',
+            capturedAt: new Date().toISOString()
+        };
     }
 
     async function scanPpeOwnerInventory(progress = null) {
