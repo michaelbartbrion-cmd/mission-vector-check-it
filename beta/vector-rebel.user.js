@@ -6848,9 +6848,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const usableSets = (config.captainSets || [])
             .map(set => ({
                 ...set,
-                people: resolveCaptainSetPeople(set, config)
+                people: resolveCaptainSetPeople(set, config),
+                memberCount: (set.memberPrefixes || []).length
             }))
-            .filter(set => set.people.length);
+            .filter(set => set.people.length && set.people.length === set.memberCount);
 
         if (!usableSets.length) {
             setStatus('No Captain Sets are ready. Open Settings → Captain Sets and choose your crew from the department roster.', false);
