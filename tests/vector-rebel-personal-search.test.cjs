@@ -78,8 +78,8 @@ test('Search result too broad cannot silently become department crawl',async()=>
 });
 test('Personal inspection routes only through scoped owner search and uses current profile',()=>{
  assert.match(script,/const personalMode = modeKey === 'tour' \|\| modeKey === 'afterFire'/);
- assert.match(script,/await scanPpeOwnerSearch\(owners\[0\], message => setStatus\(message\)\)/);
- assert.match(script,/name: config\.inspectorName,\s*prefix: config\.selfPrefix/);
+ assert.match(script,/await scanPpeByResponsibleParty\(owners\[0\]\.name, message => setStatus\(message\)\)/);
+ assert.match(script,/name: config\.inspectorName,/);
  assert.match(script,/const searchTerms = \[ownerPrefix\]/);
  assert.match(script,/ensurePpeEquipmentPage\(message => setStatus\(message\), false\)/);
  assert.match(script,/await ensurePpeEquipmentPage\(progress, false\)/);
