@@ -76,6 +76,7 @@ test('malformed imported metadata is rejected by normalizer',()=>{
 });
 test('Exact-ID lookup stays separate from real inspection templates and department roster scans',()=>{
  assert.match(src,/\['equipment', 'Assigned PPE'\]/);
+ assert.match(src,/mainAction\('Assigned PPE', \(\) => showSettings\('equipment'\), false\)/);
  assert.match(src,/async function verifyExactPpeOwnership/);
  assert.match(src,/await scanPpeOwnerSearch\(\{ name, prefix: id \}/);
  assert.doesNotMatch(src.slice(start,end),/scanPpeOwnerInventory\(/);
