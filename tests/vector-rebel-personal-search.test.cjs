@@ -83,5 +83,5 @@ test('Personal inspection routes only through scoped owner search and uses curre
  assert.match(script,/const searchTerms = \[ownerPrefix\]/);
  assert.match(script,/ensurePpeEquipmentPage\(message => setStatus\(message\), false\)/);
  assert.match(script,/await ensurePpeEquipmentPage\(progress, false\)/);
- assert.match(script,/const freshInventory = await scanPpeOwnerInventory\(message => setStatus\(message\)\)/);
+ assert.match(script,/await scanPpeCrewOwners\(owners, message => setStatus\(message\)\)/);
 });
