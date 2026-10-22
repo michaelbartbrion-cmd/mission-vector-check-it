@@ -3646,7 +3646,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             clean(item.status).toLowerCase() === 'in service');
         const mode = getMode(modeKey);
         const scba = modeKey === 'tour' ? getMode('scbaTour') : null;
-        const applicableTemplate = item => item.pool === SCBA_FACE_MASK_POOL && scba
+        const applicableTemplate = item => item.pool === '299947' && scba
             ? { template: scba.templates[item.pool], inspectionModeKey: 'scbaTour' }
             : mode?.templates?.[item.pool]
                 ? { template: mode.templates[item.pool], inspectionModeKey: modeKey }
