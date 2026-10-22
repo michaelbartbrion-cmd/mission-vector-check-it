@@ -9498,7 +9498,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         function renderContent() {
             content.innerHTML = '';
             if (active === 'profile') renderProfile();
-            if (active === 'equipment') renderLinkedEquipment();
+            else if (active === 'equipment') renderLinkedEquipment();
             else if (active === 'captain') renderCaptainSets();
             else if (active === 'signatures') renderSignatures();
             else if (active === 'history') renderHistory();
@@ -9727,6 +9727,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             mainAction('My After-Fire', () => launchMyInspectionFromAnywhere('afterFire')),
             mainAction("Captain's Monthly", launchCaptainInspectionFromAnywhere),
             mainAction('Daily Captain Check', launchCaptainDailyCheckFromAnywhere, false),
+            mainAction('Assigned PPE', () => showSettings('equipment'), false),
             mainAction('Settings', () => showSettings('profile'), false)
         );
 
