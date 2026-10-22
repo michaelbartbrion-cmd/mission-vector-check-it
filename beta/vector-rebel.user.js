@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.14
+// @version      3.2.15
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.14';
+    const VERSION = '3.2.15';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -7067,13 +7067,22 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
         const val = index => index >= 0 && cells[index]
             ? clean(cells[index].innerText || cells[index].textContent || '') : '';
-        const assetId = val(nameIndex).toUpperCase();
-        if (!/^[A-Z0-9][A-Z0-9-]{0,119}$/.test(assetId)) {
-            throw new Error('PPE Name column does not contain a verifiable asset ID.');
-        }
         const href = anchor.getAttribute('href') || '';
         const ids = href.match(/\/app\/equipment\/PPE\/pool\/(\d+)\/(\d+)\/item/i);
         if (!ids) throw new Error('PPE equipment row has no verifiable item URL.');
+        // PPE Name is an arbitrary equipment label, NOT a machine-generated
+        // surname prefix. Real examples include B.SMITH-10237612-FL and
+        // numeric serials. Validate presence and printability, not punctuation.
+        // Identity still comes from the exact pool/item URL, and ownership
+        // still comes EXCLUSIVELY from Responsible Party.
+        const assetId = val(nameIndex).toUpperCase();
+        if (!assetId || assetId.length > 160 || !/[\p{L}\p{N}]/u.test(assetId) ||
+            /[\u0000-\u001F\u007F]/.test(assetId)) {
+            throw new Error(
+                'PPE Name missing or unusable for item ' + ids[1] + ':' + ids[2] +
+                '. The roster was not saved; no equipment ownership was guessed.'
+            );
+        }
         const party = val(partyIndex);
         return {
             assetId, pool: ids[1], itemId: ids[2],
