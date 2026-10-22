@@ -8750,7 +8750,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 note.style.cssText =
                     'font-size:11px;line-height:1.4;color:#6a7f8c;margin-bottom:7px;';
                 note.textContent =
-                    'These people are not being deleted. Their names look valid, but the stored PPE prefix is unusual. You can inspect the person’s actual gear, inspect the suspect prefix, or correct the mapping.';
+                    'These are LEGACY equipment-prefix mappings from the older roster scanner. ' +
+                    'The prefixes are ignored for ownership and crew selection now uses person identity. ' +
+                    'Do not associate the listed old gear with these people. ' +
+                    'Refresh Master from PPE to rebuild using Responsible Party, or edit names in the master roster.';
                 reviewHost.appendChild(note);
 
                 currentFlags.forEach(item => {
@@ -8769,62 +8772,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         `<span style="font-size:11px;color:#7b672e">${item.reasons.map(escapeHtml).join('; ')}</span>` +
                         `${samples ? `<div style="margin-top:5px;font-size:11px;color:#607483"><b>Scanned gear:</b><br>${samples}</div>` : ''}`;
 
-                    const findPerson = makeButton("Find Person's Gear");
-                    findPerson.style.cssText += 'padding:6px 9px;font-size:11px;margin-top:6px;';
-                    findPerson.onclick = async () => {
-                        try {
-                            overlay.remove();
-                            setStatus(`Opening PPE gear for ${item.name}…`);
-                            const result = await searchPpeForRosterReview(item, message => setStatus(message));
-                            setStatus(
-                                result.matches.length
-                                    ? `${item.name}: ${result.matches.length} matching PPE item(s) shown using "${result.term}".`
-                                    : `${item.name}: no PPE items matched the full name or suspect prefix ${item.prefix}.`,
-                                result.matches.length > 0
-                            );
-                        } catch (error) {
-                            saveDiagnostic(error.message);
-                            setStatus(error.message, false);
-                        }
-                    };
-
-                    const showSuspect = makeButton(`Show ${item.prefix} Gear`);
-                    showSuspect.style.cssText += 'padding:6px 9px;font-size:11px;margin-top:6px;';
-                    showSuspect.onclick = async () => {
-                        try {
-                            overlay.remove();
-                            setStatus(`Searching PPE for suspect prefix ${item.prefix}…`);
-                            const assets = await searchPpeByPrefix(item.prefix, message => setStatus(message));
-                            setStatus(
-                                assets.length
-                                    ? `${item.prefix}: ${assets.length} matching PPE item(s) shown.`
-                                    : `${item.prefix}: no matching PPE items were found.`,
-                                assets.length > 0
-                            );
-                        } catch (error) {
-                            saveDiagnostic(error.message);
-                            setStatus(error.message, false);
-                        }
-                    };
-
-                    const fix = makeButton('Fix Mapping', { background: '#176b8e', color: '#fff' });
-                    fix.style.cssText += 'padding:6px 9px;font-size:11px;margin-top:6px;';
-                    fix.onclick = async () => {
-                        try {
-                            overlay.remove();
-                            setStatus(`Finding the actual PPE prefix for ${item.name}…`);
-                            const lookup = await findActualPpePrefixCandidates(
-                                item,
-                                message => setStatus(message)
-                            );
-                            showPrefixCorrectionDialog(item, lookup);
-                        } catch (error) {
-                            saveDiagnostic(error.message);
-                            setStatus(error.message, false);
-                        }
-                    };
-
-                    row.append(text, findPerson, showSuspect, fix);
+                    // Older "Fix Mapping", "Find Person's Gear", and generic
+                    // "Show Prefix" buttons were based on equipment-number
+                    // guesses. They are intentionally not exposed now that
+                    // Responsible Party is the sole authority for ownership.
+                    row.append(text);
                     reviewHost.appendChild(row);
                 });
             };
