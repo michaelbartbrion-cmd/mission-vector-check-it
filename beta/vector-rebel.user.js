@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.18
+// @version      3.2.19
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -27,12 +27,12 @@
     // uses the clean production identity after the September 2026 Tampermonkey reset.
     if (window.__vectorRebelInstance) {
         console.warn(
-            `Vector Rebel 3.2.9: another instance (${window.__vectorRebelInstance.version || 'unknown'}) is already active on this page.`
+            `Vector Rebel ${window.__vectorRebelInstance.version || 'unknown'}: another instance (${window.__vectorRebelInstance.version || 'unknown'}) is already active on this page.`
         );
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.9',
+        version: '3.2.19',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.18';
+    const VERSION = '3.2.19';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -1314,10 +1314,23 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         };
     }
 
+    // Retain legitimate PERSON identities while allowing a legacy master list
+    // to be selected WITHOUT treating its former gear prefix as ownership.
+    // Migration is a display/identity projection only; stored configuration and
+    // equipment records are not modified until the user saves a new roster/set.
     function getActiveMasterRoster() {
-        return getMasterRosterState().people.filter(person =>
-            person.active !== false && rosterHasPersonSpecificPrefix(person)
-        );
+        const seen = new Set();
+        return getMasterRosterState().people
+            .filter(person => person.active !== false)
+            .map(person => rosterHasPersonSpecificPrefix(person)
+                ? person
+                : { ...person, legacyPrefix: person.prefix,
+                    prefix: ownerRosterKey(person.name) })
+            .filter(person => {
+                if (!person.prefix || seen.has(person.prefix)) return false;
+                seen.add(person.prefix);
+                return true;
+            });
     }
 
     function saveLocalMasterRoster(people, metadata = {}) {
@@ -1345,16 +1358,30 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     function rosterPersonByPrefix(prefix) {
         const wanted = clean(prefix).toUpperCase();
         if (!wanted) return null;
-        const master = getMasterRosterState().people.find(p => p.prefix === wanted);
-        if (master) return rosterHasPersonSpecificPrefix(master) ? master : null;
-        const local = getConfig().peopleDirectory.find(p => p.prefix === wanted) || null;
-        return local && rosterHasPersonSpecificPrefix(local) ? local : null;
+        const active = getActiveMasterRoster();
+        const current = active.filter(person => person.prefix === wanted);
+        if (current.length === 1) return current[0];
+        // Old Captain Sets may use surname equipment prefixes. Resolve only
+        // their PERSON names, and only when the name points to one active
+        // person. Never use an old prefix as proof of PPE ownership.
+        const legacy = active.filter(person => person.legacyPrefix === wanted);
+        if (legacy.length === 1) return legacy[0];
+        const oldPeople = getConfig().peopleDirectory.filter(p => p.prefix === wanted);
+        if (oldPeople.length !== 1) return null;
+        const samePerson = active.filter(person =>
+            masterNameKey(person.name) === masterNameKey(oldPeople[0].name));
+        return samePerson.length === 1 ? samePerson[0] : null;
     }
 
     function resolveCaptainSetPeople(set, config = getConfig()) {
+        const seen = new Set();
         return (set?.memberPrefixes || [])
             .map(prefix => rosterPersonByPrefix(prefix))
-            .filter(Boolean);
+            .filter(person => {
+                if (!person || seen.has(person.prefix)) return false;
+                seen.add(person.prefix);
+                return true;
+            });
     }
 
     function masterRosterExportPayload(people = getMasterRosterState().people) {
@@ -4970,8 +4997,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     function showCaptainDailySetPicker() {
         const config = getConfig();
         const usableSets = (config.captainSets || [])
-            .map(set => ({ ...set, people: resolveCaptainSetPeople(set, config) }))
-            .filter(set => set.people.length);
+            .map(set => ({
+                ...set,
+                people: resolveCaptainSetPeople(set, config),
+                memberCount: (set.memberPrefixes || []).length
+            }))
+            .filter(set => set.people.length && set.people.length === set.memberCount);
         if (!usableSets.length) {
             setStatus('No Captain Sets are ready. Open Settings → Captain Sets and choose your crew from the department roster.', false);
             showSettings('captain');
@@ -5083,6 +5114,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const window = captainAuditWindow(validAuditDate);
             const config = getConfig();
             const selfPrefix = clean(config.selfPrefix).toUpperCase();
+            if (!(set.people || []).length ||
+                (set.memberPrefixes || []).length !== set.people.length) {
+                throw new Error('Captain Set membership is incomplete or unresolved. Edit the Captain Set before auditing PPE.');
+            }
             const owners = (set.people || [])
                 .map((person, index) => ({ name: person.name, prefix: person.prefix, setOrder: index }))
                 .sort((a, b) => {
@@ -8280,8 +8315,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     'padding:11px;background:#fff8e8;border:1px solid #ead39a;border-radius:8px;' +
                     'font-size:12px;line-height:1.45;color:#735d2c;';
                 empty.textContent =
-                    'The department roster has not been embedded in this refinement build yet. ' +
-                    'An administrator can create it under Settings → Admin → Master Roster.';
+                    'No active people are available. Refresh the Master Roster from PPE ' +
+                    'or use Admin → Edit Master Roster. No gear ownership will be guessed.';
                 c.appendChild(empty);
             }
 
@@ -8328,9 +8363,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         'display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid #edf2f5;';
                     const text = document.createElement('div');
                     text.style.flex = '1';
+                    const unresolvedCount = (set.memberPrefixes || []).length - members.length;
                     text.innerHTML =
                         `<b>${escapeHtml(set.name)}</b><br>` +
-                        `<span style="font-size:11px;color:#6b7f8c">${members.length} crew member${members.length === 1 ? '' : 's'}</span>`;
+                        `<span style="font-size:11px;color:${unresolvedCount > 0 ? '#a55e00' : '#6b7f8c'}">` +
+                        `${members.length} crew member${members.length === 1 ? '' : 's'}` +
+                        (unresolvedCount > 0 ? ` · ${unresolvedCount} legacy/unresolved key(s): edit before use` : '') +
+                        `</span>`;
 
                     const edit = makeButton('Edit');
                     edit.style.cssText += 'padding:6px 9px;font-size:11px;';
@@ -8388,7 +8427,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     'border:1px solid #d9e3ea;border-radius:8px;padding:4px 9px;max-height:380px;overflow:auto;';
                 editor.appendChild(list);
 
-                const selected = new Set(currentSet?.memberPrefixes || []);
+                const selected = new Set((currentSet?.memberPrefixes || [])
+                    .map(prefix => rosterPersonByPrefix(prefix)?.prefix || prefix));
 
                 function drawPeople() {
                     const q = clean(searchWrap.input.value).toLowerCase();
@@ -8437,6 +8477,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         const name = clean(setName.input.value);
                         if (!name) throw new Error('Captain Set name is required.');
                         if (!selected.size) throw new Error('Select at least one person.');
+                        const unknown = [...selected].filter(prefix => !rosterPersonByPrefix(prefix));
+                        if (unknown.length) throw new Error(
+                            'This Captain Set contains unresolved legacy members: ' +
+                            unknown.join(', ') + '. Remove or correct them before saving.'
+                        );
 
                         const latest = cloneConfig();
                         const otherSets = (latest.captainSets || []).filter(s => s.id !== editingSetId);
