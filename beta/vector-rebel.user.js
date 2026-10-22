@@ -3646,6 +3646,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             clean(item.status).toLowerCase() === 'in service');
         const mode = getMode(modeKey);
         const scba = modeKey === 'tour' ? getMode('scbaTour') : null;
+        if (scba && items.some(item => item.pool === '299947') &&
+            scba.templates['299947'] !== '119122') {
+            throw new Error('SCBA Face Mask Tour Checklist template mapping is not the verified 119122. Inspection blocked.');
+        }
         const applicableTemplate = item => item.pool === '299947' && scba
             ? { template: scba.templates[item.pool], inspectionModeKey: 'scbaTour' }
             : mode?.templates?.[item.pool]
