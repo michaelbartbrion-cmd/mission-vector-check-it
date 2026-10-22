@@ -3613,7 +3613,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         // and other distinct equipment pools have their own inspections and
         // must not block a routine structural PPE mode, but a newly introduced
         // structural PPE pool without a mapped template MUST block.
-        const structural = /\\b(?:bunker|structural|turnout|hood|helmet|glove|boot|coat|pant)\\b/i;
+        const structural = /\b(?:bunker|structural|turnout|hood|helmet|glove|boot|coat|pant)\b/i;
         const supplemental = unmatched.filter(item => {
             const type = clean(item.type);
             return type && type.toUpperCase() !== 'UNKNOWN' && !structural.test(type);
