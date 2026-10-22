@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.30
+// @version      3.2.31
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.30',
+        version: '3.2.31',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.30';
+    const VERSION = '3.2.31';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -60,6 +60,7 @@
     const CAPTAIN_LAST_SET_KEY = 'vectorRebelCaptainLastSet_v1';
     const CAPTAIN_DAILY_CHECK_KEY = 'vectorRebelCaptainDailyCheck_v1';
     const CAPTAIN_DAILY_REPORT_KEY = 'vectorRebelCaptainDailyReport_v1';
+    const CAPTAIN_DAILY_DEFERRED_KEY = 'vectorRebelCaptainDailyDeferred_v1';
     const MASTER_ROSTER_OVERRIDE_KEY = 'vectorRebelMasterRosterOverride_v1';
     const MASTER_ROSTER_REVIEW_KEY = 'vectorRebelMasterRosterReview_v1';
     const RUN_OWNER_KEY = 'vectorRebelRunOwner_v1';
@@ -2201,6 +2202,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         saveDiagnostic(message, run);
         if (run) {
+            const deferred = loadJSON(CAPTAIN_DAILY_DEFERRED_KEY, null);
+            if (deferred?.runId === run.runId) persistentRemoveRaw(CAPTAIN_DAILY_DEFERRED_KEY);
             const priorPhase = run.phase;
             run.phase = 'stopped';
             run.stoppedFromPhase = priorPhase;
@@ -5309,9 +5312,30 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         box.appendChild(close);
     }
 
+    function consumeQueuedCaptainDailyAfterVerifiedRun(run, now = Date.now()) {
+        const deferred = loadJSON(CAPTAIN_DAILY_DEFERRED_KEY, null);
+        if (!deferred || deferred.runId !== run?.runId) return false;
+        persistentRemoveRaw(CAPTAIN_DAILY_DEFERRED_KEY);
+        const queuedAt = Date.parse(deferred.queuedAt || '');
+        return Number.isFinite(queuedAt) && now >= queuedAt &&
+            now - queuedAt < 30 * 60 * 1000;
+    }
+
     async function launchCaptainDailyCheckFromAnywhere() {
-        if (getRun()) {
-            setStatus('An inspection run is active. Finish or abort it before the read-only Captain history check.', false);
+        const activeRun = getRun();
+        if (activeRun) {
+            if (activeRun.phase === 'stopped') {
+                setStatus('The inspection run stopped and needs review. Verify any submitted inspection, then use Settings → General → Abort Active Run before starting the Daily Captain Check.', false);
+                return;
+            }
+            // A request immediately after the final submit must not navigate away
+            // while the official Item Log is still being verified. Defer the read-only
+            // check until the existing run records its verified completion.
+            saveJSON(CAPTAIN_DAILY_DEFERRED_KEY, {
+                runId: activeRun.runId,
+                queuedAt: new Date().toISOString()
+            });
+            setStatus('Daily Captain Check queued. Waiting for the current PPE run to finish and verify its final submission; no new inspection will be started.');
             return;
         }
         const active = getCaptainDailyCheck();
@@ -6141,7 +6165,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             });
             const stopped = loadJSON(STOPPED_RUN_KEY, null);
             if (stopped?.modeKey === run.modeKey) persistentRemoveRaw(STOPPED_RUN_KEY);
+            // Consume only after the whole run is archived as verified.
+            const queuedCaptain = consumeQueuedCaptainDailyAfterVerifiedRun(run);
             clearRun();
+
+            if (queuedCaptain) {
+                setStatus(`RUN COMPLETE — ${total}/${total} ${mode.short} inspection(s) verified. Opening the queued read-only Daily Captain Check.`);
+                setTimeout(() => launchCaptainDailyCheckFromAnywhere().catch(error => {
+                    setStatus(`Daily Captain Check could not open: ${error.message}`, false);
+                }), 600);
+                return;
+            }
 
             const archiveNote = archiveWarnings.length
                 ? ` Local archive warning: ${archiveWarnings.join(' ')} Download this run summary now.`
@@ -6915,6 +6949,27 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         row.appendChild(label);
                         return select;
                     });
+                    // Never assume SCBA is safe. The inspector can attest once
+                    // AFTER physically checking each listed component; this is an
+                    // explicit action rather than seven pre-populated PASS values.
+                    const inspectedAll = makeButton('I physically verified all 7 — mark PASS', {
+                        background:'#e8f4ec', color:'#175b2e'
+                    });
+                    inspectedAll.onclick = () => {
+                        if (scbaSelects.some(select => select.value === 'fail')) {
+                            alert(item.assetId + ': a failed SCBA check cannot be changed in bulk. Review and record the failure manually.');
+                            return;
+                        }
+                        const confirmed = confirm(
+                            item.assetId + ': Have you physically checked ALL SEVEN SCBA Face Mask items and confirmed each one PASSES? This action records your answers, not an automatic equipment assessment.'
+                        );
+                        if (!confirmed) return;
+                        for (const select of scbaSelects) {
+                            select.value = 'pass';
+                            select.dispatchEvent(new Event('change', {bubbles:true}));
+                        }
+                    };
+                    row.appendChild(inspectedAll);
                     box.appendChild(row);
                     rows.push({ item, include, scbaSelects });
                     return;
@@ -9892,6 +9947,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ? `\n\nAlready completed/submitted-or-uncertain asset(s):\n${protectedIds.join('\n')}`
             : '\n\nNo item in this run is recorded as submitted yet.';
         if (!confirm('Abort the active PPE run? Already submitted inspections remain submitted.' + detail)) return;
+        const deferred = loadJSON(CAPTAIN_DAILY_DEFERRED_KEY, null);
+        if (deferred?.runId === run.runId) persistentRemoveRaw(CAPTAIN_DAILY_DEFERRED_KEY);
         saveDiagnostic('Run manually aborted by inspector.', run);
         archiveStoppedRun(run, 'Run manually aborted by inspector.');
         rebelCommandEvent('ppe_workflow_cancelled', {
