@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.15
+// @version      3.2.16
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.15';
+    const VERSION = '3.2.16';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -7100,25 +7100,21 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const original = search.value || '';
         try {
             if (clean(original)) {
+                const beforeClear = visibleAssetLinksSignature();
                 nativeSetInput(search, '');
-                let prior = '', stable = 0;
-                const start = Date.now();
-                while (Date.now() - start < 10000) {
-                    await sleep(200);
-                    const sig = visibleAssetLinksSignature();
-                    stable = sig && sig === prior ? stable + 1 : 0;
-                    prior = sig;
-                    if (stable >= 4) break;
-                }
-                if (stable < 4) throw new Error('PPE results failed to settle after clearing search.');
+                await waitForPpeRowsReady(22000, beforeClear, progress);
             }
             await goToFirstPpePage(progress);
+            await waitForPpeRowsReady(22000, null, progress);
             const items = new Map(), seenPages = new Set();
             let pageCount = 0, rowCount = 0, unassignedCount = 0;
             for (let guard = 0; guard < 1000; guard++) {
+                // The previous wait verified a complete populated page; reread
+                // that state immediately before processing its ownership rows.
+                const currentPage = ppeLoadedRowsSnapshot();
                 const sig = visibleAssetLinksSignature();
-                if (!sig || seenPages.has(sig)) {
-                    throw new Error('PPE pagination repeated or failed to load; inventory incomplete.');
+                if (!currentPage.ready || !sig || seenPages.has(sig)) {
+                    throw new Error('PPE pagination repeated or rows became incomplete; inventory not saved.');
                 }
                 seenPages.add(sig);
                 pageCount++;
@@ -7188,26 +7184,103 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             !cls.includes('disabled');
     }
 
-    async function waitForPpePageChange(previousSignature, timeoutMs = 8000) {
-        const started = Date.now();
-        let changedAt = 0;
-        let last = '';
-        let stable = 0;
-
-        while (Date.now() - started < timeoutMs) {
-            await sleep(160);
-            const current = visibleAssetLinksSignature();
-            if (current && current !== previousSignature) {
-                if (!changedAt) changedAt = Date.now();
-                if (current === last) stable += 1;
-                else {
-                    last = current;
-                    stable = 0;
-                }
-                if (stable >= 3 && Date.now() - changedAt >= 400) return current;
+    // Vector renders the Equipment/PPE shell before it renders the equipment
+    // table. A selected PPE tab or an empty table is NOT evidence that the list
+    // has finished loading. Wait for a populated, stable page containing the
+    // authoritative Responsible Party values before counting or paginating.
+    function ppeLoadedRowsSnapshot() {
+        const root = getPpeResultsContainer();
+        const anchors = root ? getVisiblePpeAnchors(root) : [];
+        const items = [];
+        let ready = anchors.length > 0;
+        for (const anchor of anchors) {
+            const row = ppeRowForAnchor(anchor);
+            const table = row?.closest('table');
+            const headers = table ? [...table.querySelectorAll('thead th')].map(cell =>
+                clean(cell.innerText || cell.textContent || '').toLowerCase()) : [];
+            const cells = row ? [...row.querySelectorAll(':scope > td, :scope > [role="cell"]')] : [];
+            const nameIndex = headers.indexOf('name');
+            const partyIndex = headers.indexOf('responsible party');
+            if (nameIndex < 0 || partyIndex < 0 || !cells[nameIndex] || !cells[partyIndex]) {
+                ready = false;
+                break;
             }
+            const name = clean(cells[nameIndex].innerText || cells[nameIndex].textContent || '');
+            const party = clean(cells[partyIndex].innerText || cells[partyIndex].textContent || '');
+            const href = anchor.getAttribute('href') || '';
+            if (!name || !/\/app\/equipment\/PPE\/pool\/\d+\/\d+\/item/i.test(href)) {
+                ready = false;
+                break;
+            }
+            items.push(href + '::' + name + '::' + party);
         }
-        throw new Error('Vector PPE pagination did not settle in time.');
+        // The visible footer normally says "1-10 of N". If present, it is
+        // authoritative evidence that a transient partial page is incomplete.
+        // If absent, a longer stable-row dwell is still required.
+        const region = root?.parentElement || root;
+        const regionText = clean(region?.innerText || region?.textContent || '').slice(-1500);
+        const range = regionText.match(/(?:^|\s)(\d+)\s*[-–]\s*(\d+)\s+of\s+(\d+)(?:\s|$)/i);
+        const expectedCount = range ? Number(range[2]) - Number(range[1]) + 1 : null;
+        if (expectedCount !== null && (!Number.isInteger(expectedCount) ||
+            expectedCount < 1 || expectedCount > 500 || anchors.length !== expectedCount)) {
+            ready = false;
+        }
+        return {
+            ready, count: anchors.length,
+            signature: items.join('|'),
+            expectedCount,
+            reason: !anchors.length ? 'waiting for first PPE item' :
+                !ready ? 'waiting for complete PPE rows' : 'PPE rows stabilizing'
+        };
+    }
+
+    async function waitForPpeRowsReady(timeoutMs = 22000, previousSignature = null, progress = null) {
+        const started = Date.now();
+        let firstReadyAt = 0, stableSince = 0, signature = '';
+        let lastProgressAt = -Infinity;
+        let latest = { reason: 'waiting for PPE list', count: 0 };
+        while (Date.now() - started < timeoutMs) {
+            const tab = findVectorNavigationTarget('PPE');
+            const selected = !!tab && vectorControlLooksActive(tab);
+            const snapshot = selected ? ppeLoadedRowsSnapshot() :
+                { ready: false, count: 0, reason: 'waiting for PPE tab to activate' };
+            latest = snapshot;
+            const changed = previousSignature === null ||
+                (snapshot.signature && snapshot.signature !== previousSignature);
+            if (selected && snapshot.ready && changed) {
+                const now = Date.now();
+                if (!firstReadyAt) firstReadyAt = now;
+                if (snapshot.signature !== signature) {
+                    signature = snapshot.signature;
+                    stableSince = now;
+                }
+                // Keep at least 1.4 seconds of post-population observation,
+                // including at least 0.9 seconds with no row/owner changes.
+                if (now - firstReadyAt >= 1400 && now - stableSince >= 900) {
+                    return snapshot;
+                }
+            } else {
+                firstReadyAt = 0;
+                stableSince = 0;
+                signature = '';
+            }
+            if (progress && Date.now() - lastProgressAt >= 900) {
+                progress('Waiting for Vector PPE to load — ' + snapshot.reason +
+                    (snapshot.count ? ' (' + snapshot.count + ' visible)' : '') + '…');
+                lastProgressAt = Date.now();
+            }
+            await sleep(200);
+        }
+        throw new Error('Vector PPE did not finish loading within ' +
+            Math.round(timeoutMs / 1000) + ' seconds (' + latest.reason +
+            ', ' + latest.count + ' visible). No master roster was saved.');
+    }
+
+    async function waitForPpePageChange(previousSignature, timeoutMs = 22000) {
+        // A changed link signature can be the first transient row of the next
+        // page. Wait for the full table and Responsible Party cells to settle.
+        const loaded = await waitForPpeRowsReady(timeoutMs, previousSignature);
+        return loaded.signature;
     }
 
     async function goToFirstPpePage(progress = null) {
@@ -7345,13 +7418,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             !!getPpeResultsContainer();
     }
 
-    async function waitForPpeListReady(timeoutMs = 12000) {
-        const started = Date.now();
-        while (Date.now() - started < timeoutMs) {
-            if (isConfirmedPpeEquipmentPage()) return true;
-            await sleep(200);
+    async function waitForPpeListReady(timeoutMs = 22000, progress = null) {
+        try {
+            await waitForPpeRowsReady(timeoutMs, null, progress);
+            return true;
+        } catch {
+            return false;
         }
-        return false;
     }
 
     async function waitForVectorNavigationTarget(label, timeoutMs = 10000) {
@@ -7372,7 +7445,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
 
         if (isConfirmedPpeEquipmentPage()) {
-            if (progress) progress('Already on Equipment → PPE.');
+            if (progress) progress('Already on Equipment → PPE; waiting for inventory rows…');
+            await waitForPpeRowsReady(22000, null, progress);
             return true;
         }
 
@@ -7400,7 +7474,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ppe.click();
         }
 
-        if (await waitForPpeListReady(15000)) {
+        if (await waitForPpeListReady(22000, progress)) {
             if (progress) progress('Equipment → PPE opened.');
             return true;
         }
@@ -7410,7 +7484,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const retryPpe = findVectorNavigationTarget('PPE');
         if (retryPpe) {
             retryPpe.click();
-            if (await waitForPpeListReady(10000)) {
+            if (await waitForPpeListReady(22000, progress)) {
                 if (progress) progress('Equipment → PPE opened.');
                 return true;
             }
