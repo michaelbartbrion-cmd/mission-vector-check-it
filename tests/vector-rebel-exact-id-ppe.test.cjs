@@ -74,9 +74,9 @@ test('malformed imported metadata is rejected by normalizer',()=>{
  assert.equal(out['michael brion'].length,1);
  assert.equal(out['other name'],undefined);
 });
-test('Exact-ID lookup stays separate from real inspection templates and department roster scans',()=>{
- assert.match(src,/\['equipment', 'Assigned PPE'\]/);
- assert.match(src,/mainAction\('Assigned PPE', \(\) => showSettings\('equipment'\), false\)/);
+test('Legacy exact-ID links remain isolated but redundant Assigned PPE controls are hidden',()=>{
+ assert.doesNotMatch(src,/\['equipment', 'Assigned PPE'\]/);
+ assert.doesNotMatch(src,/mainAction\('Assigned PPE', \(\) => showSettings\('equipment'\), false\)/);
  assert.match(src,/async function verifyExactPpeOwnership/);
  assert.match(src,/await scanPpeOwnerSearch\(\{ name, prefix: id \}/);
  assert.doesNotMatch(src.slice(start,end),/scanPpeOwnerInventory\(/);

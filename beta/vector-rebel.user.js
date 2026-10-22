@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.28
+// @version      3.2.29
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.28',
+        version: '3.2.29',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.28';
+    const VERSION = '3.2.29';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -7601,7 +7601,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const target = options.find(el =>
                     masterNameKey(el.innerText || el.textContent || '') === ownerKey);
                 if (target) {
-                    target.dispatchEvent(new MouseEvent('mousedown', {bubbles:true,cancelable:true,view:window}));
+                    // Tampermonkey runs in an isolated realm; its window is not a page Window.
+                    // MouseEvent.view must be omitted so Chromium accepts the synthetic event.
+                    target.dispatchEvent(new MouseEvent('mousedown', {bubbles:true,cancelable:true}));
                     target.click();
                     chosen = true;
                     break;
@@ -8839,7 +8841,6 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         const tabs = [
             ['profile', 'Profile'],
-            ['equipment', 'Assigned PPE'],
             ['captain', 'Captain Sets'],
             ['signatures', 'Signatures'],
             ['history', 'History'],
@@ -8973,7 +8974,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             list.style.cssText='margin:10px 0;';
             const help = document.createElement('div');
             help.style.cssText='font-size:11px;line-height:1.45;color:#9a5a10;margin-top:9px;';
-            help.textContent='SCBA inspections are not yet mapped in Vector Rebel. Linking the mask makes it easy to locate and verify, but does not certify its inspection or alter working Tour / After-Fire / Captain checks.';
+            help.textContent='Exact equipment-ID links are legacy bookmarks. Current inspections find assigned gear automatically by Responsible Party.';
             const add = makeButton('Find, Verify & Link This PPE', {
                 background:'#176b8e',color:'#fff'
             });
@@ -10054,7 +10055,6 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             mainAction('My After-Fire', () => launchMyInspectionFromAnywhere('afterFire')),
             mainAction("Captain's Monthly", launchCaptainInspectionFromAnywhere),
             mainAction('Daily Captain Check', launchCaptainDailyCheckFromAnywhere, false),
-            mainAction('Assigned PPE', () => showSettings('equipment'), false),
             mainAction('Settings', () => showSettings('profile'), false)
         );
 

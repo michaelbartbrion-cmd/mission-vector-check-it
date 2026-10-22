@@ -43,7 +43,15 @@ function harness({owner='Michael Brion',rows=[],showFilter=true,selectable=true,
  const f=code(clean,key,()=>false,async()=>{},()=>search,
    (el,val)=>{el.value=val;updates.push(val);},async ms=>{now+=ms;},fakeDoc,
    ()=>true,(v,target)=>clean(v).toLowerCase()===clean(target).toLowerCase(),
-   {},class MouseEvent{},
+   {},class StrictMouseEvent {
+     constructor(type, options) {
+       assert.equal(type, 'mousedown');
+       assert.equal(options.bubbles, true);
+       assert.equal(options.cancelable, true);
+       assert.equal(Object.hasOwn(options, 'view'), false,
+         'Tampermonkey cross-realm window must not be passed as MouseEvent.view');
+     }
+   },
    ()=>({}),()=>({ready:applied&&page().length>0,
      signature:'page'+currentPage+'-'+page().map(x=>x.assetId).join(',')}),
    ()=>anchors(),a=>a.item,
