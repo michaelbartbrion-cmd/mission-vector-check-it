@@ -2101,7 +2101,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function buildDiagnostic(message, run = getRun()) {
         const item = run?.items?.[run?.index] || null;
-        const mode = run?.modeKey ? getMode(run.modeKey) : null;
+        const mode = run?.modeKey ? getItemInspectionMode(run, item) : null;
         const inspection = currentInspection();
         const config = getConfig();
         const privateNameNeedles = [config.inspectorName, ...(config.peopleDirectory || []).map(p => p.name)]
@@ -5601,7 +5601,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     async function fillLiveForm(run, item) {
-        const mode = getMode(run.modeKey);
+        const mode = getItemInspectionMode(run, item);
         const current = currentInspection();
         if (!current || current.template !== item.template) {
             throw new Error(`${item.assetId}: expected template ${item.template}, Vector opened ${current?.template || 'unknown'}.`);
@@ -5846,7 +5846,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     function completionEvidence(run, item) {
-        const mode = getMode(run.modeKey);
+        const mode = getItemInspectionMode(run, item);
 
         // Retained for compatibility with any Vector variant that exposes a
         // completed inspection-instance view.
@@ -5988,14 +5988,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 postSubmitHistoryEntries: run.postSubmitHistoryEntries || [],
                 postSubmitHistoryKeys: run.postSubmitHistoryKeys || [],
                 postSubmitUsesStableIds: !!run.postSubmitUsesStableIds,
-                finalHistoryEntries: modeHistoryEntryTexts(item, getMode(run.modeKey).title),
+                finalHistoryEntries: modeHistoryEntryTexts(item, getItemInspectionMode(run, item).title),
                 itemLogTableFound: !!findItemLogHistoryTable(),
                 itemLogHeaders: findItemLogHistoryTable()
                     ? historyContainerHeaderText(findItemLogHistoryTable())
                     : '',
                 itemLogParserPath: run.itemLogParserPath || '',
-                textHistoryFallbackCount: textHistoryEntryElements(getMode(run.modeKey).title).length,
-                textHistoryFallbackEntries: textHistoryEntryElements(getMode(run.modeKey).title)
+                textHistoryFallbackCount: textHistoryEntryElements(getItemInspectionMode(run, item).title).length,
+                textHistoryFallbackEntries: textHistoryEntryElements(getItemInspectionMode(run, item).title)
                     .map(entry => uiText(entry.text))
                     .slice(0, 20),
                 preSubmitAssetFingerprint: run.preSubmitAssetFingerprint || null,
@@ -6074,7 +6074,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     async function waitForFinalCompletion(run, timeout = 60000) {
         const item = run.items[run.index];
-        const mode = getMode(run.modeKey);
+        const mode = getItemInspectionMode(run, item);
         const start = Date.now();
         let historyRevealAttempted = false;
 
@@ -6111,7 +6111,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     async function waitFailedOutcome(run) {
         const item = run.items[run.index];
-        const mode = getMode(run.modeKey);
+        const mode = getItemInspectionMode(run, item);
         const start = Date.now();
         let historyRevealAttempted = false;
 
@@ -6160,7 +6160,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     async function processLiveInspection(run) {
         const item = run.items[run.index];
-        const mode = getMode(run.modeKey);
+        const mode = getItemInspectionMode(run, item);
 
         if (!isLiveInspectionPage(mode.title)) {
             stopRun(`${item.assetId}: a fresh live ${mode.short} inspection was not detected.`);
@@ -6227,7 +6227,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     async function openInspectionForCurrentAsset(run) {
         const item = run.items[run.index];
-        const mode = getMode(run.modeKey);
+        const mode = getItemInspectionMode(run, item);
 
         if (!isAssetPageFor(item)) {
             location.href = item.url;
@@ -6444,7 +6444,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         busy = true;
         try {
             const item = run.items[run.index];
-            const mode = getMode(run.modeKey);
+            const mode = getItemInspectionMode(run, item);
             setStatus(`${run.index + 1}/${run.items.length} — ${item.assetId} — ${run.phase}`);
 
             if (run.phase === 'submitted') {
