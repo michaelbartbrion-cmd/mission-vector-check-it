@@ -39,14 +39,14 @@ function createHarness(anchors) {
         'getPoolType','location','ensurePpeEquipmentPage','getSearchInput','getPpeResultsContainer',
         'getVisiblePpeAnchors','visibleAssetLinksSignature','goToFirstPpePage','getPaginationControl',
         'paginationControlEnabled','normalizeMasterRoster','rosterNeedsReview','getMode',
-        'nativeSetInput','sleep','waitForPpePageChange',source);
+        'nativeSetInput','sleep','waitForPpePageChange','waitForPpeRowsReady','ppeLoadedRowsSnapshot',source);
     return fn(clean,nameKey,a=>a.row,s=>!s || s==='-' || /fire department/i.test(s),
         ()=>'Bunker Coat',{origin:'https://app.vectorcheckit.us'},
         async()=>{},()=>({value:'',isConnected:true}),()=>({}),()=>anchors,
         ()=>'unique-first-and-last-page',async()=>{},()=>null,()=>false,
         people=>({people:people.map(({assetCount,...p})=>p),rejected:[],merged:[]}),
         ()=>[],()=>({templates:{'300045':'TEMPLATE'}}),()=>{},async()=>{},
-        async()=>{});
+        async()=>{},async()=>({ready:true}),()=>({ready:true}));
 }
 test('reads numeric PPE Name field and Responsible Party instead of Location', () => {
     const api = createHarness([]);
