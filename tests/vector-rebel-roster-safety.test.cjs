@@ -135,5 +135,5 @@ test('inspection discoverer refuses stale or unproven ownership inventories', as
     await assert.rejects(()=>api.discoverOwnerGear({name:'Michael Brion'},'captain',
         {source:'Equipment-prefix guessing',items:[]}),/Responsible Party/);
     assert.doesNotMatch(script,/discoverOwnerGear\(owner\.prefix,/);
-    assert.match(script,/const freshInventory = await scanPpeOwnerInventory/);
+    assert.match(script,/const freshInventory = await scanPpeCrewOwners\(owners/);
 });
