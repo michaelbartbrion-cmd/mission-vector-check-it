@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.13
+// @version      3.2.14
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.13';
+    const VERSION = '3.2.14';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -677,13 +677,24 @@
     const MANAGED_UPDATE_URL = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js';
 
     function openManagedUpdate() {
-        const tmUtilities = 'chrome-extension://dhdgffkkebhmkfjojejmpbldmpobfkfo/options.html#nav=utils';
+        // Chrome deliberately isolates extension pages from website userscripts,
+        // so we cannot type into the Utilities import field. Directly opening a
+        // .user.js file invokes Tampermonkey's native Install/Reinstall flow
+        // when script-URL detection is enabled. The clipboard is a fallback.
         try { GM_setClipboard(MANAGED_UPDATE_URL, 'text'); } catch {}
         try {
-            GM_openInTab(tmUtilities, { active: true, insert: true, setParent: true });
-            setStatus('Update URL copied. In Tampermonkey Utilities, paste into Import from URL and click Install.');
+            const tab = GM_openInTab(MANAGED_UPDATE_URL, {
+                active: true, insert: true, setParent: true
+            });
+            if (!tab) throw new Error('Tampermonkey did not open the install URL.');
+            setStatus('Opened the direct Vector Rebel installer. Approve Install/Reinstall in Tampermonkey. If the browser displays raw script text instead, the update URL is copied for Utilities → Import from URL.');
         } catch (error) {
-            alert('Update URL copied to your clipboard. Open Tampermonkey → Utilities → Import from URL, paste, then click Install.');
+            try {
+                window.open(MANAGED_UPDATE_URL, '_blank', 'noopener,noreferrer');
+                setStatus('Opened the Vector Rebel update link. If direct installation is unavailable, use the copied URL in Tampermonkey Utilities.');
+            } catch {
+                setStatus('Direct installer blocked by the browser. Update URL copied; use Tampermonkey Utilities → Import from URL.', false);
+            }
         }
     }
 
@@ -9068,10 +9079,41 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // INITIALIZE / RESUME
     // ============================================================
 
+    // An obsolete, separately installed migration helper can still show a
+    // "Vector Rebel Recovery" toast after the migration. The current helper
+    // already stores full backups in Tampermonkey and exposes explicit
+    // Backup & Recovery controls. Remove ONLY the obsolete toast; do not
+    // touch migration keys, signatures, roster state, or arbitrary banners.
+    function dismissObsoleteRecoveryToast() {
+        if (location.hostname !== 'app.vectorcheckit.us' || !document.body) return false;
+        const marker = 'No old-site backup has been captured yet.';
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let node, scanned = 0;
+        while ((node = walker.nextNode()) && ++scanned <= 20000) {
+            if (!String(node.nodeValue || '').includes(marker)) continue;
+            let ancestor = node.parentElement;
+            let toast = null;
+            for (let depth = 0; ancestor && depth < 8; depth++, ancestor = ancestor.parentElement) {
+                if (ancestor.id === PANEL_ID || ancestor.id === OVERLAY_ID) break;
+                const content = String(ancestor.textContent || '').trim();
+                if (content.length > 500) break;
+                if (content.includes('Vector Rebel Recovery') && content.includes(marker)) {
+                    toast = ancestor;
+                }
+            }
+            if (toast) {
+                toast.remove();
+                return true;
+            }
+        }
+        return false;
+    }
+
     getConfig();
     migrateLegacySignature();
     migrateLegacyRunHistory();
     installPanel();
+    dismissObsoleteRecoveryToast();
     ensureRebelCommandEnrollment(true).finally(() => {
         rebelCommandEvent('app_loaded', { success: true, description: 'Vector Rebel loaded.' });
         refreshPanelInfo();
@@ -9110,6 +9152,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     const runObserverHandler = () => {
         observerLastRunAt = Date.now();
         if (!document.getElementById(PANEL_ID)) installPanel();
+        dismissObsoleteRecoveryToast();
         if (location.href !== lastUrl) {
             lastUrl = location.href;
             setTimeout(async () => {
