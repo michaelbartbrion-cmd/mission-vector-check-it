@@ -20,7 +20,7 @@ function reachable(entry){
    const b=body(current);
    seen.add(current);
    for(const name of functions.keys()){
-     if(name!==current&&new RegExp('\\b'+name+'\\s*\\(').test(b.replace(/\/\/[^\r\n]*/g,'')))queue.push(name);
+     // Opening Settings is only UI navigation; its admin-button callbacks are not invoked\n     // just because a captain picker opens the settings screen.\n     if(name!=='showSettings' && name!==current &&\n       new RegExp('\\b'+name+'\\s*\\(').test(b.replace(/\/\/[^\r\n]*/g,''))) queue.push(name);
    }
  }
  return seen;
