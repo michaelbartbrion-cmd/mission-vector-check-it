@@ -71,7 +71,7 @@ test('timeout on partially populated results does not return a fake full census'
 test('originally empty-ready guard is replaced for both navigation and already-open PPE',()=>{
   assert.match(script,/Already on Equipment → PPE; waiting for inventory rows/);
   assert.match(script,/await waitForPpeRowsReady\(22000, null, progress\)/);
-  assert.match(script,/await waitForPpeListReady\(22000, progress\)/);
+  assert.match(script,/await waitForPpeListReady\(22000, progress, requireRows\)/);
   assert.match(script,/await waitForPpeRowsReady\(22000, beforeClear, progress\)/);
   assert.match(script,/const currentPage = ppeLoadedRowsSnapshot\(\)/);
 });
