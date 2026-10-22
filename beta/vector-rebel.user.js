@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.11
+// @version      3.2.12
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.11';
+    const VERSION = '3.2.12';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -790,6 +790,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         };
     }
 
+    // Legacy PPE gear discovery uses a surname-style unique equipment prefix.
+    // Generic inventory series are NOT a person's identity and must not be
+    // auto-linked to a firefighter without verified assignment evidence.
+    function rosterHasPersonSpecificPrefix(person) {
+        const expected = expectedSurnamePrefix(person?.name);
+        const actual = clean(person?.prefix).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        return !!expected && !!actual && actual === expected && actual.length >= 2;
+    }
+
     function rosterNeedsReview(people) {
         return (Array.isArray(people) ? people : [])
             .map(rosterPrefixReview)
@@ -1282,7 +1291,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     function getActiveMasterRoster() {
-        return getMasterRosterState().people.filter(person => person.active !== false);
+        return getMasterRosterState().people.filter(person =>
+            person.active !== false && rosterHasPersonSpecificPrefix(person)
+        );
     }
 
     function saveLocalMasterRoster(people, metadata = {}) {
@@ -1311,13 +1322,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const wanted = clean(prefix).toUpperCase();
         if (!wanted) return null;
         const master = getMasterRosterState().people.find(p => p.prefix === wanted);
-        if (master) return master;
-        return getConfig().peopleDirectory.find(p => p.prefix === wanted) || null;
+        if (master) return rosterHasPersonSpecificPrefix(master) ? master : null;
+        const local = getConfig().peopleDirectory.find(p => p.prefix === wanted) || null;
+        return local && rosterHasPersonSpecificPrefix(local) ? local : null;
     }
 
     function resolveCaptainSetPeople(set, config = getConfig()) {
         return (set?.memberPrefixes || [])
-            .map(prefix => rosterPersonByPrefix(prefix) || config.peopleDirectory.find(p => p.prefix === prefix))
+            .map(prefix => rosterPersonByPrefix(prefix))
             .filter(Boolean);
     }
 
@@ -2717,6 +2729,25 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const anchors = getVisiblePpeAnchors(root);
             report.checks.searchInputFound = true;
             report.checks.visiblePpeAnchorCount = anchors.length;
+            // Local-only read-only evidence of the actual assignment column layout.
+            // Do not transmit to telemetry or change any Vector record.
+            report.checks.ownerColumnDiagnostics = anchors.slice(0, 8).map(a => {
+                const row = ppeRowForAnchor(a);
+                const cells = row ? [...row.querySelectorAll(':scope > td, :scope > [role="cell"]')] : [];
+                const table = row?.closest('table');
+                const headers = table ? [...table.querySelectorAll('thead th')].map(h => clean(h.innerText || h.textContent || '').slice(0, 90)) : [];
+                const assetId = genericAssetIdFromAnchor(a);
+                return {
+                    assetId,
+                    columns: cells.map((cell, index) => ({
+                        index,
+                        heading: headers[index] || '',
+                        dataLabel: clean(cell.getAttribute('data-label') || cell.getAttribute('aria-label') || '').slice(0, 90),
+                        text: clean(cell.innerText || cell.textContent || '').slice(0, 180)
+                    })),
+                    candidateName: likelyPersonFromPpeRow(row, assetId)
+                };
+            });
             report.checks.anchorSamples = anchors.slice(0, 8).map(a => ({
                 ariaLabel: clean(a.getAttribute('aria-label') || ''),
                 title: clean(a.getAttribute('title') || ''),
@@ -7068,6 +7099,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const root = getPpeResultsContainer() || document;
         const anchors = getVisiblePpeAnchors(root);
         const byPrefix = new Map();
+        const unverified = [];
 
         for (const anchor of anchors) {
             const assetId = genericAssetIdFromAnchor(anchor);
@@ -7079,6 +7111,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const row = ppeRowForAnchor(anchor);
             const name = clean(likelyPersonFromPpeRow(row, assetId));
             if (!name) continue;
+
+            // Generic asset prefixes are not proof of assignment. Fail closed.
+            if (!rosterHasPersonSpecificPrefix({ name, prefix })) {
+                unverified.push({ name, prefix, assetId, reason: 'person_to_asset_not_verified' });
+                continue;
+            }
 
             const cells = rowCellTexts(row);
             const ppeType = cells.map(normalizedPpeTypeText).find(Boolean) || '';
@@ -7110,6 +7148,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         return {
             people: [...byPrefix.values()],
+            unverified,
             visibleAssetCount: anchors.length
         };
     }
@@ -7278,6 +7317,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const seenPageSignatures = new Set();
         let pageCount = 0;
         let assetCount = 0;
+        const unverifiedByAsset = new Map();
 
         for (let guard = 0; guard < 300; guard++) {
             const signature = visibleAssetLinksSignature();
@@ -7292,6 +7332,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             pageCount += 1;
             const page = scanCurrentPpePagePeople();
             assetCount += page.visibleAssetCount;
+            for (const item of page.unverified || []) unverifiedByAsset.set(item.assetId, item);
 
             for (const person of page.people) {
                 const old = peopleByPrefix.get(person.prefix);
@@ -7361,7 +7402,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             rejected: cleaned.rejected,
             merged: cleaned.merged,
             rawUniqueCandidates: rawPeople.length,
-            needsReview: rosterNeedsReview(rawPeople)
+            needsReview: rosterNeedsReview(rawPeople),
+            unverified: [...unverifiedByAsset.values()]
         };
     }
 
@@ -7933,7 +7975,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         function renderCaptainSets() {
             const config = getConfig();
             const rosterState = getMasterRosterState();
-            const roster = rosterState.people.filter(person => person.active !== false);
+            const roster = getActiveMasterRoster();
 
             const c = card(
                 'Captain Sets',
@@ -8325,7 +8367,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         function renderAdmin() {
             const rosterCard = card(
                 'Master Roster',
-                'Admin-only roster maintenance. Refresh Master from PPE can be started from anywhere in Vector; Vector Rebel opens Equipment → PPE automatically before the read-only scan.'
+                'Admin-only roster maintenance. Generic inventory-series asset prefixes are excluded from automatic personnel assignment. Run Live DOM Preflight on Equipment → PPE to verify owner columns before mapping unusual identifiers.'
             );
 
             const rosterStatus = document.createElement('div');
@@ -8515,7 +8557,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         `New people vs current master: ${added.length}\n` +
                         `Missing from scan: ${missing.length}\n` +
                         `Prefix changes: ${prefixChanges.length}\n` +
-                        `Needs prefix review: ${result.needsReview.length}\n\n` +
+                        `Needs prefix review: ${result.needsReview.length}\n` +
+                        `Unverified gear-to-person mappings excluded: ${result.unverified.length}\n\n` +
                         `Save this cleaned scan as your local master roster?`;
 
                     if (!confirm(summary)) {
@@ -8531,7 +8574,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     });
                     rosterProgress.textContent =
                         `Saved local master: ${saved.people.length} people. ` +
-                        `${result.merged.length} duplicate value(s) merged; ${result.rejected.length} non-person value(s) rejected.`;
+                        `${result.merged.length} duplicate value(s) merged; ${result.rejected.length} non-person value(s) rejected; ` +
+                        `${result.unverified.length} unverified gear assignment(s) excluded.`;
                     refreshRosterStatus();
                     renderTabs();
                 } catch (error) {
