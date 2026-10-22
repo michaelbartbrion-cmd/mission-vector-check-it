@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.21
+// @version      3.2.22
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.21',
+        version: '3.2.22',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.21';
+    const VERSION = '3.2.22';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -7173,10 +7173,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         };
     }
 
-    // Personal PPE modes must not walk the entire department inventory. Try
-    // the person's full name and configured PPE identifier through Vector's
-    // own search field; validate every result against Responsible Party. A
-    // result from searching serials or Locations alone is never ownership.
+    // Bounded PPE owner discovery, shared by personal and Captain checks.
+    // Search the specified PPE asset prefix via Vector's own search field and
+    // verify every returned row against Responsible Party. Never infer owner
+    // from Location, an asset ID, or a PERSON-* master-roster key.
     async function scanPpeOwnerSearch(owner, progress = null) {
         const ownerName = clean(owner?.name);
         const ownerKey = masterNameKey(ownerName);
@@ -7240,7 +7240,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 }
                 if (!didSettle) {
                     throw new Error('Vector did not confirm a settled PPE search for "' +
-                        term + '". Personal inspection stopped before any submission.');
+                        term + '". Scoped PPE search stopped before any inspection or audit.');
                 }
                 searched.push(term);
                 if (empty) continue;
