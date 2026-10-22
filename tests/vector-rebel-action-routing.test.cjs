@@ -20,7 +20,7 @@ function reachable(entry){
    const b=body(current);
    seen.add(current);
    for(const name of functions.keys()){
-     if(name!==current&&new RegExp('\\b'+name+'\\s*\\(').test(b))queue.push(name);
+     if(name!==current&&new RegExp('\\b'+name+'\\s*\\(').test(b.replace(/\/\/[^\r\n]*/g,'')))queue.push(name);
    }
  }
  return seen;
@@ -35,7 +35,7 @@ test('All four visible action buttons have the expected entrypoint',()=>{
  assert.match(script,/mainAction\('My Tour PPE', \(\) => launchMyInspectionFromAnywhere\('tour'\)\)/);
  assert.match(script,/mainAction\('My After-Fire', \(\) => launchMyInspectionFromAnywhere\('afterFire'\)\)/);
  assert.match(script,/mainAction\("Captain's Monthly", launchCaptainInspectionFromAnywhere\)/);
- assert.match(script,/mainAction\('Daily Captain Check', launchCaptainDailyCheckFromAnywhere\)/);
+ assert.match(script,/mainAction\('Daily Captain Check', launchCaptainDailyCheckFromAnywhere, false\)/);
 });
 test('No inspection/audit button can reach a full department PPE crawl',()=>{
  for(const [label,entry] of actions){
