@@ -55,15 +55,15 @@ test('Full backup restores all supported settings and never clears unrelated key
 test('Signature rotation cycles through genuine saved variants with wraparound',()=>{
  const variants=[{label:'Original #1'},{label:'Original #2'},{label:'Original #3'}];
  let cursor='0';
- const fn=new Function('getSignatureLibrary','persistentGetRaw','persistentSetRaw',signatureSource);
- const x=fn(()=>variants,()=>cursor,(_key,value)=>{cursor=value;});
+ const fn=new Function('getSignatureLibrary','persistentGetRaw','persistentSetRaw','SIGNATURE_CURSOR_KEY',signatureSource);
+ const x=fn(()=>variants,()=>cursor,(_key,value)=>{cursor=value;},'sig-cursor');
  const labels=[];
  for(let i=0;i<8;i++){const sig=x.peekSignatureVariant();labels.push(sig.variant.label);x.advanceSignatureCursor(sig.index,sig.total);}
  assert.deepEqual(labels,['Original #1','Original #2','Original #3','Original #1','Original #2','Original #3','Original #1','Original #2']);
 });
 test('No signature means a PPE run must stop before form fill',()=>{
- const fn=new Function('getSignatureLibrary','persistentGetRaw','persistentSetRaw',signatureSource);
- const x=fn(()=>[],()=> '0',()=>{});
+ const fn=new Function('getSignatureLibrary','persistentGetRaw','persistentSetRaw','SIGNATURE_CURSOR_KEY',signatureSource);
+ const x=fn(()=>[],()=> '0',()=>{},'sig-cursor');
  assert.throws(()=>x.peekSignatureVariant(),/No saved signature variants/);
  assert.match(script,/if \(!getSignatureLibrary\(\)\.length\)/);
 });
