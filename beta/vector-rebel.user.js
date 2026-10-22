@@ -8765,12 +8765,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     const text = document.createElement('div');
                     text.style.cssText = 'font-size:12px;line-height:1.45;';
                     const samples = (item.equipmentSamples || [])
-                        .map(sample => `${sample.assetId}${sample.ppeType ? ` — ${sample.ppeType}` : ''}`)
+                        .map(sample => escapeHtml(
+                            `${sample.assetId}${sample.ppeType ? ` — ${sample.ppeType}` : ''}`
+                        ))
                         .join('<br>');
                     text.innerHTML =
                         `<b>${escapeHtml(item.name)}</b> · <code>${escapeHtml(item.prefix)}</code><br>` +
                         `<span style="font-size:11px;color:#7b672e">${item.reasons.map(escapeHtml).join('; ')}</span>` +
-                        `${samples ? `<div style="margin-top:5px;font-size:11px;color:#607483"><b>Scanned gear:</b><br>${samples}</div>` : ''}`;
+                        `${samples ? `<div style="margin-top:5px;font-size:11px;color:#607483"><b>Legacy equipment-row examples (ownership NOT verified):</b><br>${samples}</div>` : ''}`;
 
                     // Older "Fix Mapping", "Find Person's Gear", and generic
                     // "Show Prefix" buttons were based on equipment-number
