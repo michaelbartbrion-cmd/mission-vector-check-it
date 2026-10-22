@@ -5609,6 +5609,35 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         const pass = exactButtons('Passed');
         const fail = exactButtons('Failed');
+        if (item.inspectionModeKey === 'scbaTour') {
+            if (!Array.isArray(item.scbaAnswers) ||
+                item.scbaAnswers.length !== SCBA_TOUR_QUESTIONS.length ||
+                item.scbaAnswers.some(answer => answer !== 'pass')) {
+                throw new Error(item.assetId + ': SCBA requires seven physically verified PASS answers for automatic submission. Failed/incomplete masks require manual Vector inspection.');
+            }
+            if (pass.length !== 7 || fail.length !== 7) {
+                throw new Error(item.assetId + ': SCBA expected exactly seven Pass/Fail controls; saw ' +
+                    pass.length + '/' + fail.length + '. Form may have changed.');
+            }
+            const visibleText = uiText(document.body?.innerText || '');
+            let previousPosition = -1;
+            for (const question of SCBA_TOUR_QUESTIONS) {
+                const index = visibleText.toLowerCase().indexOf(uiText(question).toLowerCase(), previousPosition + 1);
+                if (index < 0 || index <= previousPosition) {
+                    throw new Error(item.assetId + ': SCBA checklist question/order does not match the verified seven-question template.');
+                }
+                previousPosition = index;
+            }
+            if ([...document.querySelectorAll('textarea')].some(visible) ||
+                enabledButton('Done')) {
+                throw new Error(item.assetId + ': SCBA unexpectedly requires a comment/Done step; inspect manually.');
+            }
+            for (let i = 0; i < 7; i++) {
+                pass[i].click();
+                await sleep(280);
+            }
+            return;
+        }
         if (pass.length !== 2 || fail.length !== 2) {
             throw new Error(`${item.assetId}: expected exactly 2 Passed and 2 Failed buttons. Found ${pass.length} Passed and ${fail.length} Failed.`);
         }
@@ -6178,7 +6207,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         saveRun(run);
 
         try {
-            setStatus(`${run.index + 1}/${run.items.length} — recording ${item.q1.toUpperCase()}/${item.q2.toUpperCase()} for ${item.assetId}...`);
+            setStatus(`${run.index + 1}/${run.items.length} — recording ${item.inspectionModeKey === 'scbaTour' ? '7 verified SCBA answers' : item.q1.toUpperCase() + '/' + item.q2.toUpperCase()} for ${item.assetId}...`);
             await fillLiveForm(run, item);
 
             setStatus(`${run.index + 1}/${run.items.length} — applying ${getConfig().inspectorName}'s next signature variant...`);
@@ -6188,7 +6217,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
             await sleep(1000);
             const mainSubmit = await waitFor(() => enabledButton('Submit Inspection'), 15000);
-            const anyFailure = item.q1 === 'fail' || item.q2 === 'fail';
+            const anyFailure = item.inspectionModeKey === 'scbaTour'
+                ? (item.scbaAnswers || []).some(value => value === 'fail')
+                : item.q1 === 'fail' || item.q2 === 'fail';
 
             if (anyFailure) {
                 run.phase = 'failed-main-submitted';
@@ -6354,6 +6385,37 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             );
         } else {
             setStatus(`${run.index + 1}/${run.items.length} — opening ${mode.short} chooser for ${item.assetId}...`);
+        }
+
+        // The SCBA Face Mask pool opens its single Tour Checklist directly
+        // from Start Inspection, without the multi-template chooser. Persist
+        // the click first, and NEVER click it again during interrupted resumes.
+        if (item.inspectionModeKey === 'scbaTour') {
+            if (run.phase !== 'asset') {
+                stopRun(item.assetId + ': SCBA draft had already been opened. Verify it manually; no second Start Inspection click.');
+                return;
+            }
+            const startButton = await waitFor(() => enabledButton('Start Inspection'), 10000);
+            await bringIntoView(startButton, 300);
+            run.phase = 'await-live';
+            run.chooserOpenedAt = Date.now();
+            saveRun(run);
+            startButton.click();
+            const started = Date.now();
+            while (Date.now() - started < 18000) {
+                if (isLiveInspectionPage(mode.title)) {
+                    const fresh = getRun();
+                    if (fresh?.phase === 'await-live') await processLiveInspection(fresh);
+                    return;
+                }
+                if (findChooserRoot()) {
+                    stopRun(item.assetId + ': SCBA unexpectedly opened a chooser instead of the verified direct Tour Checklist. No second click.');
+                    return;
+                }
+                await sleep(180);
+            }
+            stopRun(item.assetId + ': SCBA Start Inspection did not open the expected Tour Checklist. No retry was made.');
+            return;
         }
 
         let chooser = findChooserRoot();
