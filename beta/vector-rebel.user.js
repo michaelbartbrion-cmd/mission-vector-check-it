@@ -7245,8 +7245,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const snapshot = selected ? ppeLoadedRowsSnapshot() :
                 { ready: false, count: 0, reason: 'waiting for PPE tab to activate' };
             latest = snapshot;
+            // Callers pass visibleAssetLinksSignature() before navigation.
+            // Compare like-for-like; snapshot.signature additionally tracks the
+            // owner cells that may finish rendering after the asset links.
             const changed = previousSignature === null ||
-                (snapshot.signature && snapshot.signature !== previousSignature);
+                (snapshot.ready && visibleAssetLinksSignature() !== previousSignature);
             if (selected && snapshot.ready && changed) {
                 const now = Date.now();
                 if (!firstReadyAt) firstReadyAt = now;
