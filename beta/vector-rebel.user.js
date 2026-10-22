@@ -2564,7 +2564,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const owner = item.ownerName || run.ownerName || 'Unknown';
             groups[owner] ||= { total: 0, failed: 0, items: [] };
             groups[owner].total += 1;
-            const failed = item.q1 === 'fail' || item.q2 === 'fail';
+            const failed = item.inspectionModeKey === 'scbaTour'
+                ? (item.scbaAnswers || []).includes('fail')
+                : item.q1 === 'fail' || item.q2 === 'fail';
             if (failed) groups[owner].failed += 1;
             const completion = (run.completed || []).find(c => c.assetId === item.assetId);
             groups[owner].items.push({
@@ -2572,6 +2574,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 type: item.type,
                 q1: item.q1,
                 q2: item.q2,
+                inspectionModeKey: item.inspectionModeKey || run.modeKey,
+                scbaAnswers: Array.isArray(item.scbaAnswers) ? item.scbaAnswers.slice() : null,
                 failureNote: item.failureNote || '',
                 signatureLabel: completion?.signatureLabel || '',
                 evidence: completion?.evidence || '',
@@ -2778,14 +2782,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     details.appendChild(header);
 
                     for (const item of group.items || []) {
-                        const failed = item.q1 === 'fail' || item.q2 === 'fail';
+                        const failed = item.scbaAnswers
+                            ? item.scbaAnswers.includes('fail')
+                            : item.q1 === 'fail' || item.q2 === 'fail';
                         const row = document.createElement('div');
                         row.style.cssText =
                             `padding:7px 9px;margin:3px 0;border:1px solid #e0e6ea;border-radius:6px;${failed ? 'background:#fff4f4;' : ''}`;
                         row.innerHTML =
                             `<b>${escapeHtml(item.assetId || '')}</b> — ${escapeHtml(item.type || '')}` +
-                            `<br>Age/label: <b>${escapeHtml((item.q1 || '').toUpperCase())}</b> · ` +
-                            `Damage: <b>${escapeHtml((item.q2 || '').toUpperCase())}</b>` +
+                            (item.scbaAnswers
+                                ? `<br><b>SCBA Face Mask Tour:</b> ${item.scbaAnswers.length} question(s) — ${item.scbaAnswers.map(v => escapeHtml(v.toUpperCase())).join(', ')}`
+                                : `<br>Age/label: <b>${escapeHtml((item.q1 || '').toUpperCase())}</b> · ` +
+                                  `Damage: <b>${escapeHtml((item.q2 || '').toUpperCase())}</b>`) +
                             (item.failureNote
                                 ? `<br><b>Failure note:</b> ${escapeHtml(item.failureNote)}`
                                 : '') +
@@ -6822,6 +6830,44 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
 
             discovered.forEach(item => {
+                if (item.inspectionModeKey === 'scbaTour') {
+                    const row = document.createElement('div');
+                    row.style.cssText = 'border:2px solid #3c7b9a;border-radius:7px;padding:12px;margin:9px 0;background:#f0f8ff;';
+                    const head = document.createElement('label');
+                    head.style.cssText = 'display:flex;align-items:center;gap:9px;font-weight:700;margin-bottom:8px;';
+                    const include = document.createElement('input');
+                    include.type = 'checkbox';
+                    include.checked = !protectedAssetIds.has(clean(item.assetId).toUpperCase());
+                    const title = document.createElement('span');
+                    title.textContent = 'SCBA Face Mask Tour Checklist — ' + item.assetId +
+                        ' (' + item.ownerName + ')';
+                    head.append(include, title);
+                    row.appendChild(head);
+                    const instruction = document.createElement('div');
+                    instruction.style.cssText = 'font-size:11px;color:#35596b;margin:6px 0 10px;';
+                    instruction.textContent = 'Physically inspect all seven SCBA components. Select PASS or FAIL for EACH; nothing is pre-passed. A failed mask must be handled using Vector’s original SCBA inspection, not automatically submitted.';
+                    row.appendChild(instruction);
+                    const scbaSelects = SCBA_TOUR_QUESTIONS.map((question, index) => {
+                        const label = document.createElement('label');
+                        label.style.cssText = 'display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid #cee2ef;font-size:11px;';
+                        const name = document.createElement('span');
+                        name.style.cssText = 'flex:1;';
+                        name.textContent = (index + 1) + '. ' + question;
+                        const select = document.createElement('select');
+                        select.style.cssText = 'min-width:100px;padding:6px;';
+                        select.innerHTML = '<option value="">SELECT</option><option value="pass">PASS</option><option value="fail">FAIL</option>';
+                        select.addEventListener('change', () => {
+                            row.style.borderColor = scbaSelects.some(x => x.value === 'fail')
+                                ? '#b32c2c' : '#3c7b9a';
+                        });
+                        label.append(name,select);
+                        row.appendChild(label);
+                        return select;
+                    });
+                    box.appendChild(row);
+                    rows.push({ item, include, scbaSelects });
+                    return;
+                }
                 const defaults = defaultResultForAsset(item);
                 const row = document.createElement('div');
                 row.style.cssText = 'border:1px solid #ddd;border-radius:6px;padding:9px;margin:5px 0;';
@@ -6916,6 +6962,20 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const selected = [];
                 for (const row of rows) {
                     if (!row.include.checked) continue;
+                    if (row.item.inspectionModeKey === 'scbaTour') {
+                        const scbaAnswers = row.scbaSelects.map(select => select.value);
+                        if (scbaAnswers.length !== 7 || scbaAnswers.some(value => !value)) {
+                            alert(row.item.assetId + ': answer all seven SCBA checklist questions before starting.');
+                            return;
+                        }
+                        if (scbaAnswers.some(value => value === 'fail')) {
+                            alert(row.item.assetId +
+                                ': SCBA has one or more FAILED checks. Finish this SCBA inspection manually in Vector so its failure details are recorded correctly. Uncheck this SCBA item to proceed with other gear.');
+                            return;
+                        }
+                        selected.push({ ...row.item, scbaAnswers, failureNote: '' });
+                        continue;
+                    }
                     const q1 = row.q1.value;
                     const q2 = row.q2.value;
                     const failureNote = clean(row.note.value);
