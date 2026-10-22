@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.26
+// @version      3.2.27
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.26',
+        version: '3.2.27',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.26';
+    const VERSION = '3.2.27';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -403,7 +403,26 @@
     // Existing proven single-signature key from the earlier helper.
     const LEGACY_SIGNATURE_KEY = 'vectorPpeSavedSignature_v1';
 
+    const SCBA_FACE_MASK_POOL = '299947';
+    const SCBA_TOUR_TEMPLATE = '119122';
+    // Verified on the live SCBA Face Mask Tour Checklist, October 22, 2026.
+    const SCBA_TOUR_QUESTIONS = [
+        'Proper seal while breathing air; no unusual noises/evidence of leaking',
+        'Bypass valve checked for damage, flow tested and returned to the off position.',
+        'Overall assembly, free from deterioration, dust, and damage',
+        'Headnet and Harness: Functions and undamaged. All buckles working properly.',
+        'Regulator Connection: All components accounted for; free of wear, cracks, and damage.',
+        'Lens: Free of cracks, dirt, and damage.',
+        'Heads Up Display (HUD): Operational Check, free of damage, replace batteries as needed.'
+    ];
+
     const BUILTIN_MODES = {
+        scbaTour: {
+            key: 'scbaTour',
+            title: 'SCBA Face Mask Tour Checklist',
+            short: 'SCBA Face Mask Tour',
+            templates: { [SCBA_FACE_MASK_POOL]: SCBA_TOUR_TEMPLATE }
+        },
         tour: {
             key: 'tour',
             title: 'Tour PPE Routine Inspection',
@@ -451,7 +470,8 @@
         '299879': 'Structural Gloves',
         '299882': 'Structural Helmet',
         '299900': 'Hood',
-        '299881': 'Structural Boot'
+        '299881': 'Structural Boot',
+        [SCBA_FACE_MASK_POOL]: 'SCBA Face Mask'
     };
 
     const DEFAULT_DEPARTMENT_PROFILE = {
@@ -462,6 +482,7 @@
         expectedGearCount: 10,
         poolTypes: deepCloneSafe(BUILTIN_POOL_TYPES),
         modeTemplates: {
+            scbaTour: deepCloneSafe(BUILTIN_MODES.scbaTour.templates),
             tour: deepCloneSafe(BUILTIN_MODES.tour.templates),
             afterFire: deepCloneSafe(BUILTIN_MODES.afterFire.templates),
             captain: deepCloneSafe(BUILTIN_MODES.captain.templates)
@@ -1785,6 +1806,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ...builtin,
             templates: deepClone(config.departmentProfile?.modeTemplates?.[modeKey] || {})
         };
+    }
+
+    // Each Tour run may contain both structural gear and a SCBA Face Mask.
+    // Their official Vector checklist titles and form schemas are different.
+    function getItemInspectionMode(run, item) {
+        const key = item?.inspectionModeKey || run?.modeKey;
+        const mode = getMode(key);
+        if (!mode) throw new Error('No inspection mode mapped for ' + (item?.assetId || 'equipment'));
+        return mode;
     }
 
     function getPoolType(pool, config = getConfig()) {
@@ -3607,8 +3637,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             masterNameKey(item.ownerName) === ownerKey &&
             clean(item.status).toLowerCase() === 'in service');
         const mode = getMode(modeKey);
+        const scba = modeKey === 'tour' ? getMode('scbaTour') : null;
+        const applicableTemplate = item => item.pool === SCBA_FACE_MASK_POOL && scba
+            ? { template: scba.templates[item.pool], inspectionModeKey: 'scbaTour' }
+            : mode?.templates?.[item.pool]
+                ? { template: mode.templates[item.pool], inspectionModeKey: modeKey }
+                : null;
         const unmatched = items.filter(item =>
-            !mode?.templates?.[item.pool] || getPoolType(item.pool) === 'UNKNOWN');
+            !applicableTemplate(item) || getPoolType(item.pool) === 'UNKNOWN');
         // Responsible Party covers ALL assigned equipment. SCBA, water-rescue,
         // and other distinct equipment pools have their own inspections and
         // must not block a routine structural PPE mode, but a newly introduced
@@ -3624,7 +3660,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             !supplementalIds.has(item.pool + ':' + item.itemId));
         const blocked = new Set(unmatched.map(item => item.pool + ':' + item.itemId));
         const mapped = items.filter(item => !blocked.has(item.pool + ':' + item.itemId))
-            .map(item => ({...item, template: mode.templates[item.pool]}));
+            .map(item => ({...item, ...applicableTemplate(item)}));
         return {
             items: mapped, unknown, supplemental,
             searchMeta: {
