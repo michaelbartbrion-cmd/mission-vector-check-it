@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.17
+// @version      3.2.18
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.17';
+    const VERSION = '3.2.18';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -3246,7 +3246,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             'no items found',
             'no equipment found',
             'no records found',
-            'nothing found'
+            'nothing found',
+            'no ppe item found'
         ].some(needle => text.includes(needle));
     }
 
@@ -6746,7 +6747,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const cancelledDaily = await cancelCaptainDailyCheckForRealInspection();
             if (cancelledDaily) setStatus('Daily Captain Check cancelled. Starting the real PPE inspection…');
             else setStatus('Opening Equipment → PPE…');
-            await ensurePpeEquipmentPage(message => setStatus(message));
+            await ensurePpeEquipmentPage(message => setStatus(message), false);
             await startMyMode(modeKey);
         } catch (error) {
             saveDiagnostic(error.message);
@@ -7109,19 +7110,27 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const ownerName = clean(owner?.name);
         const ownerKey = masterNameKey(ownerName);
         if (!ownerKey) throw new Error('Set your full inspector name in Settings → Profile first.');
-        await ensurePpeEquipmentPage(progress);
+        // The search field can legitimately show zero results from a previous
+        // query. Require the PPE tab and controls, not a loaded full inventory,
+        // before overwriting that search with the owner's saved gear prefix.
+        await ensurePpeEquipmentPage(progress, false);
         const search = getSearchInput();
         if (!search) throw new Error('Vector PPE search input was not found.');
         const originalTerm = search.value || '';
-        const searchTerms = [...new Set([ownerName, clean(owner?.prefix).toUpperCase()]
-            .filter(term => term && term.length >= 2))];
-        if (!searchTerms.length) throw new Error('No PPE owner search term was configured.');
+        const ownerPrefix = clean(owner?.prefix).toUpperCase();
+        if (!ownerPrefix || ownerPrefix.length < 2 ||
+            !/^[A-Z0-9._-]+$/.test(ownerPrefix) ||
+            ownerPrefix.startsWith('PERSON-')) {
+            throw new Error('A real PPE asset prefix is required in Settings → Profile (for example BRION).');
+        }
+        const searchTerms = [ownerPrefix];
         const byItem = new Map();
         const searched = [];
         let scannedPages = 0, scannedRows = 0;
         try {
             for (const term of searchTerms) {
-                if (progress) progress('Searching PPE for ' + ownerName + ' using "' + term + '"…');
+                if (progress) progress('Searching PPE asset IDs by prefix "' + term +
+                    '" for ' + ownerName + '…');
                 const before = visibleAssetLinksSignature();
                 const priorTerm = clean(search.value);
                 nativeSetInput(search, term);
@@ -7135,7 +7144,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     await sleep(200);
                     if (clean(search.value) !== clean(term)) continue;
                     const snap = ppeLoadedRowsSnapshot();
-                    const emptyState = hasExplicitNoResults() && !snap.ready;
+                    const emptyState = hasExplicitNoResults() && !snap.ready &&
+                        Date.now() - started >= 2200;
                     const changed = before !== visibleAssetLinksSignature();
                     const unchangedQuery = priorTerm === clean(term);
                     if ((snap.ready && (changed || unchangedQuery)) || emptyState) {
@@ -7205,7 +7215,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
             if (!byItem.size) throw new Error(
                 'No PPE could be verified for ' + ownerName +
-                ' using Responsible Party. Check Settings → Profile and confirm Vector searches by person or PPE asset prefix.'
+                ' with PPE prefix ' + ownerPrefix +
+                ' and Responsible Party. Verify your saved PPE prefix and Vector assignment.'
             );
             return {
                 items: [...byItem.values()],
@@ -7551,7 +7562,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             !!getPpeResultsContainer();
     }
 
-    async function waitForPpeListReady(timeoutMs = 22000, progress = null) {
+    async function waitForPpeListReady(timeoutMs = 22000, progress = null, requireRows = true) {
+        if (!requireRows) {
+            const start = Date.now();
+            while (Date.now() - start < timeoutMs) {
+                if (isConfirmedPpeEquipmentPage()) return true;
+                if (progress) progress('Waiting for Vector PPE search controls…');
+                await sleep(200);
+            }
+            return false;
+        }
         try {
             await waitForPpeRowsReady(timeoutMs, null, progress);
             return true;
@@ -7570,7 +7590,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return null;
     }
 
-    async function ensurePpeEquipmentPage(progress = null) {
+    async function ensurePpeEquipmentPage(progress = null, requireRows = true) {
         if (getRun()) {
             throw new Error(
                 'An inspection run is active. Finish or abort that run before Vector Rebel navigates away.'
@@ -7578,8 +7598,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
 
         if (isConfirmedPpeEquipmentPage()) {
-            if (progress) progress('Already on Equipment → PPE; waiting for inventory rows…');
-            await waitForPpeRowsReady(22000, null, progress);
+            if (progress) progress(requireRows
+                ? 'Already on Equipment → PPE; waiting for inventory rows…'
+                : 'PPE tab ready; using the saved asset-prefix search…');
+            if (requireRows) await waitForPpeRowsReady(22000, null, progress);
             return true;
         }
 
@@ -7607,7 +7629,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ppe.click();
         }
 
-        if (await waitForPpeListReady(22000, progress)) {
+        if (await waitForPpeListReady(22000, progress, requireRows)) {
             if (progress) progress('Equipment → PPE opened.');
             return true;
         }
@@ -7617,7 +7639,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const retryPpe = findVectorNavigationTarget('PPE');
         if (retryPpe) {
             retryPpe.click();
-            if (await waitForPpeListReady(22000, progress)) {
+            if (await waitForPpeListReady(22000, progress, requireRows)) {
                 if (progress) progress('Equipment → PPE opened.');
                 return true;
             }
