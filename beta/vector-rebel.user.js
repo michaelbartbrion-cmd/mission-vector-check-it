@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.24
+// @version      3.2.25
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.24',
+        version: '3.2.25',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.24';
+    const VERSION = '3.2.25';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -6559,7 +6559,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ? 'Searching only your PPE and verifying Responsible Party…'
             : 'Verifying live Responsible Party ownership for the selected crew…');
         const freshInventory = personalMode
-            ? await scanPpeOwnerSearch(owners[0], message => setStatus(message))
+            ? await scanPpeByResponsibleParty(owners[0].name, message => setStatus(message))
             : await scanPpeCrewOwners(owners, message => setStatus(message));
 
         for (const owner of owners) {
@@ -7298,6 +7298,179 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // Search the specified PPE asset prefix via Vector's own search field and
     // verify every returned row against Responsible Party. Never infer owner
     // from Location, an asset ID, or a PERSON-* master-roster key.
+    // Direct Vector PPE filter by Responsible Party, verified live on 2026-10-22.
+    // This can return serial-number SCBA masks as well as surname-marked bunker
+    // PPE without guessing gear ID prefixes, and without a department-wide crawl.
+    // It uses the existing Vector filter controls (read-only UI navigation).
+    async function scanPpeByResponsibleParty(personName, progress = null) {
+        const name = clean(personName);
+        const ownerKey = masterNameKey(name);
+        if (!ownerKey || isOrganizationOrBadRosterName(name)) {
+            throw new Error('A valid Responsible Party person name is required.');
+        }
+        await ensurePpeEquipmentPage(progress, false);
+        const search = getSearchInput();
+        if (!search) throw new Error('PPE search field missing.');
+        if (clean(search.value)) {
+            // Clear the separate equipment-name search; otherwise it would hide
+            // valid gear even after Responsible Party filtering succeeds.
+            nativeSetInput(search, '');
+            await sleep(350);
+        }
+        const findButton = label => [...document.querySelectorAll('button,[role="button"]')]
+            .find(btn => visible(btn) &&
+                (uiEquals(btn.getAttribute('aria-label') || '', label) ||
+                    uiEquals(btn.innerText || btn.textContent || '', label)));
+        let input = [...document.querySelectorAll('input[role="combobox"]')]
+            .find(el => visible(el) && /filter-equip-.*-responsibleParty/i.test(el.id));
+        if (!input) {
+            const open = findButton('Open filter options') || findButton('Filters');
+            if (!open) throw new Error('Vector PPE Filters button was not found.');
+            open.click();
+            const openedAt = Date.now();
+            while (Date.now() - openedAt < 5500) {
+                await sleep(120);
+                input = [...document.querySelectorAll('input[role="combobox"]')]
+                    .find(el => visible(el) && /filter-equip-.*-responsibleParty/i.test(el.id));
+                if (input) break;
+            }
+        }
+        if (!input) throw new Error('Vector PPE Responsible Party filter was not available.');
+        // Clear other user-selected draft filters so an earlier Pool/Location
+        // filter cannot silently exclude this person's assigned equipment.
+        const clear = findButton('Clear Filters');
+        if (!clear) throw new Error('Vector did not expose Clear Filters; cannot guarantee full coverage.');
+        clear.click();
+        await sleep(180);
+        input = [...document.querySelectorAll('input[role="combobox"]')]
+            .find(el => visible(el) && /filter-equip-.*-responsibleParty/i.test(el.id));
+        if (!input) {
+            const open = findButton('Open filter options') || findButton('Filters');
+            open?.click();
+            await sleep(250);
+            input = [...document.querySelectorAll('input[role="combobox"]')]
+                .find(el => visible(el) && /filter-equip-.*-responsibleParty/i.test(el.id));
+        }
+        if (!input) throw new Error('Responsible Party picker closed unexpectedly after clearing filters.');
+        // Vector's React-select may reject a complete full-name autocomplete
+        // string. Searching a name fragment produces options; the resulting
+        // choice MUST match the complete requested person name exactly.
+        const tokens = name.split(/[\s-]+/).filter(t => t.length >= 2);
+        const probes = [...new Set([tokens.at(-1), tokens[0], name]
+            .filter(Boolean))];
+        let chosen = false;
+        for (const term of probes) {
+            input.focus();
+            nativeSetInput(input, term);
+            const started = Date.now();
+            while (Date.now() - started < 4000) {
+                await sleep(130);
+                const menuId = input.getAttribute('aria-controls');
+                const menu = menuId ? document.getElementById(menuId) : null;
+                const options = [...(menu || document).querySelectorAll('[role="option"],[id*="-option-"]')]
+                    .filter(el => visible(el));
+                const target = options.find(el =>
+                    masterNameKey(el.innerText || el.textContent || '') === ownerKey);
+                if (target) {
+                    target.dispatchEvent(new MouseEvent('mousedown', {bubbles:true,cancelable:true,view:window}));
+                    target.click();
+                    chosen = true;
+                    break;
+                }
+            }
+            if (chosen) break;
+        }
+        if (!chosen) throw new Error('Responsible Party "' + name +
+            '" was not an exact selectable option in Vector. No check was started.');
+        const apply = findButton('Apply Filters');
+        if (!apply) throw new Error('Vector did not show Apply Filters.');
+        apply.click();
+
+        const started = Date.now();
+        let firstReady = 0, stableAt = 0, prior = '', emptyAt = 0;
+        while (Date.now() - started < 25000) {
+            await sleep(200);
+            const snapshot = ppeLoadedRowsSnapshot();
+            const anchors = getVisiblePpeAnchors(getPpeResultsContainer() || document);
+            let correct = snapshot.ready && anchors.length > 0;
+            if (correct) {
+                try {
+                    correct = anchors.every(a =>
+                        masterNameKey(responsiblePartyPpeRow(a).ownerName) === ownerKey);
+                } catch { correct = false; }
+            }
+            const sig = correct ? snapshot.signature : '';
+            if (correct) {
+                const now = Date.now();
+                if (!firstReady) firstReady = now;
+                if (sig !== prior) { prior = sig; stableAt = now; }
+                if (now-firstReady >= 1400 && now-stableAt >= 900) break;
+            } else {
+                firstReady = 0; prior = ''; stableAt = 0;
+            }
+            if (hasExplicitNoResults() && Date.now() - started > 3000) {
+                if (!emptyAt) emptyAt = Date.now();
+                if (Date.now() - emptyAt > 1200) {
+                    throw new Error('No PPE assigned to Responsible Party "' + name +
+                        '" in Vector. The check was not started.');
+                }
+            }
+            if (progress && Date.now()-started > 1200 &&
+                Math.floor((Date.now()-started)/1000) % 4 === 0) {
+                progress('Waiting for Responsible Party "' + name + '" PPE rows…');
+            }
+        }
+        if (!firstReady || Date.now() - firstReady < 1400 ||
+            Date.now() - stableAt < 900) {
+            throw new Error('Responsible Party PPE filter did not settle for "'+name+'". Check stopped.');
+        }
+        const byItem = new Map(), seenPages = new Set();
+        let pageCount=0, rowCount=0;
+        for (let page=0;page<20;page++) {
+            const snapshot = ppeLoadedRowsSnapshot();
+            const sig = visibleAssetLinksSignature();
+            if (!snapshot.ready || !sig || seenPages.has(sig)) {
+                throw new Error('Responsible Party filtered PPE pagination incomplete or repeated.');
+            }
+            seenPages.add(sig);
+            pageCount++;
+            const anchors = getVisiblePpeAnchors(getPpeResultsContainer() || document);
+            rowCount += anchors.length;
+            if (rowCount > 200) {
+                throw new Error('Responsible Party filter returned more than 200 rows. Unverified filter; stopped.');
+            }
+            for (const anchor of anchors) {
+                const item = responsiblePartyPpeRow(anchor);
+                if (masterNameKey(item.ownerName) !== ownerKey) {
+                    throw new Error('PPE filter returned an asset belonging to a different Responsible Party: ' +
+                        item.assetId + '. Stopped without creating an inspection.');
+                }
+                const key = item.pool+':'+item.itemId;
+                const previous = byItem.get(key);
+                if (previous && (previous.assetId!==item.assetId ||
+                    masterNameKey(previous.ownerName)!==ownerKey)) {
+                    throw new Error('Conflicting PPE filtered row for ' + key);
+                }
+                byItem.set(key,item);
+            }
+            if (progress) progress('Responsible Party '+name+': verified '+
+                byItem.size+' assigned PPE items ('+pageCount+' page(s))…');
+            const next = getPaginationControl('next');
+            if (!paginationControlEnabled(next)) {
+                return {
+                    items:[...byItem.values()],pageCount,rowCount,
+                    source:'Vector PPE Responsible Party column',
+                    scope:'responsible-party-filter',
+                    capturedAt:new Date().toISOString()
+                };
+            }
+            if (page === 19) throw new Error('Responsible Party results exceed 20 pages; check stopped.');
+            next.click();
+            await waitForPpePageChange(sig);
+        }
+        throw new Error('Responsible Party PPE filtered scan did not reach the last page.');
+    }
+
     async function scanPpeOwnerSearch(owner, progress = null) {
         const ownerName = clean(owner?.name);
         const ownerKey = masterNameKey(ownerName);
@@ -7493,25 +7666,21 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 throw new Error('Captain Set has a missing or duplicate person identity.');
             }
             uniqueNames.add(nameKey);
-            const selection = crewPpeSearchPrefix(owner, config);
-            if (progress) progress('Crew PPE ' + (i + 1) + '/' + owners.length + ': searching ' +
-                owner.name + ' with ' + selection.prefix + ' (' + selection.source + ')…');
+            if (progress) progress('Crew PPE ' + (i + 1) + '/' + owners.length +
+                ': filtering Responsible Party = ' + owner.name + '…');
             let scoped;
             try {
-                scoped = await scanPpeOwnerSearch({
-                    name: owner.name,
-                    prefix: selection.prefix
-                }, progress);
+                scoped = await scanPpeByResponsibleParty(owner.name, progress);
             } catch (error) {
-                throw new Error(owner.name + ' (' + selection.prefix + '): ' +
+                throw new Error(owner.name + ': ' +
                     (error?.message || String(error)) +
                     '. Crew check stopped; no incomplete roster was accepted.');
             }
             if (!scoped.items.length) throw new Error(owner.name +
                 ': no PPE ownership confirmed. Crew check stopped.');
             searches.push({
-                name: owner.name, prefix: selection.prefix,
-                source: selection.source, assetCount: scoped.items.length
+                name: owner.name, filter: 'Responsible Party',
+                source: 'Vector PPE', assetCount: scoped.items.length
             });
             pageCount += scoped.pageCount;
             rowCount += scoped.rowCount;
