@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.31
+// @version      3.2.32
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.31',
+        version: '3.2.32',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.31';
+    const VERSION = '3.2.32';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -1851,7 +1851,31 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     });
 
     function getRun() {
-        return loadJSON(RUN_KEY, null);
+        const run = loadJSON(RUN_KEY, null);
+        if (!run || typeof run !== 'object' || Array.isArray(run)) return null;
+        // A different open Vector tab can still hold an old localStorage run.
+        // Previously, clearing the GM key let that tab resurrect an already
+        // completed inspection after the last item was archived. Retire only
+        // an exact run already present in the verified local archive.
+        const summary = loadJSON(LAST_SUMMARY_KEY, null);
+        const verifiedItems = summary?.groups && typeof summary.groups === 'object'
+            ? Object.values(summary.groups).reduce(
+                (count, group) => count + (Array.isArray(group?.items) ? group.items.length : 0), 0)
+            : -1;
+        if (run.runId && summary?.runId === run.runId &&
+            summary.startedAt === run.startedAt &&
+            summary.modeKey === run.modeKey &&
+            summary.completedAt &&
+            Number(summary.total) === run.items?.length &&
+            verifiedItems === run.items?.length &&
+            run.items?.length > 0) {
+            // JSON null is a durable cross-tab tombstone, not a missing key.
+            // Never rewrite unverified in-flight inspection data.
+            persistentSetRaw(RUN_KEY, 'null');
+            releaseRunOwnership();
+            return null;
+        }
+        return run;
     }
 
     function getRunOwner() {
@@ -1922,7 +1946,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     function clearRun() {
-        persistentRemoveRaw(RUN_KEY);
+        // A missing GM value allows another open Check It tab's stale localStorage
+        // to rehydrate and resurrect this run. Persist JSON null instead.
+        persistentSetRaw(RUN_KEY, 'null');
         releaseRunOwnership();
         refreshPanelInfo();
     }

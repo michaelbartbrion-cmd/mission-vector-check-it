@@ -82,3 +82,42 @@ test('SCBA answers are never pre-PASS; one-click PASS requires inspector attesta
     assert.match(src, /if \(scbaSelects\.some\(select => select\.value === 'fail'\)\)/);
     assert.match(src,/scbaAnswers\.some\(value => !value\)/);
 });
+test('A verified archived run cannot be resurrected by stale multi-tab localStorage', () => {
+    const getRunSource = extract('function getRun() {','function getRunOwner() {');
+    const cases = [
+        {same:true, expected:null, tombstoned:true},
+        {same:false, expected:'ppe-other', tombstoned:false}
+    ];
+    for(const item of cases) {
+        const raw = {runId:item.same?'ppe-done':'ppe-other',startedAt:'2026-10-22T21:00:00Z',modeKey:'tour',items:[{assetId:'A'},{assetId:'B'}]};
+        const summary = {runId:'ppe-done',startedAt:'2026-10-22T21:00:00Z',modeKey:'tour',
+            completedAt:'2026-10-22T21:11:00Z',total:2,
+            groups:{'Michael Brion':{items:[{assetId:'A'},{assetId:'B'}]}}};
+        const writes=[], released=[];
+        const getRun = new Function('loadJSON','persistentSetRaw','releaseRunOwnership','RUN_KEY','LAST_SUMMARY_KEY',
+            getRunSource + '\nreturn getRun;')(
+                k=>k==='run-key'?raw:summary,
+                (k,v)=>writes.push([k,v]),()=>released.push(true),'run-key','summary-key');
+        const result = getRun();
+        assert.equal(result?.runId||null,item.expected);
+        assert.deepEqual(writes,item.tombstoned?[['run-key','null']]:[]);
+        assert.equal(released.length,item.tombstoned?1:0);
+    }
+});
+test('Never discard an unverified run just because a previous report exists', () => {
+    const getRunSource=extract('function getRun() {','function getRunOwner() {');
+    const run={runId:'ppe-A',modeKey:'tour',startedAt:'today',items:[{},{}]};
+    let tombstoned=false;
+    const getRun=new Function('loadJSON','persistentSetRaw','releaseRunOwnership','RUN_KEY','LAST_SUMMARY_KEY',
+        getRunSource+'\nreturn getRun;')(
+            k=>k==='run-key'?run:{runId:'ppe-A',modeKey:'tour',startedAt:'today',
+                completedAt:'today',total:2,groups:{person:{items:[{}]}}},
+            ()=>{tombstoned=true;},()=>{},'run-key','summary-key');
+    assert.equal(getRun(),run);
+    assert.equal(tombstoned,false);
+});
+test('clearRun leaves a durable JSON null tombstone rather than deleting GM run key', () => {
+    const clear=extract('function clearRun() {','function setStatus(message, ok = true) {');
+    assert.match(clear,/persistentSetRaw\(RUN_KEY, 'null'\)/);
+    assert.doesNotMatch(clear,/persistentRemoveRaw\(RUN_KEY\)/);
+});
