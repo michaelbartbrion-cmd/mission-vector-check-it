@@ -7,7 +7,8 @@ assert.ok(begin>=0&&end>begin);
 const code=script.slice(begin,end)+'\nreturn scanPpeOwnerSearch;';
 function testHarness(data, settings={}) {
  let ms=0;
- let search={value:'',isConnected:true};
+ let search={value:settings.initialTerm||'',isConnected:true};
+ let rowWaitRequirement=null;
  class FakeDate extends Date {static now(){return ms;}}
  let terms=[], visits=[];
  const rows=()=>{
@@ -34,7 +35,7 @@ function testHarness(data, settings={}) {
   'getPpeResultsContainer','getVisiblePpeAnchors','responsiblePartyPpeRow',
   'getPaginationControl','paginationControlEnabled','waitForPpePageChange',
   'location','Date','sleep','getPoolType','document',code);
- const f=from(clean,norm,async()=>{},()=>search,
+ const f=from(clean,norm,async(_progress, requireRows)=>{rowWaitRequirement=requireRows;},()=>search,
    ()=>rows().length?search.value+':'+currentIndex+':'+rows().length:'EMPTY',
    (_,term)=>{search.value=term;terms.push(term);currentIndex=0},
    ()=>({ready:rows().length>0,signature:JSON.stringify(pages().map(a=>a.x)),count:pages().length}),
@@ -43,19 +44,21 @@ function testHarness(data, settings={}) {
    kind=>kind==='next'&&rows().length>(currentIndex+1)*10?{click(){currentIndex++}}:null,
    v=>!!v,async()=>{}, {origin:'https://app.vectorcheckit.us'},
    FakeDate,async()=>{ms+=200},()=>'',{});
- return {run:f,search,terms,visits,clock:()=>ms};
+ return {run:f,search,terms,visits,clock:()=>ms, getRowRequirement:()=>rowWaitRequirement};
 }
 const michael={name:'Michael Brion',prefix:'BRION'};
 const gear=(id,owner='Michael Brion')=>({assetId:id,ownerName:owner,status:'In Service',type:'Bunker Coat'});
-test('My Tour search checks full name then PPE prefix; does not crawl other crew',async()=>{
+test('My Tour searches only PPE prefix and filters Responsible Party, never full name or entire roster',async()=>{
  const h=testHarness({'Michael Brion':[],BRION:[
     gear('BRION-COAT'),gear('BRION-PANTS'),gear('UNRELATED','Robert Brooks')
- ]});
+ ]},{initialTerm:'Michael Brion'});
  const r=await h.run(michael);
  assert.equal(r.scope,'verified-owner-search');
- assert.deepEqual(r.searched,['Michael Brion','BRION']);
+ assert.deepEqual(r.searched,['BRION']);
  assert.deepEqual(r.items.map(i=>i.assetId),['BRION-COAT','BRION-PANTS']);
- assert.deepEqual(h.terms.slice(0,2),['Michael Brion','BRION']);
+ assert.deepEqual(h.terms,['BRION']);
+ assert.equal(h.search.value,'BRION');
+ assert.equal(h.getRowRequirement(),false);
  assert.ok(r.pageCount<=2);
 });
 test('Exact Responsible Party matching prevents another member gear from inclusion',async()=>{
@@ -70,12 +73,15 @@ test('No matching owner blocks run instead of scanning all PPE',async()=>{
 });
 test('Search result too broad cannot silently become department crawl',async()=>{
  const large=Array.from({length:170},(_,i)=>gear('ITEM-'+i,'Someone Else'));
- const h=testHarness({'Michael Brion':large,BRION:[]});
+ const h=testHarness({'Michael Brion':[],BRION:large});
  await assert.rejects(h.run(michael),/too many results|exceeded 15 pages/);
 });
 test('Personal inspection routes only through scoped owner search and uses current profile',()=>{
  assert.match(script,/const personalMode = modeKey === 'tour' \|\| modeKey === 'afterFire'/);
  assert.match(script,/await scanPpeOwnerSearch\(owners\[0\], message => setStatus\(message\)\)/);
  assert.match(script,/name: config\.inspectorName,\s*prefix: config\.selfPrefix/);
+ assert.match(script,/const searchTerms = \[ownerPrefix\]/);
+ assert.match(script,/ensurePpeEquipmentPage\(message => setStatus\(message\), false\)/);
+ assert.match(script,/await ensurePpeEquipmentPage\(progress, false\)/);
  assert.match(script,/const freshInventory = await scanPpeOwnerInventory\(message => setStatus\(message\)\)/);
 });
