@@ -7001,7 +7001,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         // directory record which could contain somebody else's name.
         const self = {
             name: config.inspectorName,
-            prefix: config.selfPrefix
+            // Stable internal owner key; legacy stored prefix retained only if
+            // already present so existing local rules/snapshots keep working.
+            prefix: config.selfPrefix || ownerRosterKey(config.inspectorName)
         };
 
         try {
