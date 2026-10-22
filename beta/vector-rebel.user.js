@@ -7228,8 +7228,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 capturedAt: new Date().toISOString()
             };
         } finally {
-            if (search.isConnected && search.value !== originalTerm) {
-                nativeSetInput(search, originalTerm);
+            // Leave the verified asset-prefix search visible. Restoring an old
+            // full-name search would make Vector show "No PPE item found" again
+            // and falsely suggest that the inspection ignored the PPE prefix.
+            if (search.isConnected &&
+                clean(search.value).toUpperCase() !== ownerPrefix) {
+                nativeSetInput(search, ownerPrefix);
             }
         }
     }
