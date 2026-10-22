@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.29
+// @version      3.2.30
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.29',
+        version: '3.2.30',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.29';
+    const VERSION = '3.2.30';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -3661,10 +3661,22 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         // and other distinct equipment pools have their own inspections and
         // must not block a routine structural PPE mode, but a newly introduced
         // structural PPE pool without a mapped template MUST block.
+        // These live-confirmed pool names are distinct from structural bunker PPE.
+        // Recognize ONLY the matching pool + type combination; do not infer that
+        // any other unmapped coat, pant, or helmet can be skipped. They remain
+        // visible as other assigned equipment, never auto-inspected or certified.
+        const distinctPpePoolTypes = {
+            '299896': /^dual certification coat\b/i,
+            '299897': /^dual certification pant\b/i,
+            '300006': /^wildland helmet\b/i
+        };
         const structural = /\b(?:bunker|structural|turnout|hood|helmet|glove|boot|coat|pant)\b/i;
         const supplemental = unmatched.filter(item => {
             const type = clean(item.type);
-            return type && type.toUpperCase() !== 'UNKNOWN' && !structural.test(type);
+            if (!type || type.toUpperCase() === 'UNKNOWN') return false;
+            const recognized = distinctPpePoolTypes[clean(item.pool)];
+            if (recognized && recognized.test(type)) return true;
+            return !structural.test(type);
         });
         const supplementalIds = new Set(supplemental.map(item =>
             item.pool + ':' + item.itemId));
@@ -7585,11 +7597,31 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         // string. Searching a name fragment produces options; the resulting
         // choice MUST match the complete requested person name exactly.
         const tokens = name.split(/[\s-]+/).filter(t => t.length >= 2);
-        const probes = [...new Set([tokens.at(-1), tokens[0], name]
+        const shortSurname = tokens.at(-1)?.slice(0, 2);
+        const probes = [...new Set([shortSurname, tokens.at(-1), tokens[0], name]
             .filter(Boolean))];
+        // React-select's multiselect value must actually contain a selected
+        // chip. Finding an option is NOT proof it was selected (v3.2.29 live
+        // video showed Apply Filters running with an empty Responsible Party).
+        const partyIsSelected = () => {
+            const valueContainer = input.parentElement?.parentElement;
+            if (!valueContainer) return false;
+            const labels = [...valueContainer.querySelectorAll(
+                '[class*="multiValue"],[class*="singleValue"],[class*="MultiValue"]'
+            )].filter(el => visible(el));
+            if (labels.some(el =>
+                masterNameKey(el.innerText || el.textContent || '') === ownerKey)) return true;
+            // Some Vector builds give the selected chip a generated CSS class.
+            // Input.value is NOT DOM textContent, so this checks rendered labels,
+            // not an uncommitted search phrase typed into the combobox.
+            const rendered = clean(valueContainer.textContent || '')
+                .replace(/[×✕]/g, '').trim();
+            return masterNameKey(rendered) === ownerKey;
+        };
         let chosen = false;
         for (const term of probes) {
             input.focus();
+            input.click();
             nativeSetInput(input, term);
             const started = Date.now();
             while (Date.now() - started < 4000) {
@@ -7600,19 +7632,24 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     .filter(el => visible(el));
                 const target = options.find(el =>
                     masterNameKey(el.innerText || el.textContent || '') === ownerKey);
-                if (target) {
-                    // Tampermonkey runs in an isolated realm; its window is not a page Window.
-                    // MouseEvent.view must be omitted so Chromium accepts the synthetic event.
-                    target.dispatchEvent(new MouseEvent('mousedown', {bubbles:true,cancelable:true}));
+                if (!target) continue;
+                // One mousedown is the React-select selection gesture. A second
+                // click can toggle it back off in the multi-select widget.
+                target.dispatchEvent(new MouseEvent('mousedown', {bubbles:true,cancelable:true}));
+                await sleep(200);
+                if (!partyIsSelected()) {
+                    // Alternate selector behavior: some Vector releases select
+                    // on click instead of mousedown.
                     target.click();
-                    chosen = true;
-                    break;
+                    await sleep(200);
                 }
+                chosen = partyIsSelected();
+                if (chosen) break;
             }
             if (chosen) break;
         }
         if (!chosen) throw new Error('Responsible Party "' + name +
-            '" was not an exact selectable option in Vector. No check was started.');
+            '" was not confirmed selected in the Vector filter. No check was started.');
         const apply = findButton('Apply Filters');
         if (!apply) throw new Error('Vector did not show Apply Filters.');
         apply.click();
