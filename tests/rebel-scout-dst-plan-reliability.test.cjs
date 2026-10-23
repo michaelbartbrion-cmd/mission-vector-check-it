@@ -25,7 +25,7 @@ test('Staffing census counts the locally correct hours while retaining all other
   assert.match(scrape,/Number\(r\.lengthHours\)===expectedRegularHours\(before\)/);
   assert.match(scrape,/regular>=MIN_REGULAR/);
   assert.match(scrape,/groups>=MIN_GROUPS/);
-  assert.match(scrape,/stableBefore&&stableAfter&&noLoading&&result\.scrollSweepComplete/);
+  assert.match(scrape,/full=\(stableBefore&&stableAfter\|\|independentlyStable\)&&noLoading&&result\.scrollSweepComplete/);
   assert.match(scrape,/body\?\.staffing\?\.quality==='good'/);
 });
 const retrySource=extract('async function syncPlan(){','const REPORT_COLUMNS=');
