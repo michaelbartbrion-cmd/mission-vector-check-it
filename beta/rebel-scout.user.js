@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Scout
 // @namespace    mission-vector-check-it-rebel-scout
-// @version      1.1.47
+// @version      1.1.48
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-scout.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-scout.user.js
 // @description  Read-only CrewSense staffing and overtime collector for Mission Vector Check It.
@@ -23,7 +23,7 @@
 (function(){
 'use strict';
 if (window.top !== window.self || window.MVCI_REBEL_SCOUT_CORE) return;
-const VERSION='1.1.47';
+const VERSION='1.1.48';
 const ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const PAIR_KEY='rebelScoutPairingV1';
 const LEGACY_PAIR_KEYS=['vectorStaffingCollectorPairing_v1','vectorOvertimeCollectorPairing_v1'];
@@ -44,7 +44,7 @@ migrateLegacy();
 /* --- Staffing collector: consolidated from verified vector-staffing-bridge 0.29.0 --- */
 (function(){
 'use strict';
-const VERSION='1.1.47';
+const VERSION='1.1.48';
 const ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const PAIR_KEY='vectorStaffingCollectorPairing_v1';
 const STABLE_MS=900;
@@ -433,7 +433,7 @@ GM_deleteValue('rebelScoutActionInputV1');
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_SCOUT_ACTIONS)return;
-const VERSION='1.1.47';
+const VERSION='1.1.48';
 const core=window.MVCI_REBEL_SCOUT_CORE;
 const STATE_KEY='rebelScoutActionInputV1';
 const SYNC_KEY='rebelScoutSyncQueueV1';
@@ -789,7 +789,7 @@ window.MVCI_REBEL_SCOUT_ACTIONS=Object.freeze({
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_SCOUT)return;
-const VERSION='1.1.47';
+const VERSION='1.1.48';
 const core=window.MVCI_REBEL_SCOUT_CORE;
 function compareScoutVersions(a,b){
  const digits=v=>String(v||'').split('.').map(x=>Number(x)||0);
@@ -1007,7 +1007,28 @@ async function navigateFor(item,q){const date=item.workDate,key=itemKey(item);if
 if(!isRankingPage()||actualVisibleDate()!==date){const target=rankingUrl(date);q.navReloads=q.navReloads||{};if(location.href===target){try{await waitForTargetDate(date,'overtime',30000);if(q.navReloads)delete q.navReloads[key];saveQueue(q);return true}catch(e){q.navReloads[key]=(Number(q.navReloads[key])||0)+1;saveQueue(q);if(q.navReloads[key]>2)throw new Error(`OT Rankings did not render ${date} after waiting on the already-correct URL (${actualVisibleDate()||'no rendered date detected'}).`);location.reload();return false}}location.assign(target);return false}return true}
 async function collectStaffing(date){await waitForTargetDate(date,'staffing');const api=window.MVCI_REBEL_SCOUT_STAFFING;if(!api?.scrapeNow)throw new Error('Rebel Scout staffing collector is unavailable.');await wait(650);const started=Date.now();let thrown='';try{await api.scrapeNow({expectedDate:date})}catch(e){thrown=clean(e?.message||e)}const s=api.status?.()||{},fresh=s.lastCapture?.date===date&&Date.parse(s.lastCapture?.at||'')>=started-1000,last=s.lastError||thrown||s.status||'unknown';if(s.status==='sent-good'&&fresh)return `Staffing ${date}: ${s.lastCapture.rows} rows, ${s.lastCapture.regular} regular full-duty.`;throw new Error(`Staffing ${date} did not pass the full-census verification (${last}).`)}
 async function collectOvertime(date){await waitForTargetDate(date,'overtime');const api=window.MVCI_REBEL_SCOUT_OT;if(!api?.captureRanking)throw new Error('Rebel Scout overtime collector is unavailable.');const r=await api.captureRanking({force:true});if(r?.ranking?.quality==='good')return `OT priority ${date}: accepted.`;throw new Error(`OT priority ${date} did not pass verification (${r?.error||r?.ranking?.quality||'unknown'}).`)}
-async function finishOrExtend(q){let plan;try{plan=await syncPlanReliable('final freshness')}catch(e){q.active=false;q.completedAt=Date.now();q.finalServerCheckError=clean(e?.message||e);saveQueue(q);releaseLock();const good=(q.successKeys||[]).length,fail=q.finalFailures||[];if(fail.length)saveStatus(`Collection finished ${good} checks; ${fail.length} still failed after retries. Final server freshness check was unavailable (${q.finalServerCheckError}). ${fail.slice(0,2).map(x=>`${x.key}: ${x.message}`).join(' | ')}`,'error');else saveStatus(`Collection complete. ${good} requested checks succeeded. Final server freshness check was unavailable (${q.finalServerCheckError}), so Scout could not ask whether any additional stale dates remain.`,'info');return true}if(Number(q.schemaVersion)>=3){q.active=false;q.completedAt=Date.now();q.finalServerCheckError='';q.remainingServerRequested=Array.isArray(plan?.worklist)?plan.worklist.length:0;saveQueue(q);releaseLock();const good=(q.successKeys||[]).length,fail=q.finalFailures||[],remain=Number(q.remainingServerRequested)||0;if(fail.length)saveStatus(`Background batch finished: ${good} succeeded; ${fail.length} failed after retries; ${remain} server-requested check${remain===1?'':'s'} remain for a later batch. ${fail.slice(0,2).map(x=>`${x.key}: ${x.message}`).join(' | ')}`,'error');else if(remain)saveStatus(`Background batch complete: ${good} checks succeeded. ${remain} server-requested check${remain===1?'':'s'} remain and are deferred to the next sync.`,'info');else saveStatus(`Sync complete. ${good} required checks succeeded and the server reports no remaining missing/stale data.`,'success');return true}const added=mergeNewNeeded(q,plan),hard=Math.max(1,Number(q.hardSafetyMax)||250),atCap=(Number(q.totalAdded)||0)>=hard;if(added){saveQueue(q);return false}q.active=false;q.completedAt=Date.now();q.finalServerCheckError='';saveQueue(q);releaseLock();const good=(q.successKeys||[]).length,fail=q.finalFailures||[];if(fail.length)saveStatus(`Sync completed ${good} checks; ${fail.length} still failed after retries. ${fail.slice(0,2).map(x=>`${x.key}: ${x.message}`).join(' | ')}`,'error');else if(atCap&&(plan?.worklist||[]).some(raw=>!new Set(q.sessionKeys||[]).has(`${raw.type==='ranking'?'overtime':raw.type}:${raw.workDate}`)))saveStatus(`Sync reached the whole-session safety ceiling of ${hard} unique checks. ${good} succeeded; remaining server-requested work is deferred to the next manual sync.`,'info');else saveStatus(`Sync complete. ${good} required checks succeeded and the server reports no remaining missing/stale data.`,'success');return true}
+function reconcileVerifiedStaffingFailures(q,plan){
+  if(!Array.isArray(plan?.captures) || !Array.isArray(plan?.worklist) ||
+      plan?.config?.captureQueryTruncated === true || !Number.isFinite(Number(q?.startedAt))) return 0;
+  const active=new Set(plan.worklist.map(x=>`${x.type==='ranking'?'overtime':x.type}:${x.workDate}`));
+  const successful=new Map(plan.captures.filter(row=>
+    row?.quality==='good' && /^\d{4}-\d{2}-\d{2}$/.test(String(row.workDate||'')) &&
+    Number.isFinite(Date.parse(String(row.capturedAt||''))) &&
+    Date.parse(String(row.capturedAt))>=Number(q.startedAt) &&
+    Date.parse(String(row.capturedAt))<=Date.now()+60000
+  ).map(row=>[`staffing:${row.workDate}`,row]));
+  const recovered=[];
+  q.finalFailures=(q.finalFailures||[]).filter(f=>{
+    const key=String(f?.key||'');
+    if(!successful.has(key)||active.has(key))return true;
+    recovered.push(key);
+    if(!q.successKeys.includes(key))q.successKeys.push(key);
+    return false;
+  });
+  q.recoveredKeys=[...new Set([...(q.recoveredKeys||[]),...recovered])];
+  return recovered.length;
+}
+async function finishOrExtend(q){let plan;try{plan=await syncPlanReliable('final freshness')}catch(e){q.active=false;q.completedAt=Date.now();q.finalServerCheckError=clean(e?.message||e);saveQueue(q);releaseLock();const good=(q.successKeys||[]).length,fail=q.finalFailures||[];if(fail.length)saveStatus(`Collection finished ${good} checks; ${fail.length} still failed after retries. Final server freshness check was unavailable (${q.finalServerCheckError}). ${fail.slice(0,2).map(x=>`${x.key}: ${x.message}`).join(' | ')}`,'error');else saveStatus(`Collection complete. ${good} requested checks succeeded. Final server freshness check was unavailable (${q.finalServerCheckError}), so Scout could not ask whether any additional stale dates remain.`,'info');return true}const recovered=reconcileVerifiedStaffingFailures(q,plan);if(Number(q.schemaVersion)>=3){q.active=false;q.completedAt=Date.now();q.finalServerCheckError='';q.remainingServerRequested=Array.isArray(plan?.worklist)?plan.worklist.length:0;saveQueue(q);releaseLock();const good=(q.successKeys||[]).length,fail=q.finalFailures||[],remain=Number(q.remainingServerRequested)||0;if(fail.length)saveStatus(`Background batch finished: ${good} verified${recovered?` (${recovered} independently confirmed by the server)`:''}; ${fail.length} failed after retries; ${remain} server-requested check${remain===1?'':'s'} remain for a later batch. ${fail.slice(0,2).map(x=>`${x.key}: ${x.message}`).join(' | ')}`,'error');else if(remain)saveStatus(`Background batch complete: ${good} checks verified${recovered?` (${recovered} independently confirmed by the server after a local warning)`:''}. ${remain} server-requested check${remain===1?'':'s'} remain and are deferred to the next sync.`,'info');else saveStatus(`Sync complete. ${good} required checks succeeded and the server reports no remaining missing/stale data.`,'success');return true}const added=mergeNewNeeded(q,plan),hard=Math.max(1,Number(q.hardSafetyMax)||250),atCap=(Number(q.totalAdded)||0)>=hard;if(added){saveQueue(q);return false}q.active=false;q.completedAt=Date.now();q.finalServerCheckError='';saveQueue(q);releaseLock();const good=(q.successKeys||[]).length,fail=q.finalFailures||[];if(fail.length)saveStatus(`Sync completed ${good} checks; ${fail.length} still failed after retries. ${fail.slice(0,2).map(x=>`${x.key}: ${x.message}`).join(' | ')}`,'error');else if(atCap&&(plan?.worklist||[]).some(raw=>!new Set(q.sessionKeys||[]).has(`${raw.type==='ranking'?'overtime':raw.type}:${raw.workDate}`)))saveStatus(`Sync reached the whole-session safety ceiling of ${hard} unique checks. ${good} succeeded; remaining server-requested work is deferred to the next manual sync.`,'info');else saveStatus(`Sync complete. ${good} required checks succeeded and the server reports no remaining missing/stale data.`,'success');return true}
 async function runQueue(){if(state.runner)return;state.runner=true;try{while(true){let q=queue();if(!q.active)return;if(!ownLock(false)){saveStatus('Sync is already running in another CrewSense tab.','info');return}pulseLock();if(q.index>=q.items.length){if(await finishOrExtend(q))return;q=queue();continue}const item=q.items[q.index],key=itemKey(item),date=item.workDate;state.busy=true;saveStatus(`Syncing ${q.index+1}/${q.items.length}: ${item.type==='staffing'?'staffing':'OT priority'} ${date}`,'info');let navigated=await navigateFor(item,q);if(!navigated)return;let ok=true,message='';try{message=item.type==='staffing'?await collectStaffing(date):await collectOvertime(date)}catch(e){ok=false;message=clean(e?.message||e)}q=queue();q.results=q.results||[];q.successKeys=q.successKeys||[];q.finalFailures=q.finalFailures||[];q.attempts=q.attempts||{};q.results.push({key,ok,message,at:Date.now()});if(ok){if(!q.successKeys.includes(key))q.successKeys.push(key);if(q.navReloads)delete q.navReloads[key]}else{q.attempts[key]=(Number(q.attempts[key])||0)+1;if(q.attempts[key]<MAX_ATTEMPTS)q.items.push({...item,retry:q.attempts[key]});else if(!q.finalFailures.some(x=>x.key===key))q.finalFailures.push({key,message,attempts:q.attempts[key]})}q.index++;saveQueue(q);state.busy=false;await wait(document.hidden?1100:400)}}catch(e){saveStatus(`Sync stopped: ${clean(e?.message||e)}`,'error')}finally{state.runner=false;state.busy=false;render()}}
 async function startSync(){if(!core.paired()){saveStatus('Pair Rebel Scout before syncing.','error');return}if(!ownLock(false)){saveStatus('Sync is already running in another CrewSense tab.','info');return}const old=queue();if(old.active){state.open=true;set('rebelScoutExpandedV1',true);saveStatus('Resuming existing read-only Scout sync; progress will appear here.','info');runQueue();return}state.busy=true;state.open=true;set('rebelScoutExpandedV1',true);saveStatus('Contacting Rebel Command for the latest read-only staffing/OT sync plan...','info');try{const plan=await syncPlanReliable('initial'),hard=Math.max(1,Number(plan?.config?.hardSafetyMaxChecks)||250),budget=Math.max(1,Math.min(hard,Number(plan?.config?.legacyMaxDatesPerSession)||18)),q={schemaVersion:3,active:true,startedAt:Date.now(),index:0,items:[],results:[],successKeys:[],finalFailures:[],attempts:{},navReloads:{},hardSafetyMax:hard,sessionBudget:budget,sessionKeys:[],totalAdded:0};mergeNewNeeded(q,plan);q.active=q.items.length>0;saveQueue(q);if(!q.active){releaseLock();saveStatus('Everything is current. No missing or stale staffing/OT data was requested.','success');return}state.open=true;set('rebelScoutExpandedV1',true);render();saveStatus(`Background Scout batch started: ${q.items.length} highest-priority checks (session budget ${budget}). Keep this CrewSense tab open; you can work in other tabs while Scout runs.`,'info');runQueue()}catch(e){releaseLock();saveStatus(`Sync could not start: ${clean(e?.message||e)}`,'error')}finally{state.busy=false;render()}}
 function stopSync(){const q=queue();q.active=false;q.stoppedAt=Date.now();saveQueue(q);releaseLock();saveStatus('Sync stopped by user.','info')}
