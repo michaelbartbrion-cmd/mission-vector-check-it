@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.34
+// @version      3.2.35
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.34',
+        version: '3.2.35',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.34';
+    const VERSION = '3.2.35';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -5611,21 +5611,31 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // INSPECTION CHOOSER
     // ============================================================
 
+    // Vector renders the chooser as a React modal whose title, Cancel action,
+    // and cards may be divs or button-like elements in different builds.
+    // Normalize smart quotes and ellipsis before matching; never search the
+    // whole page for a checklist action unless its containing modal is verified.
+    function chooserText(el) {
+        return uiText(el?.innerText || el?.textContent || '')
+            .replace(/\u2026/g, '...')
+            .replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
     function findChooserRoot() {
-        const titles = [...document.querySelectorAll('h1,h2,h3,h4,div,span')].filter(
-            el => visible(el) && clean(el.innerText) === 'Select Inspection...'
-        );
+        const titles = [...document.querySelectorAll('h1,h2,h3,h4,div,span,[role="heading"]')]
+            .filter(el => visible(el) && chooserText(el) === 'select inspection...');
 
         const roots = [];
         for (const title of titles) {
             let el = title;
-            for (let i = 0; el && i < 8; i++, el = el.parentElement) {
+            for (let i = 0; el && i < 10; i++, el = el.parentElement) {
                 if (!visible(el)) continue;
-                const text = clean(el.innerText);
-                if (exactButton('Cancel', el) && text.includes('CHECKLIST')) {
-                    roots.push(el);
-                    break;
-                }
+                const text = chooserText(el);
+                if (!text.includes('select inspection...') || !text.includes('checklist')) continue;
+                const controls = [...el.querySelectorAll('button,a,[role="button"],input[type="button"]')];
+                if (!controls.some(control => visible(control) && chooserText(control) === 'cancel')) continue;
+                roots.push(el);
+                break;
             }
         }
 
@@ -5643,33 +5653,36 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         if (!root) return null;
 
         const target = uiText(modeTitle).toLowerCase();
-        const matches = [...root.querySelectorAll('button,a,[role="button"],li,div')].filter(el => {
-            if (!visible(el)) return false;
-            const t = uiText(el.innerText).toLowerCase();
-            return (
-                t === target ||
-                t === `${target} checklist` ||
-                (t.startsWith(target) && t.includes('checklist') && t.length <= target.length + 24)
-            );
+        // Match the ENTIRE official title, not a prefix such as "Tour PPE".
+        // Vector may render cards as nested div/span/paragraphs, not buttons.
+        const matches = [...root.querySelectorAll(
+            'button,a,[role="button"],[role="option"],li,div,article,section,span,p,h3,h4'
+        )].filter(el => {
+            if (!visible(el) || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+            const t = chooserText(el);
+            return t === target || t === `${target} checklist` ||
+                (t.startsWith(target) && t.includes('checklist') && t.length <= target.length + 24);
         });
         if (!matches.length) return null;
 
         const clickable = matches.filter(el => {
-            const tag = el.tagName.toLowerCase();
+            const tag = (el.tagName || '').toLowerCase();
             const role = el.getAttribute('role');
             const cursor = getComputedStyle(el).cursor;
-            return tag === 'button' || tag === 'a' || role === 'button' || !!el.onclick || el.tabIndex >= 0 || cursor === 'pointer';
+            return tag === 'button' || tag === 'a' || role === 'button' ||
+                role === 'option' || !!el.onclick || el.tabIndex >= 0 || cursor === 'pointer';
         });
 
         const pool = clickable.length ? clickable : matches;
         pool.sort((a, b) => {
             const ar = a.getBoundingClientRect();
             const br = b.getBoundingClientRect();
-            const score = r => {
-                const cardish = (r.width >= 250 && r.height >= 35 && r.height <= 150) ? 0 : 1000000;
-                return cardish + Math.abs(r.height - 70) * 100 + Math.abs(r.width - 450);
+            const score = (rect, text) => {
+                const cardish = (rect.width >= 220 && rect.height >= 30 && rect.height <= 160) ? 0 : 1000000;
+                const hasChecklist = text.endsWith(' checklist') ? 0 : 800;
+                return cardish + hasChecklist + Math.abs(rect.height - 70) * 100 + Math.abs(rect.width - 450);
             };
-            return score(ar) - score(br);
+            return score(ar,chooserText(a)) - score(br,chooserText(b));
         });
 
         return pool[0];
@@ -6558,7 +6571,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             run.chooserOpenedAt = Date.now();
             saveRun(run); // persist before the click it authorizes
             startButton.click();
-            chooser = await waitFor(findChooserRoot, 10000);
+            try {
+                chooser = await waitFor(findChooserRoot, 15000);
+            } catch {
+                stopRun(`${item.assetId}: Start Inspection was clicked once, but the Select Inspection popup could not be recognized. No retry was made. Review the open Vector modal manually.`);
+                return;
+            }
 
             // Starting an inspection must not itself create something we count as
             // COMPLETE. This catches draft rows labelled "Incomplete" or any future
@@ -6580,7 +6598,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
         }
 
-        const card = await waitFor(() => findInspectionCardInChooser(mode.title), 10000);
+        let card;
+        try {
+            card = await waitFor(() => findInspectionCardInChooser(mode.title), 15000);
+        } catch {
+            stopRun(`${item.assetId}: the Select Inspection popup was open, but the exact "${mode.title}" card could not be identified. No option was clicked. Review it manually.`);
+            return;
+        }
         if (!chooser.contains(card)) {
             stopRun(`${item.assetId}: ${mode.short} selector was not inside the Select Inspection popup.`);
             return;
