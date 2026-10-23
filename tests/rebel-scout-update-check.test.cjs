@@ -8,7 +8,7 @@ const start=source.indexOf('function compareScoutVersions(');
 const end=source.indexOf('const REBEL_SYMBOL_HTML=',start);
 assert.ok(start>=0 && end>start,'source exposes in-controller update handler');
 const functions=source.slice(start,end);
-function harness({reply='// ==UserScript==\n// @version      1.1.49\n// ==/UserScript==',status=200,fail='',installed='1.1.49'}={}){
+function harness({reply='// ==UserScript==\n// @version      1.1.50\n// ==/UserScript==',status=200,fail='',installed='1.1.50'}={}){
  const state={open:false},saved=[],messages=[],requests=[];
  const GM_xmlhttpRequest=opts=>{
    requests.push(opts);
@@ -46,9 +46,9 @@ test('check button fetches official source, reads latest version, and displays c
  assert.equal(h.messages.at(-1).kind,'success');
 });
 test('newer remote release produces an install instruction without silently modifying script',async()=>{
- const h=harness({reply:'// ==UserScript==\n// @version  1.1.50\n// ==/UserScript=='});
+ const h=harness({reply:'// ==UserScript==\n// @version  1.1.51\n// ==/UserScript=='});
  await h.api.checkForScoutUpdate();
- assert.match(h.messages.at(-1).m,/Update available: v1\.1\.50/);
+ assert.match(h.messages.at(-1).m,/Update available: v1\.1\.51/);
  assert.match(h.messages.at(-1).m,/INSTALL \/ UPDATE MANUALLY/);
 });
 test('network failure and invalid GitHub content are visible, with manual fallback',async()=>{
@@ -67,5 +67,5 @@ test('visible update controls bind to a controller-scope function and HTTPS inst
  assert.match(source,/\/\/ @connect\s+raw\.githubusercontent\.com/);
  assert.doesNotMatch(source,/chrome-extension:\/\/dhdgffkkebhmkfjojejmpbldmpobfkfo/);
  assert.doesNotMatch(source,/onclick=openManagedUpdate/);
- assert.match(source,/\/\/ @version\s+1\.1\.49/);
+ assert.match(source,/\/\/ @version\s+1\.1\.50/);
 });

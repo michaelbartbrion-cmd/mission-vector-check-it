@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Scout
 // @namespace    mission-vector-check-it-rebel-scout
-// @version      1.1.49
+// @version      1.1.50
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-scout.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-scout.user.js
 // @description  Read-only CrewSense staffing and overtime collector for Mission Vector Check It.
@@ -23,7 +23,7 @@
 (function(){
 'use strict';
 if (window.top !== window.self || window.MVCI_REBEL_SCOUT_CORE) return;
-const VERSION='1.1.49';
+const VERSION='1.1.50';
 const ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const PAIR_KEY='rebelScoutPairingV1';
 const LEGACY_PAIR_KEYS=['vectorStaffingCollectorPairing_v1','vectorOvertimeCollectorPairing_v1'];
@@ -44,7 +44,7 @@ migrateLegacy();
 /* --- Staffing collector: consolidated from verified vector-staffing-bridge 0.29.0 --- */
 (function(){
 'use strict';
-const VERSION='1.1.49';
+const VERSION='1.1.50';
 const ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const PAIR_KEY='vectorStaffingCollectorPairing_v1';
 const STABLE_MS=900;
@@ -93,14 +93,14 @@ function domDisplayedDate(){
   candidates.sort((a,b)=>b.score-a.score);return candidates[0]?.d||'';
 }
 function loadingVisible(){return[...document.querySelectorAll('[aria-busy="true"],.loading,.spinner,[class*="loading"],[class*="spinner"]')].some(el=>rendered(el)&&!ownElement(el))}
-function rowMarker(t){return/Salary Step\s*\[1010\]|\bSub\s*\[1010\]|Additional Time|Disaster Relief|Overtime|OT Sign|Force Hire|Backfill|Trade|Swap|Open Slot|Vacation|Sick|Leave|Time Off/i.test(t)}
+function rowMarker(t){return/Salary Step\s*\[1010\]|\bSub\s*\[1010\]|Additional Time|Disaster Relief|Overtime|OT Sign|Force Hire|Backfill|Trade|Swap|Open Slot|Vacation|Holiday|Sick|Leave|Time Off|Comp Time|FMLA|Bereavement/i.test(t)}
 function looksLikeScheduleRow(t){t=clean(t);return/\b\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\b/.test(t)&&(rowMarker(t)||/^Open Slot\b/i.test(t))}
 function candidateElements(root=document){const pool=[...root.querySelectorAll('tr,[role="row"],li,article,section,div')].filter(el=>rendered(el)&&!ownElement(el)).map(el=>({el,text:clean(el.textContent)})).filter(x=>x.text.length>=8&&x.text.length<=900&&looksLikeScheduleRow(x.text));const selected=[];for(const item of pool.sort((a,b)=>a.text.length-b.text.length)){if(selected.some(x=>item.el.contains(x.el)))continue;selected.push(item)}return selected}
 const GROUP_RE=/\b(Engine|Truck|Medic|Quint|Rescue|Battalion|Brush|Squad|Tower|Ladder|Ambulance|Station)\s+\d{1,4}\b/i;
 function groupFor(el){let n=el;for(let d=0;n&&d<10;d++,n=n.parentElement){if(ownElement(n))continue;const text=clean(n.textContent).slice(0,5000),m=[...text.matchAll(new RegExp(GROUP_RE.source,'ig'))];if(m.length===1)return clean(m[0][0]);if(m.length>1&&d<=2)return clean(m[m.length-1][0])}let p=el.previousElementSibling;for(let i=0;p&&i<8;i++,p=p.previousElementSibling){const m=clean(p.textContent).match(GROUP_RE);if(m)return clean(m[0])}return''}
 function hoursFrom(t){t=clean(t);let m=t.match(/\b(\d+(?:\.\d+)?)\s*(?:hrs?|hours?)(?:\s+(\d+)\s*min)?\b/i);if(m)return Math.round((+m[1]+ +(m[2]||0)/60)*100)/100;m=t.match(/\b(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\b/);if(!m)return null;let a=+m[1]+ +m[2]/60,b=+m[3]+ +m[4]/60;if(b<=a)b+=24;return Math.round((b-a)*100)/100}
 function scheduleType(t){t=clean(t);for(const re of[/Salary Step\s*\[1010\](?:\s*-\s*[^\[]+\[[^\]]+\])?/i,/\bSub\s*\[1010\]/i,/Additional Time[^\[]*(?:\[[^\]]+\])?/i,/Salary Disaster Relief[^\[]*(?:\[[^\]]+\])?/i,/Overtime[^\[]*(?:\[[^\]]+\])?/i]){const m=t.match(re);if(m)return clean(m[0])}return''}
-function personAndDuty(t){t=clean(t);if(/^Open Slot\b/i.test(t))return{personName:'Open Slot',dutyCode:''};const marker=t.search(/\s+(?=Salary Step\s*\[1010\]|Sub\s*\[1010\]|Additional Time|Salary Disaster Relief|Overtime|OT Sign|Force Hire|Backfill|Trade|Swap|Vacation|Sick|Leave|Time Off)/i),prefix=clean(marker>0?t.slice(0,marker):t),tokens=prefix.split(' ').filter(Boolean),status=new Set(['S','A','O','V']),duties=new Set(['CAPT','CAPTAIN','BC','CHIEF','DE','DE-A','DE-B','DE-C','FF','FFA','FFB','FFC','TM','TILLER','TADE','TAC','SWING','FTO']);while(tokens.length&&status.has(tokens[tokens.length-1].toUpperCase()))tokens.pop();while(tokens.length&&tokens[tokens.length-1]==='-')tokens.pop();const out=[];while(tokens.length&&duties.has(tokens[tokens.length-1].toUpperCase()))out.unshift(tokens.pop());while(tokens.length&&tokens[tokens.length-1]==='-')tokens.pop();if(tokens.length>2&&/^\d+$/.test(tokens[tokens.length-1]))tokens.pop();return{personName:clean(tokens.join(' ')).slice(0,180),dutyCode:clean(out.join(' '))}}
+function personAndDuty(t){t=clean(t);if(/^Open Slot\b/i.test(t))return{personName:'Open Slot',dutyCode:''};const marker=t.search(/\s+(?=Salary Step\s*\[1010\]|Sub\s*\[1010\]|Additional Time|Salary Disaster Relief|Overtime|OT Sign|Force Hire|Backfill|Trade|Swap|Vacation|Holiday|Kelly|Sick|Leave|Time Off|Comp Time|FMLA|Bereavement)/i),prefix=clean(marker>0?t.slice(0,marker):t),tokens=prefix.split(' ').filter(Boolean),status=new Set(['S','A','O','V','H','K']),duties=new Set(['CAPT','CAPTAIN','BC','CHIEF','DE','DE-A','DE-B','DE-C','FF','FFA','FFB','FFC','TM','TILLER','TADE','TAC','SWING','FTO']);while(tokens.length&&status.has(tokens[tokens.length-1].toUpperCase()))tokens.pop();while(tokens.length&&tokens[tokens.length-1]==='-')tokens.pop();const out=[];while(tokens.length&&duties.has(tokens[tokens.length-1].toUpperCase()))out.unshift(tokens.pop());while(tokens.length&&tokens[tokens.length-1]==='-')tokens.pop();if(tokens.length>2&&/^\d+$/.test(tokens[tokens.length-1]))tokens.pop();return{personName:clean(tokens.join(' ')).slice(0,180),dutyCode:clean(out.join(' '))}}
 function hash32(t){let h=0x811c9dc5;for(let i=0;i<t.length;i++){h^=t.charCodeAt(i);h=Math.imul(h,0x01000193)}return(h>>>0).toString(36)}
 function makeRow(item){const rawText=clean(item.text),group=groupFor(item.el),pd=personAndDuty(rawText),lengthHours=hoursFrom(rawText);return{personId:`dom-${hash32((pd.personName||rawText).toLowerCase())}`,personName:pd.personName,activity:'Work Shift',assignment:group,assignmentGroup:group,dutyCode:pd.dutyCode,scheduleType:scheduleType(rawText),...(Number.isFinite(lengthHours)?{lengthHours}:{}),captureQuality:group?'row+group':'row-only',rawText}}
 function findScroller(el){let n=el?.parentElement||null;for(let d=0;n&&d<12;d++,n=n.parentElement){const s=getComputedStyle(n);if(n.scrollHeight>n.clientHeight+80&&/(auto|scroll)/i.test(s.overflowY||''))return n}return null}
@@ -448,7 +448,7 @@ GM_deleteValue('rebelScoutActionInputV1');
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_SCOUT_ACTIONS)return;
-const VERSION='1.1.49';
+const VERSION='1.1.50';
 const core=window.MVCI_REBEL_SCOUT_CORE;
 const STATE_KEY='rebelScoutActionInputV1';
 const SYNC_KEY='rebelScoutSyncQueueV1';
@@ -804,7 +804,7 @@ window.MVCI_REBEL_SCOUT_ACTIONS=Object.freeze({
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_SCOUT)return;
-const VERSION='1.1.49';
+const VERSION='1.1.50';
 const core=window.MVCI_REBEL_SCOUT_CORE;
 function compareScoutVersions(a,b){
  const digits=v=>String(v||'').split('.').map(x=>Number(x)||0);
@@ -875,7 +875,7 @@ function listViewUrl(date){return `${location.origin}/Application/ControlPanel/L
 function rankingUrl(date){const[y,m,d]=date.split('-');let path='';try{const raw=localStorage.getItem(RANKING_PATH_KEY);const x=raw?JSON.parse(raw):{};path=/^\/Application\/ControlPanel\/CallbackModule\/Rankings\//i.test(clean(x.path))?clean(x.path):''}catch(_){}path=path||DEFAULT_RANKING_PATH;return `${location.origin}${path}?shift_date=${encodeURIComponent(`${m}/${d}/${y}`)}&select-date=`}
 function actualVisibleDate(){if(isListView()){const d=clean(window.MVCI_REBEL_SCOUT_STAFFING?.status?.()?.renderedDate||'');if(/^\d{4}-\d{2}-\d{2}$/.test(d))return d}if(isRankingPage()){const d=clean(window.MVCI_REBEL_SCOUT_OT?.detectForecastDate?.()?.date||'');if(/^\d{4}-\d{2}-\d{2}$/.test(d))return d}return''}
 async function waitForTargetDate(target,mode,timeout=120000){const started=Date.now();let stable=0,last='';while(Date.now()-started<timeout){const pathOk=mode==='staffing'?isListView():isRankingPage(),d=actualVisibleDate();last=d;if(pathOk&&d===target){stable++;if(stable>=3)return true}else stable=0;await wait(document.hidden?900:300)}throw new Error(`CrewSense did not finish rendering ${target}${last?` (still showed ${last})`:''}.`)}
-async function syncPlan(){const p=await core.request('?action=range-sync-plan');if(!Array.isArray(p?.worklist))throw new Error('Rebel Command returned an incomplete synchronization plan.');state.plan=p;return p}
+async function syncPlan(){const p=await core.request('?action=range-sync-plan&sourceVersion='+encodeURIComponent(VERSION));if(!Array.isArray(p?.worklist))throw new Error('Rebel Command returned an incomplete synchronization plan.');state.plan=p;return p}
 // Only the read-only GET plan may be retried. Never retry a staffing POST,
 // CrewSense Save, or any other request that could duplicate source records.
 function retriablePlanError(error){

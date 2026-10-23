@@ -37,10 +37,10 @@ function setup(responses){
     if(next instanceof Error)throw next;
     return next;
   }};
-  const api=new Function('core','state','clean','saveStatus','wait',retrySource+
+  const api=new Function('core','state','clean','saveStatus','wait','VERSION',retrySource+
     '\nreturn {syncPlan,syncPlanReliable,retriablePlanError};')(
     core,state,String,(message,kind)=>statuses.push({message,kind}),
-    async duration=>{waits.push(duration)}
+    async duration=>{waits.push(duration)},'1.1.50'
   );
   return {api,calls,statuses,waits,state};
 }
@@ -50,7 +50,7 @@ test('Temporary telemetry failure retries only read-only plan GET and then confi
   const result=await h.api.syncPlanReliable('final freshness');
   assert.deepEqual(result,good);
   assert.equal(h.calls.length,2);
-  assert.ok(h.calls.every(x=>x==='?action=range-sync-plan'));
+  assert.ok(h.calls.every(x=>x==='?action=range-sync-plan&sourceVersion=1.1.50'));
   assert.deepEqual(h.waits,[1200]);
   assert.match(h.statuses[0].message,/retrying read-only status 2\/3/);
 });
@@ -73,7 +73,7 @@ test('Start and final stages use the retrying GET; never auto-retry writes',()=>
   const start=extract('async function startSync(){','function stopSync(){');
   assert.match(finish,/syncPlanReliable\('final freshness'\)/);
   assert.match(start,/syncPlanReliable\('initial'\)/);
-  assert.match(source,/async function syncPlan\(\)\{const p=await core\.request\('\?action=range-sync-plan'\)/);
+  assert.match(source,/async function syncPlan\(\)\{const p=await core\.request\('\?action=range-sync-plan&sourceVersion='/);
   assert.doesNotMatch(retrySource,/\.post\(/);
   assert.match(finish,/q\.finalServerCheckError=clean\(e\?\.message\|\|e\)/);
 });
