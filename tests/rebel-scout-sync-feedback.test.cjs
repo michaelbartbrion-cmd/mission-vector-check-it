@@ -4,7 +4,7 @@ const fs=require('node:fs'),path=require('node:path');
 const src=fs.readFileSync(path.join(__dirname,'../beta/rebel-scout.user.js'),'utf8');
 const line=src.split(/\r?\n/).find(s=>s.startsWith('async function startSync(){'));
 assert.ok(line,'Scout sync function present');
-const start=new Function('core','ownLock','queue','state','set','saveStatus','render','syncPlan',
+const start=new Function('core','ownLock','queue','state','set','saveStatus','render','syncPlanReliable',
  'mergeNewNeeded','saveQueue','releaseLock','runQueue','clean',line+'\nreturn startSync;');
 function env({paired=true,active=false,plan={config:{legacyMaxDatesPerSession:18},worklist:[]}}={}){
  const state={open:false,busy:false,message:'Ready',kind:'info'},writes=[],messages=[],runCalls=[];
