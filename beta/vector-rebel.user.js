@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.33
+// @version      3.2.34
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.33',
+        version: '3.2.34',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.33';
+    const VERSION = '3.2.34';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -6754,6 +6754,29 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         box.appendChild(wrap);
     }
 
+    function stoppedRunAlreadyVerifiedInArchive(stoppedRun, archives = null) {
+        if (!stoppedRun?.runId || !stoppedRun?.startedAt ||
+            !Array.isArray(stoppedRun.items) || !stoppedRun.items.length) return false;
+        const saved = archives || [loadJSON(LAST_SUMMARY_KEY, null), ...getRunHistory()];
+        const expected = stoppedRun.items.map(item => clean(item.assetId).toUpperCase());
+        if (expected.some(id => !id) || new Set(expected).size !== expected.length) return false;
+        return saved.some(summary => {
+            if (!summary || summary.runId !== stoppedRun.runId ||
+                summary.startedAt !== stoppedRun.startedAt ||
+                summary.modeKey !== stoppedRun.modeKey ||
+                Number(summary.total) !== expected.length ||
+                !Number.isFinite(Date.parse(summary.completedAt || '')) ||
+                Date.parse(summary.completedAt) < Date.parse(stoppedRun.startedAt)) return false;
+            const completed = Object.values(summary.groups || {}).flatMap(group =>
+                Array.isArray(group?.items) ? group.items : []);
+            if (completed.length !== expected.length) return false;
+            const confirmed = new Map(completed.map(item =>
+                [clean(item.assetId).toUpperCase(), clean(item.evidence)]));
+            return confirmed.size === expected.length &&
+                expected.every(id => confirmed.has(id) && !!confirmed.get(id));
+        });
+    }
+
     async function buildPreview(modeKey, ownerInput) {
         const mode = getMode(modeKey);
         const config = getConfig();
@@ -6856,21 +6879,50 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const rows = [];
         const expectedCount = getExpectedGearCount(config);
         const stoppedRun = loadJSON(STOPPED_RUN_KEY, null);
-        const stoppedRecent = stoppedRun && stoppedRun.modeKey === modeKey &&
-            Date.now() - Date.parse(stoppedRun.stoppedAt || stoppedRun.startedAt || 0) <= 6 * 60 * 60 * 1000;
+        // An older open Vector tab can resurrect and later stop a run which the
+        // SAME run ID had already archived as completely verified. An exact
+        // evidence-bearing archived match is a ghost, not an unfinished check.
+        const archivedStop = stoppedRunAlreadyVerifiedInArchive(stoppedRun);
+        if (archivedStop) persistentRemoveRaw(STOPPED_RUN_KEY);
+        const stoppedAt = Date.parse(stoppedRun?.stoppedAt || stoppedRun?.startedAt || '');
+        const stoppedRecent = !archivedStop && stoppedRun?.modeKey === modeKey &&
+            Number.isFinite(stoppedAt) && Date.now() >= stoppedAt &&
+            Date.now() - stoppedAt <= 6 * 60 * 60 * 1000;
         const protectedAssetIds = new Set();
         if (stoppedRecent) {
-            for (const c of stoppedRun.completed || []) protectedAssetIds.add(clean(c.assetId).toUpperCase());
-            if (Number.isFinite(stoppedRun.submittedAt) && stoppedRun.items?.[stoppedRun.index]?.assetId) {
-                protectedAssetIds.add(clean(stoppedRun.items[stoppedRun.index].assetId).toUpperCase());
-            }
+            const previouslyCompleted = new Set(
+                (stoppedRun.completed || []).map(c => clean(c.assetId).toUpperCase()).filter(Boolean)
+            );
+            for (const id of previouslyCompleted) protectedAssetIds.add(id);
+            const inFlight = Number.isFinite(stoppedRun.submittedAt)
+                ? clean(stoppedRun.items?.[stoppedRun.index]?.assetId).toUpperCase() : '';
+            if (inFlight) protectedAssetIds.add(inFlight);
             if (protectedAssetIds.size) {
                 const recovery = document.createElement('div');
                 recovery.style.cssText = 'background:#fff4e5;border:2px solid #d49b42;padding:10px;margin:8px 0;border-radius:5px;line-height:1.45;';
                 recovery.innerHTML =
-                    `<b>RECENT STOPPED RUN RECOVERY:</b> ${protectedAssetIds.size} asset(s) from the stopped ${escapeHtml(mode.short)} run ` +
-                    'will be pre-unchecked to reduce duplicate records. Review before re-enabling any of them.<br>' +
+                    `<b>PREVIOUS RUN NEEDS REVIEW:</b> ${previouslyCompleted.size} item(s) already recorded complete` +
+                    (inFlight && !previouslyCompleted.has(inFlight)
+                        ? `; 1 last submitted item (${escapeHtml(inFlight)}) has UNVERIFIED completion` : '') +
+                    '. These items were left unchecked to avoid accidental duplicate inspections. ' +
+                    'Check the official Vector Item Log before retrying an uncertain submission.<br>' +
                     [...protectedAssetIds].map(escapeHtml).join(', ');
+                const chooseNew = makeButton('NEW physical inspection — select all gear', {
+                    background: '#e8f3f7', color: '#153e5c'
+                });
+                chooseNew.onclick = () => {
+                    if (!confirm(
+                        'Start an entirely NEW physical inspection of all listed equipment? ' +
+                        'Some items may already have been submitted during the prior run. ' +
+                        'Selecting them again can create duplicate official records. ' +
+                        'Do not use this to retry an uncertain submission.'
+                    )) return;
+                    for (const row of rows) row.include.checked = true;
+                    chooseNew.textContent = 'All gear selected for a new inspection';
+                    setStatus('All gear selected for a NEW physical inspection. Review the answers and certify before starting.');
+                };
+                recovery.appendChild(document.createElement('br'));
+                recovery.appendChild(chooseNew);
                 box.appendChild(recovery);
             }
         }
