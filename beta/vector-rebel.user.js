@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.38
+// @version      3.2.39
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.38',
+        version: '3.2.39',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.38';
+    const VERSION = '3.2.39';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -10452,7 +10452,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         };
         return {
             serial:find(/^Serial (?:Number|No\.?|#)$/i,'serial'),
-            size:find(/^Size$/i,'size'),
+            size:find(/^Size\s*:?$/i,'size'),
             manufacture:find(/^(?:Date of Manuf(?:acture|acturing)?\.?|Manufactur(?:e|ing) Date|Mfg\.? Date)$/i,'manufacture')||
                 find(/^Year$/i,'manufacture')
         };
@@ -10487,7 +10487,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         // DOM-local values take precedence over text-flow fallbacks.
         return {
             serial:find(/^Serial (?:Number|No\.?|#)$/i,'serial')||raw.serial,
-            size:find(/^Size$/i,'size')||raw.size,
+            size:find(/^Size\s*:?$/i,'size')||raw.size,
             manufacture:find(/^(?:Date of Manuf(?:acture|acturing)?\.?|Manufactur(?:e|ing) Date|Mfg\.? Date)$/i,'manufacture')||
                 raw.manufacture||find(/^Year$/i,'manufacture')
         };
@@ -10527,15 +10527,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const itemURL=new URL(asset.url,location.origin);
         if(itemURL.origin!==location.origin)throw Error('Vector PPE item has a different origin.');
         const already=repairCachedDetail(itemURL.href);
-        if(['serial','size','manufacture'].every(field=>repairFieldValid(field,already[field])))return already;
+        const fields=['serial','size','manufacture'];
+        if(fields.every(field=>repairFieldValid(field,already[field])))return already;
         const frame=document.createElement('iframe');
         frame.setAttribute('aria-hidden','true');frame.tabIndex=-1;
         frame.style.cssText='position:fixed;bottom:0;right:0;width:2px;height:2px;opacity:0;pointer-events:none;border:0';
         frame.src=itemURL.href;document.body.appendChild(frame);
+        let merged={...already},firstFieldAt=0,lastChangeAt=0;
         try{
             const start=Date.now();
-            while(Date.now()-start<6500) {
-                await sleep(200);
+            while(Date.now()-start<8500){
+                await sleep(180);
                 let doc,pathname;
                 try{
                     doc=frame.contentDocument;
@@ -10543,12 +10545,24 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 }catch{throw Error('Vector blocked item preview. Open the item link instead.');}
                 if(!doc||pathname!==itemURL.pathname)continue;
                 const found=repairReadDetailDocument(doc);
-                if(Object.values(found).some(Boolean)){
-                    repairRecordDetail(itemURL.href,found);
-                    return Object.fromEntries(['serial','size','manufacture'].map(key=>[key,found[key]||already[key]||'']));
+                const now=Date.now();
+                let changed=false;
+                for(const field of fields){
+                    if(repairFieldValid(field,found[field])&&found[field]!==merged[field]){
+                        merged[field]=found[field];changed=true;
+                    }
                 }
+                if(changed){
+                    repairRecordDetail(itemURL.href,merged);
+                    if(!firstFieldAt)firstFieldAt=now;
+                    lastChangeAt=now;
+                }
+                if(fields.every(field=>repairFieldValid(field,merged[field])))break;
+                // React can render serial/year first, then size. Allow the rest
+                // of the item page to settle instead of returning immediately.
+                if(firstFieldAt&&now-firstFieldAt>=3000&&now-lastChangeAt>=1250)break;
             }
-            return already;
+            return merged;
         }finally{frame.remove();}
     }
     // On an actual Vector equipment page, remember the page's own visible
@@ -10560,6 +10574,255 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const values=repairReadDetailDocument(document);
         if(Object.values(values).some(Boolean))repairRecordDetail(location.href,values);
     }
+    // Downloadable, fully populated PDF. No external library, remote service
+    // or browser print dialog is required; fields remain editable in .xlsx.
+    function repairPdfAscii(value) {
+        return String(value??'').normalize('NFKD')
+            .replace(/[\u0300-\u036f]/g,'')
+            .replace(/[\u2018\u2019]/g,"'")
+            .replace(/[\u201c\u201d]/g,'"')
+            .replace(/[\u2013\u2014]/g,'-')
+            .replace(/[\u2022]/g,'*')
+            .replace(/[^\x20-\x7e]/g,'?');
+    }
+    function repairPdfEscape(value) {
+        return repairPdfAscii(value).replace(/[\\()]/g,'\\$&');
+    }
+    function repairPdfWrap(value,limit=55) {
+        const output=[];
+        for(const segment of repairPdfAscii(value).split(/\r?\n/)){
+            const words=segment.split(/\s+/).filter(Boolean);
+            if(!words.length){output.push('');continue;}
+            let line='';
+            for(let word of words){
+                while(word.length>limit){
+                    if(line){output.push(line);line='';}
+                    output.push(word.slice(0,limit));word=word.slice(limit);
+                }
+                if(!word)continue;
+                if(line.length+1+word.length>limit){output.push(line);line=word;}
+                else line=line?line+' '+word:word;
+            }
+            if(line)output.push(line);
+        }
+        return output;
+    }
+    function repairPdfPaint(form,part=0,lines=[],pageNo=1,totalPages=1) {
+        const c=[];
+        const rect=(x,y,w,h,r=.94,g=.97,b=.98)=>{
+            c.push(r+' '+g+' '+b+' rg '+x+' '+y+' '+w+' '+h+' re f');
+        };
+        const stroke=(x,y,w,h)=>{
+            c.push('0.60 0.70 0.77 RG 0.7 w '+x+' '+y+' '+w+' '+h+' re S');
+        };
+        const text=(x,y,value,size=9,bold=false,limit=110)=>{
+            const txt=repairPdfEscape(repairPdfAscii(value).slice(0,limit));
+            c.push('0.11 0.21 0.29 rg BT /'+(bold?'F2':'F1')+' '+
+                size+' Tf 1 0 0 1 '+x+' '+y+' Tm ('+txt+') Tj ET');
+        };
+        rect(0,0,612,792,1,1,1);
+        rect(24,740,564,38,.11,.22,.32);
+        c.push('1 1 1 rg BT /F2 17 Tf 1 0 0 1 38 752 Tm (PPE CLEAN AND REPAIR FORM) Tj ET');
+        text(30,723,'Flower Mound Fire Department',11,true);
+        text(545,723,String(pageNo)+'/'+String(totalPages),9,true);
+        if(part>0){
+            rect(24,692,564,22,.88,.92,.95);
+            text(32,699,'KNOWN ISSUES - CONTINUED',11,true);
+            text(30,676,'Firefighter: '+form.name,11,true);
+            let y=652;
+            for(const item of lines){
+                if(item.heading){rect(26,y-4,560,17,.94,.96,.98);text(34,y,item.heading,9,true,90);y-=20;}
+                else {text(38,y,item.text,9,false,105);y-=12;}
+            }
+            text(30,41,'Read-only Vector data. Confirm all equipment and issues before turning in.',8);
+            return c.join('\n')+'\n';
+        }
+        rect(24,688,564,25,.89,.93,.96);
+        text(32,697,'CUSTOMER INFORMATION',11,true);
+        text(30,674,'Department: Flower Mound Fire Dept.',9,true);
+        text(395,674,'Date: '+(form.date||''),9,false);
+        text(30,654,'Name: '+(form.name||''),10,true,54);
+        text(395,654,'ID Number: '+(form.idNumber||''),9,false);
+        text(30,634,'Station picked up at: '+(form.pickupStation||''),9,false,52);
+        text(290,634,'Preferred delivery: '+(form.deliveryStation||''),9,false,44);
+        text(500,634,'Shift: '+(form.shift||''),9,false,19);
+        rect(24,601,564,24,.89,.93,.96);
+        text(32,609,'PPE ITEMS SENT IN',11,true);
+        const cols=[24,141,239,297,372,588],tableTop=580,rowH=33;
+        rect(24,tableTop,564,22,.85,.89,.92);
+        for(let j=0;j<cols.length-1;j++)stroke(cols[j],tableTop,cols[j+1]-cols[j],22);
+        [['Item',29],['Serial Number',146],['Size',244],['Date of Manuf.',302],['Known Issues',377]].forEach(([label,x])=>text(x,tableTop+7,label,8,true));
+        for(let i=0;i<PPE_REPAIR_ROWS.length;i++){
+            const item=form.items?.[i]||{};
+            const bottom=tableTop-(i+1)*rowH;
+            if(i%2===0)rect(24,bottom,564,rowH,.96,.97,.98);
+            for(let j=0;j<cols.length-1;j++)stroke(cols[j],bottom,cols[j+1]-cols[j],rowH);
+            text(29,bottom+13,PPE_REPAIR_ROWS[i],8,true,23);
+            if(item.asset){
+                text(146,bottom+13,item.serial||'',8,false,19);
+                text(244,bottom+13,item.size||'',8,false,11);
+                text(302,bottom+13,item.manufacture||'',8,false,18);
+                const issues=repairPdfWrap(item.issues||'',42);
+                if(issues[0])text(377,bottom+20,issues[0],7,false,42);
+                if(issues[1])text(377,bottom+9,issues.length>2?issues[1].slice(0,29)+' (see notes)':issues[1],7,false,42);
+            }
+        }
+        rect(24,177,564,24,.89,.93,.96);
+        text(32,185,'PICKUP / RETURN INFORMATION',10,true);
+        text(30,157,'Pick-up By: '+(form.pickupBy||''),9,false,60);
+        text(330,157,'Pick-up Date: '+(form.pickupDate||''),9,false,45);
+        text(30,134,'Returned By: '+(form.returnedBy||''),9,false,60);
+        text(330,134,'Returned Date: '+(form.returnedDate||''),9,false,45);
+        text(30,87,'Prepared from verified Vector Responsible Party PPE records.',8);
+        text(30,72,'Blank fields were not available in the collected item details. Review before use.',8);
+        text(30,41,'Saved locally; no equipment record or inspection was changed.',8);
+        return c.join('\n')+'\n';
+    }
+    function repairPdfPages(forms) {
+        const pages=[];
+        for(const form of forms){
+            const details=[];
+            for(let i=0;i<PPE_REPAIR_ROWS.length;i++){
+                const item=form.items?.[i];
+                if(!item?.asset||!String(item.issues||'').trim())continue;
+                details.push({heading:PPE_REPAIR_ROWS[i]+' - '+(item.serial||item.asset.assetId||'')});
+                for(const line of repairPdfWrap(item.issues,92))details.push({text:line});
+                details.push({text:''});
+            }
+            const extra=[];
+            if(details.length){
+                let batch=[],count=0;
+                for(const line of details){
+                    if(count>=40){extra.push(batch);batch=[];count=0;}
+                    batch.push(line);count++;
+                }
+                if(batch.length)extra.push(batch);
+            }
+            pages.push({form,part:0,lines:[]});
+            extra.forEach((lines,i)=>pages.push({form,part:i+1,lines}));
+        }
+        return pages;
+    }
+    function repairPdfDocument(forms) {
+        if(!Array.isArray(forms)||!forms.length)throw Error('Select a firefighter first.');
+        const enc=new TextEncoder(),objects=[];
+        const add=body=>{objects.push(body);return objects.length;};
+        const f1=add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+        const f2=add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
+        const catalog=add(''),pagesId=add('');
+        const pageIds=[],allPages=repairPdfPages(forms);
+        for(let i=0;i<allPages.length;i++){
+            const page=allPages[i];
+            const stream=repairPdfPaint(page.form,page.part,page.lines,i+1,allPages.length);
+            const length=enc.encode(stream).length;
+            const contents=add('<< /Length '+length+' >>\nstream\n'+stream+'endstream');
+            const pageId=add('<< /Type /Page /Parent '+pagesId+' 0 R /MediaBox [0 0 612 792] '+
+                '/Resources << /Font << /F1 '+f1+' 0 R /F2 '+f2+' 0 R >> >> '+
+                '/Contents '+contents+' 0 R >>');
+            pageIds.push(pageId);
+        }
+        objects[catalog-1]='<< /Type /Catalog /Pages '+pagesId+' 0 R >>';
+        objects[pagesId-1]='<< /Type /Pages /Kids ['+
+            pageIds.map(id=>id+' 0 R').join(' ')+'] /Count '+pageIds.length+' >>';
+        const chunks=[],offsets=[0];let offset=0;
+        const append=text=>{
+            const bytes=enc.encode(text);chunks.push(bytes);offset+=bytes.length;
+        };
+        append('%PDF-1.4\n');
+        objects.forEach((body,i)=>{
+            offsets.push(offset);
+            append((i+1)+' 0 obj\n'+body+'\nendobj\n');
+        });
+        const xref=offset;
+        append('xref\n0 '+(objects.length+1)+'\n0000000000 65535 f \n');
+        for(let i=1;i<offsets.length;i++){
+            append(String(offsets[i]).padStart(10,'0')+' 00000 n \n');
+        }
+        append('trailer\n<< /Size '+(objects.length+1)+' /Root '+catalog+' 0 R >>\n'+
+            'startxref\n'+xref+'\n%%EOF\n');
+        return new Blob(chunks,{type:'application/pdf'});
+    }
+
+    const PPE_REPAIR_DRAFTS_KEY='vr_ppe_clean_repair_saved_info_v1';
+    const PPE_REPAIR_FORM_FIELDS=[
+        'date','name','idNumber','shift','pickupStation','deliveryStation',
+        'pickupBy','pickupDate','returnedBy','returnedDate'
+    ];
+    function repairAssetKey(asset){
+        return asset?String(asset.pool||'')+':'+String(asset.itemId||''):'';
+    }
+    function repairPersistDraft(forms){
+        const drafts=loadJSON(PPE_REPAIR_DRAFTS_KEY,{})||{};
+        const now=new Date().toISOString();
+        for(const form of forms){
+            const key=masterNameKey(form.originalName);
+            if(!key)continue;
+            const fields=Object.fromEntries(PPE_REPAIR_FORM_FIELDS.map(k=>[k,
+                String(form[k]||'').slice(0,500)]));
+            drafts[key]={
+                savedAt:now,fields,
+                slots:PPE_REPAIR_ROWS.map((label,i)=>{
+                    const slot=form.items[i]||{};
+                    return {
+                        label,assetKey:repairAssetKey(slot.asset),
+                        serial:String(slot.serial||'').slice(0,100),
+                        size:String(slot.size||'').slice(0,100),
+                        manufacture:String(slot.manufacture||'').slice(0,100),
+                        issues:String(slot.issues||'').slice(0,2000)
+                    };
+                })
+            };
+        }
+        const keys=Object.keys(drafts);
+        if(keys.length>30){
+            keys.sort((a,b)=>String(drafts[a]?.savedAt||'').localeCompare(String(drafts[b]?.savedAt||'')));
+            for(const key of keys.slice(0,keys.length-30))delete drafts[key];
+        }
+        saveJSON(PPE_REPAIR_DRAFTS_KEY,drafts);
+        repairPersistPersonDefaults(forms);
+        return now;
+    }
+    function repairRestoreDraft(form){
+        const key=masterNameKey(form.originalName);
+        const draft=loadJSON(PPE_REPAIR_DRAFTS_KEY,{})?.[key];
+        if(!draft?.fields||!Array.isArray(draft.slots))return '';
+        for(const k of PPE_REPAIR_FORM_FIELDS){
+            if(typeof draft.fields[k]==='string')form[k]=draft.fields[k];
+        }
+        let missing=0;
+        for(let i=0;i<PPE_REPAIR_ROWS.length;i++){
+            const saved=draft.slots[i];
+            if(!saved||saved.label!==PPE_REPAIR_ROWS[i])continue;
+            if(!saved.assetKey){
+                // A deliberately unselected form row remains unselected.
+                form.items[i]={
+                    asset:null,serial:saved.serial||'',size:saved.size||'',
+                    manufacture:saved.manufacture||'',issues:saved.issues||''
+                };
+                continue;
+            }
+            // Only restore saved item data when the live Responsible Party
+            // scan still verifies the SAME pool/item ID for THIS person.
+            const asset=form.sourceItems.find(item=>repairAssetKey(item)===saved.assetKey);
+            if(!asset){
+                missing++;
+                if(!form.sourceItems.some(item=>repairAssetKey(item)===repairAssetKey(form.items[i]?.asset))){
+                    form.items[i]={asset:null,serial:'',size:'',manufacture:'',issues:''};
+                }
+                continue;
+            }
+            form.items[i]={
+                ...repairSlotFromAsset(asset),
+                serial:saved.serial||repairSlotFromAsset(asset).serial,
+                size:saved.size||repairSlotFromAsset(asset).size,
+                manufacture:saved.manufacture||repairSlotFromAsset(asset).manufacture,
+                issues:saved.issues||''
+            };
+        }
+        return 'Saved form restored ('+String(draft.savedAt||'').slice(0,16).replace('T',' ')+
+            ')'+(missing?'; '+missing+' former item(s) no longer assigned and omitted':'');
+    }
+
     function showPpeCleanRepairForm() {
         if (getRun()) {
             setStatus('Finish or abort the active inspection before preparing a clean/repair form.',false);
@@ -10617,10 +10880,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         footer.style.cssText='display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:10px 0;';
         const detailsBtn=makeButton('Fill missing details from Vector',{background:'#265a81',color:'#fff'});
         detailsBtn.disabled=true;
+        const saveInfoBtn=makeButton('Save Info',{background:'#265a81',color:'#fff'});
+        saveInfoBtn.disabled=true;
+        const pdfBtn=makeButton('Save as PDF',{background:'#187450',color:'#fff'});
+        pdfBtn.disabled=true;
         const exportBtn=makeButton('Download editable Excel (.xlsx)',{background:'#187450',color:'#fff'});
         exportBtn.disabled=true;
-        footer.append(load,detailsBtn,exportBtn);
-        box.append(h,info,note,controls,list,status,footer,review);
+        footer.append(load,detailsBtn,saveInfoBtn,pdfBtn,exportBtn);
+        footer.style.cssText+='position:sticky;top:0;z-index:25;background:#f8fbff;padding:9px 5px;border-bottom:1px solid #b3c7d3;border-radius:6px;';
+        box.append(h,info,note,controls,list,footer,status,review);
         const forms=[];
         const makeInput=(placeholder,value,onchange)=>{
             const el=document.createElement('input');el.type='text';
@@ -10710,6 +10978,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
             status.textContent=forms.length+' person form(s) ready for review. Primary/secondary gear identified from FL/BU. Item metadata lookup starts automatically.';
             exportBtn.disabled=!forms.length;
+            pdfBtn.disabled=!forms.length;
+            saveInfoBtn.disabled=!forms.length;
             detailsBtn.disabled=!forms.length;
         }
         detailsBtn.onclick=async()=>{
@@ -10720,7 +10990,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
             if(!queue.length){status.textContent='All selected PPE details have values. You may edit them before downloading.';return;}
             if(queue.length>36){status.textContent='Select fewer items (up to 36 detail pages per lookup).';return;}
-            detailsBtn.disabled=true;load.disabled=true;exportBtn.disabled=true;
+            detailsBtn.disabled=true;load.disabled=true;exportBtn.disabled=true;pdfBtn.disabled=true;
             let next=0,completed=0,updated=0,failed=0;
             const worker=async()=>{
                 while(next<queue.length){
@@ -10742,15 +11012,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 status.textContent='Vector detail lookup complete: '+completed+' item(s), '+
                     updated+' field(s) filled'+(failed?'; '+failed+' could not be read':'')+
                     '. Verify remaining blanks or open item links to enter them manually.';
-            }finally{detailsBtn.disabled=false;load.disabled=false;exportBtn.disabled=!forms.length;}
+            }finally{detailsBtn.disabled=false;load.disabled=false;exportBtn.disabled=!forms.length;pdfBtn.disabled=!forms.length;}
         };
         load.onclick=async()=>{
             if(getRun()){status.textContent='An inspection is active. Finish or abort it before exporting.';return;}
             const chosen=roster.filter(p=>selection.has(p.prefix));
             if(!chosen.length){status.textContent='Choose at least one person.';return;}
             if(chosen.length>12){status.textContent='Select up to 12 people per export to keep live PPE searches bounded.';return;}
-            load.disabled=true;detailsBtn.disabled=true;exportBtn.disabled=true;forms.length=0;review.innerHTML='';
+            load.disabled=true;detailsBtn.disabled=true;exportBtn.disabled=true;pdfBtn.disabled=true;saveInfoBtn.disabled=true;forms.length=0;review.innerHTML='';
             try{
+                const restored=[];
                 for(let i=0;i<chosen.length;i++){
                     const person=chosen[i];
                     status.textContent='Scanning '+(i+1)+'/'+chosen.length+': '+person.name;
@@ -10769,15 +11040,54 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         pickupBy:'',pickupDate:'',
                         returnedBy:'',returnedDate:'',items:slots,sourceItems,
                         capturedAt:inventory.capturedAt});
+                    const note=repairRestoreDraft(forms[forms.length-1]);
+                    if(note)restored.push(person.name+': '+note);
                 }
                 showReview();
+                if(restored.length)status.textContent=restored.join(' | ');
                 await detailsBtn.onclick();
+                if(restored.length)status.textContent+=' | '+restored.join(' | ');
             }catch(error){
                 forms.length=0;
                 review.innerHTML='';
                 status.textContent='Cannot verify full PPE inventory: '+(error?.message||error)+
                     '. No partial workbook was produced. Refresh Vector and retry.';
             }finally{load.disabled=false;}
+        };
+        saveInfoBtn.onclick=()=>{
+            if(!forms.length){status.textContent='Load PPE for at least one person first.';return;}
+            try{
+                const savedAt=repairPersistDraft(forms);
+                status.textContent='Saved Info for '+forms.length+
+                    ' person(s) on this browser ('+savedAt.slice(0,16).replace('T',' ')+
+                    '). Station/shift/ID are also saved in Profile. No Vector changes made.';
+            }catch(error){status.textContent='Save Info failed: '+(error?.message||error);}
+        };
+        pdfBtn.onclick=()=>{
+            try{
+                if(!forms.length)throw Error('Load PPE for at least one person first.');
+                for(const form of forms){
+                    const seen=new Set();
+                    for(const slot of form.items){
+                        if(!slot?.asset)continue;
+                        const key=repairAssetKey(slot.asset);
+                        if(seen.has(key))throw Error(form.name+': same PPE selected in two rows.');
+                        seen.add(key);
+                    }
+                    if(!seen.size)throw Error(form.name+': select at least one PPE item.');
+                }
+                repairPersistDraft(forms);
+                const blob=repairPdfDocument(forms);
+                const url=URL.createObjectURL(blob),anchor=document.createElement('a');
+                const date=new Date().toISOString().slice(0,10);
+                anchor.href=url;
+                anchor.download='PPE_Clean_and_Repair_'+date+
+                    (forms.length===1?'_'+forms[0].originalName.replace(/[^A-Za-z0-9]+/g,'_'):'_Crew')+'.pdf';
+                document.body.append(anchor);anchor.click();anchor.remove();
+                setTimeout(()=>URL.revokeObjectURL(url),30000);
+                status.textContent='Saved PDF for '+forms.length+
+                    ' person(s). Form information was also saved on this browser.';
+            }catch(error){status.textContent='Save as PDF failed: '+(error?.message||error);}
         };
         exportBtn.onclick=()=>{
             try{
@@ -10793,7 +11103,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     }
                     if(!seen.size)throw Error(form.name+': choose at least one PPE item to send.');
                 }
-                repairPersistPersonDefaults(forms);
+                repairPersistDraft(forms);
                 const xlsx=repairWorkbook(forms);
                 const url=URL.createObjectURL(xlsx),a=document.createElement('a');
                 const stamp=new Date().toISOString().slice(0,10);
