@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.40
+// @version      3.2.41
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.40',
+        version: '3.2.41',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.40';
+    const VERSION = '3.2.41';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -10801,12 +10801,47 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ')'+(missing?'; '+missing+' former item(s) no longer assigned and omitted':'');
     }
 
+    const PPE_REPAIR_PEOPLE_KEY='vr_ppe_repair_people_v1';
+    // Fresh installs have no shared roster. All owners still require a live
+    // Vector Responsible Party match; manual names grant no PPE ownership.
+    function repairPersonChoices(masterPeople, directoryPeople, ownName, addedPeople) {
+        const byKey=new Map();
+        for(const raw of [...(Array.isArray(masterPeople)?masterPeople:[]),
+            ...(Array.isArray(directoryPeople)?directoryPeople:[]),
+            ...(Array.isArray(addedPeople)?addedPeople:[]),{name:ownName}]){
+            const name=clean(raw?.name);
+            if(!name||isOrganizationOrBadRosterName(name))continue;
+            const key=masterNameKey(name);
+            if(!key||byKey.has(key))continue;
+            byKey.set(key,{name,prefix:ownerRosterKey(name)});
+        }
+        return [...byKey.values()].sort((a,b)=>a.name.localeCompare(b.name));
+    }
+    function repairSavedPersonNames() {
+        const saved=loadJSON(PPE_REPAIR_PEOPLE_KEY,[]);
+        return Array.isArray(saved)?saved.filter(p=>typeof p?.name==='string').slice(0,40):[];
+    }
+    function repairSavePersonName(name) {
+        const candidates=repairPersonChoices([],[],name,[]);
+        if(candidates.length!==1||clean(name).split(/\s+/).length<2){
+            throw new Error('Enter the firefighter full first and last name exactly as Vector lists the Responsible Party.');
+        }
+        const saved=repairSavedPersonNames();
+        if(!saved.some(p=>masterNameKey(p.name)===masterNameKey(name))){
+            saved.push({name:clean(name)});
+            saveJSON(PPE_REPAIR_PEOPLE_KEY,saved.slice(-40));
+        }
+        return candidates[0];
+    }
+
     function showPpeCleanRepairForm() {
         if (getRun()) {
             setStatus('Finish or abort the active inspection before preparing a clean/repair form.',false);
             return;
         }
-        const roster=getActiveMasterRoster().sort((a,b)=>a.name.localeCompare(b.name));
+        const config=getConfig();
+        const roster=repairPersonChoices(getActiveMasterRoster(),
+            config.peopleDirectory||[],config.inspectorName,repairSavedPersonNames());
         const {overlay,box}=makeOverlayBox('1150px');
         const h=document.createElement('h2');
         h.textContent='PPE Clean and Repair Form';
@@ -10831,12 +10866,27 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const counter=document.createElement('span');
         counter.style.cssText='font:11px Arial;color:#567085';
         controls.append(search,counter,close);
+        const manualRow=document.createElement('div');
+        manualRow.style.cssText='display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin:7px 0';
+        const manualName=document.createElement('input');
+        manualName.type='text';
+        manualName.placeholder='Full Vector Responsible Party name (First Last)';
+        manualName.setAttribute('aria-label','Add firefighter by exact Responsible Party name');
+        manualName.style.cssText='padding:9px;border:1px solid #b9cad6;border-radius:6px;flex:1;min-width:240px;font:13px Arial';
+        const addPerson=makeButton('Add firefighter',{background:'#176b8e',color:'#fff'});
+        const guidance=document.createElement('div');
+        guidance.style.cssText='font:11px/1.5 Arial;color:#567085;width:100%';
+        guidance.textContent='Your Profile name appears automatically. Add others by their exact Vector Responsible Party name; names are remembered on this browser. PPE ownership is verified before export.';
+        manualRow.append(manualName,addPerson,guidance);
         const list=document.createElement('div');
         list.style.cssText='border:1px solid #d6e3eb;border-radius:8px;margin:8px 0;max-height:180px;overflow:auto;padding:4px 8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:3px 14px';
         const selection=new Set();
-        const myName=masterNameKey(getConfig().inspectorName);
+        const myName=masterNameKey(config.inspectorName);
         const me=roster.find(p=>masterNameKey(p.name)===myName);
-        if(me)selection.add(me.prefix);
+        if(me)selection.add(myName);
+        function drawCount(){
+            counter.textContent=selection.size+' selected / '+roster.length+' available';
+        }
         const draw=()=>{
             list.innerHTML='';
             const term=search.value.trim().toLowerCase();
@@ -10844,13 +10894,33 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             for(const person of visiblePeople) {
                 const row=document.createElement('label');
                 row.style.cssText='display:flex;align-items:center;gap:8px;padding:4px 0;font:12px Arial;color:#28465b;cursor:pointer';
-                const cb=document.createElement('input');cb.type='checkbox';cb.checked=selection.has(person.prefix);
-                cb.onchange=()=>{if(cb.checked)selection.add(person.prefix);else selection.delete(person.prefix);counter.textContent=selection.size+' selected';};
+                const key=masterNameKey(person.name);
+                const cb=document.createElement('input');cb.type='checkbox';cb.checked=selection.has(key);
+                cb.onchange=()=>{if(cb.checked)selection.add(key);else selection.delete(key);drawCount();};
                 const n=document.createElement('span');n.textContent=person.name;row.append(cb,n);list.appendChild(row);
             }
-            counter.textContent=selection.size+' selected · '+roster.length+' available';
+            drawCount();
         };
         draw();search.addEventListener('input',draw);
+        if(!roster.length)status.textContent='No names saved on this installation. Enter the full Vector Responsible Party name above, then click Add firefighter.';
+        addPerson.onclick=()=>{
+            try{
+                const person=repairSavePersonName(clean(manualName.value));
+                const key=masterNameKey(person.name);
+                if(!roster.some(p=>masterNameKey(p.name)===key))roster.push(person);
+                roster.sort((a,b)=>a.name.localeCompare(b.name));
+                selection.add(key);
+                search.value='';
+                manualName.value='';
+                draw();
+                status.textContent=person.name+' added and selected. Load PPE to verify exact Responsible Party ownership.';
+            }catch(error){
+                status.textContent=error?.message||String(error);
+            }
+        };
+        manualName.addEventListener('keydown',event=>{
+            if(event.key==='Enter'){event.preventDefault();addPerson.click();}
+        });
         const load=makeButton('Load selected PPE',{background:'#176b8e',color:'#fff'});
         const review=document.createElement('div');
         review.style.cssText='margin-top:12px;';
@@ -10866,7 +10936,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         exportBtn.disabled=true;
         footer.append(load,detailsBtn,saveInfoBtn,pdfBtn,exportBtn);
         footer.style.cssText+='position:sticky;top:0;z-index:25;background:#f8fbff;padding:9px 5px;border-bottom:1px solid #b3c7d3;border-radius:6px;';
-        box.append(h,info,note,controls,list,footer,status,review);
+        box.append(h,info,note,controls,manualRow,list,footer,status,review);
         const forms=[];
         const makeInput=(placeholder,value,onchange)=>{
             const el=document.createElement('input');el.type='text';
@@ -10994,7 +11064,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         };
         load.onclick=async()=>{
             if(getRun()){status.textContent='An inspection is active. Finish or abort it before exporting.';return;}
-            const chosen=roster.filter(p=>selection.has(p.prefix));
+            const chosen=roster.filter(p=>selection.has(masterNameKey(p.name)));
             if(!chosen.length){status.textContent='Choose at least one person.';return;}
             if(chosen.length>12){status.textContent='Select up to 12 people per export to keep live PPE searches bounded.';return;}
             load.disabled=true;detailsBtn.disabled=true;exportBtn.disabled=true;pdfBtn.disabled=true;saveInfoBtn.disabled=true;forms.length=0;review.innerHTML='';
