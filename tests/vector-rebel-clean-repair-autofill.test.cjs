@@ -1,65 +1,89 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const fs=require('node:fs');
-const src=fs.readFileSync(require('node:path').join(__dirname,'../beta/vector-rebel.user.js'),'utf8');
-const extract=(begin,end)=>{const a=src.indexOf(begin),b=src.indexOf(end,a+begin.length);assert.ok(a>0&&b>a);return src.slice(a,b)};
-const helper=extract('function repairPersonDefaults(person) {','function showPpeCleanRepairForm()');
-const local={'michael brion':{pickupStation:'Station 4',deliveryStation:'Station 4',shift:'C',idNumber:'909'}};
-const api=new Function('loadJSON','saveJSON','clean','masterNameKey',helper+';return {repairPersonDefaults,repairSlotFromAsset};')(
- (_key,fallback)=>local,()=>{},v=>String(v||'').trim(),v=>String(v||'').trim().toLowerCase()
+const fs=require('node:fs'),path=require('node:path');
+const src=fs.readFileSync(path.join(__dirname,'../beta/vector-rebel.user.js'),'utf8');
+const extract=(begin,end)=>{const a=src.indexOf(begin),b=src.indexOf(end,a+begin.length);assert.ok(a>0&&b>a,begin);return src.slice(a,b)};
+const state={config:{inspectorName:'Michael Brion',ppeRepairProfile:{
+  idNumber:'',shift:'',pickupStation:'',deliveryStation:''
+}},local:{'michael brion':{pickupStation:'4',deliveryStation:'4',shift:'C',idNumber:'911'}}};
+const loadJSON=(key,fallback)=>key==='vr_ppe_repair_contact_v1'?state.local:key==='vr_ppe_repair_verified_details_v1'?{}:fallback;
+const gearMatcher=new Function(extract('function repairGearMatches(label, item) {','function repairXml(value) {')+';return repairGearMatches;')();
+const api=new Function('loadJSON','saveJSON','clean','masterNameKey','getConfig','cloneConfig','saveConfig','repairGearMatches',
+ extract('const PPE_REPAIR_PROFILE_FIELDS=Object.freeze([','function showPpeCleanRepairForm() {')+
+ ';return {repairPersonDefaults,repairPersistPersonDefaults,repairDefaultAsset,repairGearTier,repairSlotFromAsset,repairReadDetailText,repairReadDetailDocument,repairFieldValid};')(
+ loadJSON,(key,val)=>{if(key==='vr_ppe_repair_contact_v1')state.local=val},
+ v=>String(v||'').trim(),v=>String(v||'').trim().toLowerCase(),
+ ()=>state.config,()=>structuredClone(state.config),val=>{state.config=val},gearMatcher
 );
-test('The repair form date and exact person name remain editable, and station/shift persist per person',()=>{
- assert.match(src,/\['First and Last Name','name'\]/);
- assert.match(src,/\['Date','date'\]/);
- assert.match(src,/\['Station picked up at','pickupStation'\]/);
- assert.match(src,/\['Shift','shift'\]/);
+test('PPE form names and dates are editable, with saved station/shift/ID in Profile',()=>{
+ for(const piece of ["['First and Last Name','name']","['Date','date']","['Shift','shift']",
+   "['Station picked up at','pickupStation']","['Preferred station delivery','deliveryStation']"]){
+   assert.ok(src.includes(piece),piece);
+ }
+ assert.match(src,/profileFields\.map\(entry=>\[entry\.key,clean\(entry\.input\.value\)\]\)/);
  assert.match(src,/forms\.push\(\{name:person\.name,originalName:person\.name/);
- const current=api.repairPersonDefaults({name:'Michael Brion'});
- assert.deepEqual(current,{pickupStation:'Station 4',deliveryStation:'Station 4',shift:'C',idNumber:'909'});
- const next=api.repairPersonDefaults({name:'Jared Weston'});
- assert.equal(next.shift,'');
- assert.equal(next.pickupStation,'');
+ assert.deepEqual(api.repairPersonDefaults({name:'Michael Brion'}),
+  {idNumber:'911',shift:'C',pickupStation:'4',deliveryStation:'4'});
+ api.repairPersistPersonDefaults([{originalName:'Michael Brion',shift:'B',pickupStation:'5',
+  deliveryStation:'2',idNumber:'999'}]);
+ assert.equal(state.config.ppeRepairProfile.shift,'B');
+ assert.equal(state.config.ppeRepairProfile.pickupStation,'5');
+ assert.equal(state.config.ppeRepairProfile.idNumber,'999');
+ assert.equal(api.repairPersonDefaults({name:'Jared Weston'}).shift,'');
+ assert.match(src,/input\?\.addEventListener\('blur',\(\)=>repairPersistPersonDefaults/);
 });
-test('Only verified PPE row metadata fills serial number, size and manufacturing date',()=>{
- const asset={assetId:'BRION-001',serial:'001222',size:'XL',manufacture:'04/12/2024'};
- assert.deepEqual(api.repairSlotFromAsset(asset),
-  {asset,serial:'001222',size:'XL',manufacture:'04/12/2024',issues:''});
- assert.deepEqual(api.repairSlotFromAsset({...asset,serial:'-',size:'UNKNOWN',manufacture:'N/A'}).serial,'');
- assert.equal(api.repairSlotFromAsset({...asset,serial:'-',size:'UNKNOWN',manufacture:'N/A'}).size,'');
- assert.equal(api.repairSlotFromAsset({...asset,serial:'-',size:'UNKNOWN',manufacture:'N/A'}).manufacture,'');
+test('FL means primary and BU means secondary without inferring ownership',()=>{
+ const inventory=[
+ {assetId:'BRION-10237792-FL',type:'Bunker Coat'},
+ {assetId:'BRION-13313162-BU',type:'Bunker Coat'},
+ {assetId:'BRION-4111218',type:'Structural Helmet'}];
+ assert.equal(api.repairDefaultAsset('Primary Coat',inventory).assetId,'BRION-10237792-FL');
+ assert.equal(api.repairDefaultAsset('Secondary Coat',inventory).assetId,'BRION-13313162-BU');
+ assert.equal(api.repairDefaultAsset('Helmet',inventory).assetId,'BRION-4111218');
+ assert.equal(api.repairDefaultAsset('Helmet (Personal)',inventory),null);
+ assert.equal(api.repairGearTier({assetId:'BRION-10237792-FL'}),'primary');
+ assert.equal(api.repairGearTier({assetId:'BRION-13313162-BU'}),'secondary');
+ assert.equal(api.repairGearTier({assetId:'BRION-4111218'}),'unmarked');
 });
-test('Owner-verified Vector PPE row parser reads the real Serial No, Size and Mfg column when present',()=>{
- const f=extract('function responsiblePartyPpeRow(anchor) {','// Bounded PPE owner discovery');
- assert.match(f,/const headerValue = patterns =>/);
- assert.match(f,/serial: headerValue/);
- assert.match(f,/size: headerValue/);
- assert.match(f,/manufacture: headerValue/);
- assert.match(f,/\^serial\(\?: number\| no\| #\)/);
- assert.match(f,/ownerName: party/);
+test('Unrelated Vector UI label Tags must never become a serial number',()=>{
+ const asset={assetId:'BRION-13313162-BU',serial:'Tags',size:'',manufacture:''};
+ assert.equal(api.repairSlotFromAsset(asset).serial,'');
+ assert.equal(api.repairSlotFromAsset({...asset,serial:'13313162'}).serial,'13313162');
 });
-test('Changing an asset resets stale details then hydrates only the newly selected asset',()=>{
- assert.match(src,/Object\.assign\(slot,repairSlotFromAsset\(selected\)\)/);
- assert.match(src,/detailLink\.href=selected\?\.url/);
- assert.match(src,/const values=\[slot\.serial,slot\.size,slot\.manufacture,slot\.issues\]/);
+test('Actual item detail shows serial and size; Year gives year only, not guessed purchase date',()=>{
+ const page=['Bunker Coat: BRION-13313162-BU','Year','2022',
+  'Purchase Date','08/01/2022','End of Life','08/01/2032',
+  'Serial Number','13313162','Size','50-32','Length','Regular'].join('\n');
+ const got=api.repairReadDetailText(page);
+ assert.deepEqual(got,{serial:'13313162',size:'50-32',manufacture:'2022'});
+ const full=['Serial Number','13313162','Size','50-32','Date of Manufacture',
+  '08/01/2022','End of Life','08/01/2032'].join('\n');
+ assert.deepEqual(api.repairReadDetailText(full),{serial:'13313162',size:'50-32',manufacture:'08/01/2022'});
+ const bogus=['Serial Number','Tags','Size','Tags','Purchase Date','08/01/2022'].join('\n');
+ assert.deepEqual(api.repairReadDetailText(bogus),{serial:'',size:'',manufacture:''});
 });
-test('All form fields are passed into the editable Excel export (no guessed manufacture dates)',()=>{
- const xml=extract('function repairFormSheet(form) {','function repairSourceSheet(forms) {');
- for(const field of ['form.date','form.name','form.pickupStation','form.deliveryStation','form.shift','item.serial','item.size','item.manufacture'])assert.ok(xml.includes(field),field);
- assert.match(src,/const xlsx=repairWorkbook\(forms\)/);
- assert.match(src,/const localDate=\[d\.getFullYear\(\)/);
+test('Two-column DOM label/value pairs win over misleading global reading order',()=>{
+ function leaf(label,value){
+   const right={innerText:value,textContent:value},head={children:[],textContent:label,
+      closest:()=>null,nextElementSibling:right};
+   head.parentElement={children:[head,right],nextElementSibling:null};
+   return head;
+ }
+ const dom={
+   body:{innerText:['Serial Number','Tags','Size','Length','Year','2022'].join('\n')},
+   querySelectorAll:()=>[leaf('Serial Number','13313162'),leaf('Size','50-32'),leaf('Year','2022')]
+ };
+ assert.deepEqual(api.repairReadDetailDocument(dom),{serial:'13313162',size:'50-32',manufacture:'2022'});
 });
-
-test('Read-only detail-page text can supply serial, size and manufacture date when table omitted them',()=>{
- const fnSrc=extract('function repairReadDetailText(text) {','async function repairReadItemDetail(asset) {');
- const parser=new Function(fnSrc+'; return repairReadDetailText;')();
- const text=['Bunker Coat','Serial Number','16642722','Size','46-32','Date of Manufacture','05/14/2025','End of Life','05/14/2035'].join('\n');
- assert.deepEqual(parser(text),{serial:'16642722',size:'46-32',manufacture:'05/14/2025'});
- const noManuf=['Serial Number','16642722','Size','46-32','End of Life','05/14/2035'].join('\n');
- assert.equal(parser(noManuf).manufacture,'','Never infer manufacture date from end-of-life');
-});
-test('Optional bounded Vector detail prefill does not overwrite manually edited fields',()=>{
- assert.match(src,/Fill missing details from Vector/);
+test('Export remains editable and reads source pages without writing PPE or inspections',()=>{
+ const exporter=extract('function repairFormSheet(form) {','function repairSourceSheet(forms) {');
+ for(const field of ['form.date','form.name','form.pickupStation','form.deliveryStation','form.shift',
+   'item.serial','item.size','item.manufacture'])assert.ok(exporter.includes(field),field);
+ assert.match(src,/scanPpeByResponsibleParty\(person\.name/);
+ assert.match(src,/repairCaptureVisibleItemPage\(\)/);
+ assert.match(src,/const found=repairReadDetailDocument\(doc\)/);
+ assert.match(src,/await detailsBtn\.onclick\(\)/);
  assert.match(src,/if\(!slot\[k\]&&extra\[k\]\)/);
- assert.match(src,/while\(Date\.now\(\)-start<8500\)/);
  assert.match(src,/finally\{frame\.remove\(\);\}/);
+ assert.match(src,/View item in Vector/);
 });

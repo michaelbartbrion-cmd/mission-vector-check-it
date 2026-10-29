@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.37
+// @version      3.2.38
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.37',
+        version: '3.2.38',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.37';
+    const VERSION = '3.2.38';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -495,6 +495,7 @@
         initialized: false,
         inspectorName: '',
         selfPrefix: '',
+        ppeRepairProfile: {idNumber:'',shift:'',pickupStation:'',deliveryStation:''},
         tourCoatComment: '',
         peopleDirectory: [],
         captainRosterPrefixes: [],
@@ -1777,6 +1778,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ...stored,
             schemaVersion: 7,
             inspectorName: clean(stored.inspectorName),
+            ppeRepairProfile: Object.fromEntries(
+                ['idNumber','shift','pickupStation','deliveryStation'].map(key=>
+                    [key,clean(String(stored.ppeRepairProfile?.[key]||''))])),
             selfPrefix,
             tourCoatComment: clean(stored.tourCoatComment),
             peopleDirectory: people,
@@ -9100,7 +9104,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 config.inspectorName, {placeholder:'First Last'});
             const coat = field('Tour Bunker Coat assignment comment',
                 config.tourCoatComment, {placeholder:'Name / identifier written into the coat inspection'});
+            const profileFields = [
+                ['ID Number','idNumber'],['Shift','shift'],
+                ['Station picked up at','pickupStation'],
+                ['Preferred station delivery','deliveryStation']
+            ].map(([label,key])=>({
+                key,...field(label, config.ppeRepairProfile?.[key]||'', {
+                    placeholder:label+' for PPE clean/repair forms'
+                })
+            }));
             intro.append(name.wrap,coat.wrap);
+            for(const entry of profileFields)intro.appendChild(entry.wrap);
             const save = makeButton('Save Profile', {background:'#176b8e',color:'#fff'});
             save.onclick = () => {
                 try {
@@ -9112,6 +9126,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     next.initialized = true;
                     next.inspectorName = newName;
                     next.tourCoatComment = clean(coat.input.value);
+                    next.ppeRepairProfile=Object.fromEntries(
+                        profileFields.map(entry=>[entry.key,clean(entry.input.value)]));
                     saveConfig(next);
                     refreshPanelInfo();
                     setStatus('Profile saved. PPE discovery uses Responsible Party.');
@@ -10244,13 +10260,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     function repairSourceSheet(forms) {
         const rows=[['Person','Form line','Vector PPE name','Pool ID','Item ID',
             'Responsible Party verified','Captured at','Vector item URL',
-            'Serial from Vector','Size from Vector','Manufacture from Vector']];
+            'Exported Serial','Exported Size','Exported Manufacturing']];
         for (const form of forms) for (let i=0;i<PPE_REPAIR_ROWS.length;i++) {
             const item=form.items[i]||{};
             if (!item.asset) continue;
             rows.push([form.name,PPE_REPAIR_ROWS[i],item.asset.assetId,item.asset.pool,
                 item.asset.itemId,item.asset.ownerName,form.capturedAt,item.asset.url,
-                item.asset.serial||'',item.asset.size||'',item.asset.manufacture||'']);
+                item.serial||'',item.size||'',item.manufacture||'']);
         }
         const rowXml=rows.map((row,i)=>'<row r="'+(i+1)+'">'+row.map((v,j)=>
             repairXmlCell(String.fromCharCode(65+j)+(i+1),v,i===0?3:0)).join('')+'</row>').join('');
@@ -10353,82 +10369,196 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     // Reuse a person's explicitly entered station/shift on future exports.
     // These are not inferred from fire staffing assignments or PPE labels.
+    const PPE_REPAIR_PROFILE_FIELDS=Object.freeze([
+        'idNumber','shift','pickupStation','deliveryStation'
+    ]);
+    // My own saved PPE repair details belong in Vector Rebel's normal profile,
+    // not only an export-specific draft. Other firefighters remain local entries.
     function repairPersonDefaults(person) {
         const saved=loadJSON('vr_ppe_repair_contact_v1', {});
         const key=masterNameKey(person.name);
         const manual=saved && typeof saved==='object' ? saved[key]||{} : {};
-        return {
-            pickupStation:clean(String(person.station || manual.pickupStation || '')),
-            deliveryStation:clean(String(person.deliveryStation || manual.deliveryStation || '')),
-            shift:clean(String(person.shift || manual.shift || '')),
-            idNumber:clean(String(person.idNumber || manual.idNumber || ''))
-        };
+        const profile=getConfig();
+        const mine=key && key===masterNameKey(profile.inspectorName);
+        const own=mine?profile.ppeRepairProfile||{}:{};
+        return Object.fromEntries(PPE_REPAIR_PROFILE_FIELDS.map(field=>[
+            field,clean(String(own[field]||manual[field]||person[field]||
+                (field==='pickupStation'?person.station:'')||''))
+        ]));
     }
     function repairPersistPersonDefaults(forms) {
         const saved=loadJSON('vr_ppe_repair_contact_v1', {})||{};
+        let next=null;
         for (const form of forms) {
             const key=masterNameKey(form.originalName);
-            if (!key) continue;
-            saved[key]={
-                pickupStation:clean(form.pickupStation),deliveryStation:clean(form.deliveryStation),
-                shift:clean(form.shift),idNumber:clean(form.idNumber)
-            };
+            if(!key)continue;
+            saved[key]=Object.fromEntries(PPE_REPAIR_PROFILE_FIELDS.map(field=>
+                [field,clean(String(form[field]||''))]));
+            if(key===masterNameKey(getConfig().inspectorName)){
+                next=next||cloneConfig();
+                next.ppeRepairProfile={...saved[key]};
+            }
         }
         saveJSON('vr_ppe_repair_contact_v1',saved);
+        if(next)saveConfig(next);
+    }
+    // FL / BU identify primary and secondary structural gear on this
+    // department's item names, not ownership. Ownership remains Responsible Party.
+    function repairGearTier(asset) {
+        const suffix=String(asset?.assetId||'').match(/(?:^|[-_])(FL|BU)$/i)?.[1];
+        return suffix==='FL'||suffix==='fl'?'primary':
+            suffix==='BU'||suffix==='bu'?'secondary':'unmarked';
+    }
+    function repairDefaultAsset(label,assets){
+        const group=assets.filter(item=>repairGearMatches(label,item));
+        const tier=/^Secondary |\(Personal\)/i.test(label)?'secondary':'primary';
+        const targeted=group.filter(item=>repairGearTier(item)===tier);
+        if(targeted.length===1)return targeted[0];
+        if(targeted.length>1)return null;
+        if(tier==='primary'){
+            const unknown=group.filter(item=>repairGearTier(item)==='unmarked');
+            // One identifiable helmet or boots is safely a primary choice.
+            if(unknown.length===1)return unknown[0];
+        }
+        return null;
     }
     function repairSlotFromAsset(asset) {
         const accepted=value=>{
             const v=clean(String(value||''));
             return !v||v==='-'||/^n\/?a$|^unknown$/i.test(v)?'':v;
         };
-        return {asset:asset||null,serial:accepted(asset?.serial),size:accepted(asset?.size),
-            manufacture:accepted(asset?.manufacture),issues:''};
+        return {asset:asset||null,serial:repairFieldValid('serial',asset?.serial)?accepted(asset.serial):'',
+            size:repairFieldValid('size',asset?.size)?accepted(asset.size):'',
+            manufacture:repairFieldValid('manufacture',asset?.manufacture)?accepted(asset.manufacture):'',issues:''};
     }
-    function repairReadDetailText(text) {
+    const PPE_REPAIR_DETAIL_CACHE='vr_ppe_repair_verified_details_v1';
+    function repairFieldValid(key,value){
+        const text=clean(String(value||''));
+        if(!text||text.length>80||/^(?:-|n\/?a|none|unknown|tags?|length|price|year|size|serial number|barcode|purchase date|check out date|end of life)$/i.test(text))return false;
+        if(key==='serial')return text.length<=64&&/\d/.test(text);
+        if(key==='size')return text.length<=40&&/[a-z0-9]/i.test(text);
+        if(key==='manufacture')return /^(?:19|20)\d{2}$/.test(text)||
+            /^\d{1,2}[\/.-]\d{1,2}[\/.-](?:19|20)\d{2}$/.test(text)||
+            /^(?:19|20)\d{2}-\d{2}-\d{2}$/.test(text);
+        return false;
+    }
+    function repairReadDetailText(text){
         const lines=String(text||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-        const find=labels=>{
+        const find=(rx,key)=>{
             for(let i=0;i<lines.length-1;i++){
-                if(!labels.some(rx=>rx.test(lines[i])))continue;
-                const val=lines[i+1]||'';
-                if(val.length>100||/^(?:-|N\/?A|Unknown)$/i.test(val))continue;
-                if(/^(?:Serial Number|Size|Date of Manuf|Known Issues|End of Life|Price|Lifespan)$/i.test(val))continue;
-                return val;
+                if(rx.test(lines[i])&&repairFieldValid(key,lines[i+1]))return lines[i+1];
             }
             return '';
         };
         return {
-            serial:find([/^Serial (?:Number|No\.?|#)$/i]),
-            size:find([/^Size$/i]),
-            manufacture:find([/^Date of Manuf(?:acture|acturing)?\.?$/i,
-                /^Manufactur(?:e|ing) Date$/i,/^Mfg\.? Date$/i])
+            serial:find(/^Serial (?:Number|No\.?|#)$/i,'serial'),
+            size:find(/^Size$/i,'size'),
+            manufacture:find(/^(?:Date of Manuf(?:acture|acturing)?\.?|Manufactur(?:e|ing) Date|Mfg\.? Date)$/i,'manufacture')||
+                find(/^Year$/i,'manufacture')
         };
     }
+    function repairReadDetailDocument(doc){
+        if(!doc?.body)return {serial:'',size:'',manufacture:''};
+        // Vector renders label/value pairs inside two side-by-side information
+        // columns. Read the label's own container rather than relying on the
+        // arbitrary document-wide text order.
+        const all=[...doc.querySelectorAll('dt,label,p,span,div,strong,b,th')];
+        const leaf=all.filter(el=>el.children.length===0 && !el.closest(
+            '#vector-ppe-helper-v23,#vector-ppe-overlay-v23'));
+        const find=(pattern,key)=>{
+            for(const label of leaf){
+                if(!pattern.test(clean(label.textContent||'')))continue;
+                const p=label.parentElement;
+                const choices=[
+                    label.nextElementSibling,
+                    p?.nextElementSibling,
+                    ...[...(p?.children||[])].filter(el=>el!==label),
+                    p?.parentElement?.nextElementSibling
+                ];
+                for(const candidate of choices){
+                    if(!candidate)continue;
+                    const value=clean(candidate.innerText||candidate.textContent||'');
+                    if(repairFieldValid(key,value))return value;
+                }
+            }
+            return '';
+        };
+        const raw=repairReadDetailText(doc.body.innerText||'');
+        // DOM-local values take precedence over text-flow fallbacks.
+        return {
+            serial:find(/^Serial (?:Number|No\.?|#)$/i,'serial')||raw.serial,
+            size:find(/^Size$/i,'size')||raw.size,
+            manufacture:find(/^(?:Date of Manuf(?:acture|acturing)?\.?|Manufactur(?:e|ing) Date|Mfg\.? Date)$/i,'manufacture')||
+                raw.manufacture||find(/^Year$/i,'manufacture')
+        };
+    }
+    function repairDetailCacheKey(url){
+        const m=String(url||'').match(/\/app\/equipment\/PPE\/pool\/(\d+)\/(\d+)\/item/i);
+        return m?m[1]+':'+m[2]:'';
+    }
+    function repairCachedDetail(url){
+        const key=repairDetailCacheKey(url);
+        const record=key?loadJSON(PPE_REPAIR_DETAIL_CACHE,{})?.[key]:null;
+        return record&&typeof record==='object'?{
+            serial:record.serial||'',size:record.size||'',
+            manufacture:record.manufacture||''
+        }:{};
+    }
+    function repairRecordDetail(url,values){
+        const key=repairDetailCacheKey(url);
+        if(!key)return;
+        const cache=loadJSON(PPE_REPAIR_DETAIL_CACHE,{})||{};
+        const old=cache[key]||{},newData={...old};
+        for(const field of ['serial','size','manufacture']){
+            if(repairFieldValid(field,values?.[field]))newData[field]=values[field];
+        }
+        if(['serial','size','manufacture'].every(field=>newData[field]===old[field]))return;
+        newData.readAt=new Date().toISOString();cache[key]=newData;
+        // Bound local metadata storage; no department-wide crawl.
+        const ids=Object.keys(cache);
+        if(ids.length>250){
+            ids.sort((x,y)=>String(cache[x]?.readAt||'').localeCompare(String(cache[y]?.readAt||'')));
+            for(const id of ids.slice(0,ids.length-250))delete cache[id];
+        }
+        saveJSON(PPE_REPAIR_DETAIL_CACHE,cache);
+    }
     async function repairReadItemDetail(asset) {
-        if(!asset?.url) return {};
+        if(!asset?.url)return {};
         const itemURL=new URL(asset.url,location.origin);
         if(itemURL.origin!==location.origin)throw Error('Vector PPE item has a different origin.');
+        const already=repairCachedDetail(itemURL.href);
+        if(['serial','size','manufacture'].every(field=>repairFieldValid(field,already[field])))return already;
         const frame=document.createElement('iframe');
         frame.setAttribute('aria-hidden','true');frame.tabIndex=-1;
         frame.style.cssText='position:fixed;bottom:0;right:0;width:2px;height:2px;opacity:0;pointer-events:none;border:0';
         frame.src=itemURL.href;document.body.appendChild(frame);
         try{
             const start=Date.now();
-            while(Date.now()-start<8500) {
+            while(Date.now()-start<6500) {
                 await sleep(200);
                 let doc,pathname;
                 try{
                     doc=frame.contentDocument;
                     pathname=frame.contentWindow?.location?.pathname;
-                }catch{throw Error('Vector blocked item detail preview. Use the item link.');}
+                }catch{throw Error('Vector blocked item preview. Open the item link instead.');}
                 if(!doc||pathname!==itemURL.pathname)continue;
-                const text=doc.body?.innerText||'';
-                // The item page may take longer to render than the iframe shell.
-                if(!text||!(/\bSerial Number\b|\bDate of Manuf|\bSize\b/i.test(text)))continue;
-                const result=repairReadDetailText(text);
-                if(Object.values(result).some(Boolean))return result;
+                const found=repairReadDetailDocument(doc);
+                if(Object.values(found).some(Boolean)){
+                    repairRecordDetail(itemURL.href,found);
+                    return Object.fromEntries(['serial','size','manufacture'].map(key=>[key,found[key]||already[key]||'']));
+                }
             }
-            return {};
+            return already;
         }finally{frame.remove();}
+    }
+    // On an actual Vector equipment page, remember the page's own visible
+    // read-only item metadata. A separate tab can then complete missing form
+    // fields without requiring an iframe or guessing serial/size/year.
+    function repairCaptureVisibleItemPage(){
+        const key=repairDetailCacheKey(location.href);
+        if(!key)return;
+        const values=repairReadDetailDocument(document);
+        if(Object.values(values).some(Boolean))repairRecordDetail(location.href,values);
     }
     function showPpeCleanRepairForm() {
         if (getRun()) {
@@ -10444,7 +10574,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         info.textContent='Select people, load their PPE by verified Responsible Party, choose which gear is being sent, then export an editable Excel workbook. Nothing is submitted to Vector.';
         info.style.cssText='margin:0 0 12px;color:#577083;font:13px/1.5 Arial,sans-serif';
         const note=document.createElement('p');
-        note.textContent='Date and owner name are filled automatically. Station and shift reuse values you previously entered for each person. Serial number, size and manufacture date fill from verified Vector equipment records when present; use Fill missing details from Vector to check the item pages. Every field remains editable.';
+        note.textContent='Date and owner name are filled automatically. Station and shift reuse values you previously entered for each person. Serial number, size and manufacture date fill from verified Vector equipment records when present; use Fill missing details from Vector to check the item pages. Every field remains editable. A Vector Year value is year-only; it is not converted into an invented manufacturing day/month.';
         note.style.cssText='padding:9px;border:1px solid #c0d5e4;background:#eff6fb;color:#234760;border-radius:7px;font:12px/1.45 Arial,sans-serif';
         const status=document.createElement('div');
         status.setAttribute('role','status');
@@ -10521,7 +10651,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     ['Station picked up at','pickupStation'],['Preferred station delivery','deliveryStation'],
                     ['Pick-up By','pickupBy'],['Pick-up Date','pickupDate'],
                     ['Returned By','returnedBy'],['Returned Date','returnedDate']]){
-                    field(fields,label,form[key],v=>{form[key]=v;});
+                    const entry=field(fields,label,form[key],v=>{form[key]=v;});
+                    if(PPE_REPAIR_PROFILE_FIELDS.includes(key)){
+                        const input=entry?.querySelector?.('input')||
+                            fields.lastElementChild?.querySelector?.('input');
+                        input?.addEventListener('blur',()=>repairPersistPersonDefaults([form]));
+                    }
                 }
                 const table=document.createElement('table');
                 table.style.cssText='width:100%;border-collapse:collapse;font:11px Arial;color:#26465b';
@@ -10573,7 +10708,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 table.append(tbody);section.append(title,verified,fields,table);
                 review.append(section);
             }
-            status.textContent=forms.length+' person form(s) ready for review. Choose primary/secondary items and verify missing fields before download.';
+            status.textContent=forms.length+' person form(s) ready for review. Primary/secondary gear identified from FL/BU. Item metadata lookup starts automatically.';
             exportBtn.disabled=!forms.length;
             detailsBtn.disabled=!forms.length;
         }
@@ -10625,11 +10760,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     // No guesses from family names, equipment prefixes, or prior ownership.
                     const sourceItems=inventory.items.map(item=>({...item}));
                     const slots=PPE_REPAIR_ROWS.map(label=>{
-                        const group=sourceItems.filter(item=>repairGearMatches(label,item));
-                        const isSecondary=/secondary|personal/i.test(label);
-                        // One unambiguous owned item may fill a primary slot;
-                        // never guess which of two identical coats is primary.
-                        return repairSlotFromAsset(!isSecondary&&group.length===1?group[0]:null);
+                        return repairSlotFromAsset(repairDefaultAsset(label,sourceItems));
                     });
                     const d=new Date();
                     const localDate=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
@@ -10640,6 +10771,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         capturedAt:inventory.capturedAt});
                 }
                 showReview();
+                await detailsBtn.onclick();
             }catch(error){
                 forms.length=0;
                 review.innerHTML='';
@@ -10838,6 +10970,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     migrateLegacyRunHistory();
     installPanel();
     dismissObsoleteRecoveryToast();
+    setTimeout(repairCaptureVisibleItemPage,1200);
     ensureRebelCommandEnrollment(true).finally(() => {
         rebelCommandEvent('app_loaded', { success: true, description: 'Vector Rebel loaded.' });
         refreshPanelInfo();
@@ -10877,6 +11010,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         observerLastRunAt = Date.now();
         if (!document.getElementById(PANEL_ID)) installPanel();
         dismissObsoleteRecoveryToast();
+        repairCaptureVisibleItemPage();
         if (location.href !== lastUrl) {
             lastUrl = location.href;
             setTimeout(async () => {
