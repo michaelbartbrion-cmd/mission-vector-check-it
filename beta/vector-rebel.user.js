@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.39
+// @version      3.2.40
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.39',
+        version: '3.2.40',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.39';
+    const VERSION = '3.2.40';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -10574,24 +10574,25 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const values=repairReadDetailDocument(document);
         if(Object.values(values).some(Boolean))repairRecordDetail(location.href,values);
     }
-    // Downloadable, fully populated PDF. No external library, remote service
-    // or browser print dialog is required; fields remain editable in .xlsx.
+    // Official 9.28.26 FMFD form layout, matched to the source document's
+    // 612 x 792pt page dimensions and field boundaries. Not a second design.
+    // The logo is the department logo extracted from the supplied original.
+    const REPAIR_OFFICIAL_LOGO_BASE64='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';
     function repairPdfAscii(value) {
         return String(value??'').normalize('NFKD')
             .replace(/[\u0300-\u036f]/g,'')
             .replace(/[\u2018\u2019]/g,"'")
             .replace(/[\u201c\u201d]/g,'"')
             .replace(/[\u2013\u2014]/g,'-')
-            .replace(/[\u2022]/g,'*')
             .replace(/[^\x20-\x7e]/g,'?');
     }
     function repairPdfEscape(value) {
         return repairPdfAscii(value).replace(/[\\()]/g,'\\$&');
     }
-    function repairPdfWrap(value,limit=55) {
+    function repairPdfWrap(value,limit=35) {
         const output=[];
-        for(const segment of repairPdfAscii(value).split(/\r?\n/)){
-            const words=segment.split(/\s+/).filter(Boolean);
+        for(const segment of String(value??'').split(/\r?\n/)){
+            const words=repairPdfAscii(segment).split(/\s+/).filter(Boolean);
             if(!words.length){output.push('');continue;}
             let line='';
             for(let word of words){
@@ -10600,150 +10601,127 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     output.push(word.slice(0,limit));word=word.slice(limit);
                 }
                 if(!word)continue;
-                if(line.length+1+word.length>limit){output.push(line);line=word;}
+                if(line.length+word.length+1>limit){output.push(line);line=word;}
                 else line=line?line+' '+word:word;
             }
             if(line)output.push(line);
         }
         return output;
     }
-    function repairPdfPaint(form,part=0,lines=[],pageNo=1,totalPages=1) {
-        const c=[];
-        const rect=(x,y,w,h,r=.94,g=.97,b=.98)=>{
-            c.push(r+' '+g+' '+b+' rg '+x+' '+y+' '+w+' '+h+' re f');
+    function repairPdfOfficialPaint(form){
+        const draw=[];
+        const rgb=(r,g,b)=>{draw.push(r+' '+g+' '+b+' rg')};
+        const box=(x,y,w,h,fill=null,stroke=null,line=.5)=>{
+            const bottom=792-y-h;
+            if(fill){rgb(...fill);draw.push(x+' '+bottom+' '+w+' '+h+' re f');}
+            if(stroke){draw.push(stroke.join(' ')+' RG '+line+' w '+x+' '+bottom+' '+w+' '+h+' re S');}
         };
-        const stroke=(x,y,w,h)=>{
-            c.push('0.60 0.70 0.77 RG 0.7 w '+x+' '+y+' '+w+' '+h+' re S');
+        const text=(x,top,value,size=9,bold=false,white=false,max=200)=>{
+            draw.push((white?'1 1 1':'0 0 0')+' rg');
+            draw.push('BT /'+(bold?'F2':'F1')+' '+size+' Tf 1 0 0 1 '+x+' '+(792-top)+' Tm ('+
+                repairPdfEscape(String(value??'').slice(0,max))+') Tj ET');
         };
-        const text=(x,y,value,size=9,bold=false,limit=110)=>{
-            const txt=repairPdfEscape(repairPdfAscii(value).slice(0,limit));
-            c.push('0.11 0.21 0.29 rg BT /'+(bold?'F2':'F1')+' '+
-                size+' Tf 1 0 0 1 '+x+' '+y+' Tm ('+txt+') Tj ET');
+        const line=(x1,y1,x2,y2,thickness=.5,gray=0)=>{
+            draw.push(gray+' '+gray+' '+gray+' RG '+thickness+' w '+
+                x1+' '+(792-y1)+' m '+x2+' '+(792-y2)+' l S');
         };
-        rect(0,0,612,792,1,1,1);
-        rect(24,740,564,38,.11,.22,.32);
-        c.push('1 1 1 rg BT /F2 17 Tf 1 0 0 1 38 752 Tm (PPE CLEAN AND REPAIR FORM) Tj ET');
-        text(30,723,'Flower Mound Fire Department',11,true);
-        text(545,723,String(pageNo)+'/'+String(totalPages),9,true);
-        if(part>0){
-            rect(24,692,564,22,.88,.92,.95);
-            text(32,699,'KNOWN ISSUES - CONTINUED',11,true);
-            text(30,676,'Firefighter: '+form.name,11,true);
-            let y=652;
-            for(const item of lines){
-                if(item.heading){rect(26,y-4,560,17,.94,.96,.98);text(34,y,item.heading,9,true,90);y-=20;}
-                else {text(38,y,item.text,9,false,105);y-=12;}
-            }
-            text(30,41,'Read-only Vector data. Confirm all equipment and issues before turning in.',8);
-            return c.join('\n')+'\n';
-        }
-        rect(24,688,564,25,.89,.93,.96);
-        text(32,697,'CUSTOMER INFORMATION',11,true);
-        text(30,674,'Department: Flower Mound Fire Dept.',9,true);
-        text(395,674,'Date: '+(form.date||''),9,false);
-        text(30,654,'Name: '+(form.name||''),10,true,54);
-        text(395,654,'ID Number: '+(form.idNumber||''),9,false);
-        text(30,634,'Station picked up at: '+(form.pickupStation||''),9,false,52);
-        text(290,634,'Preferred delivery: '+(form.deliveryStation||''),9,false,44);
-        text(500,634,'Shift: '+(form.shift||''),9,false,19);
-        rect(24,601,564,24,.89,.93,.96);
-        text(32,609,'PPE ITEMS SENT IN',11,true);
-        const cols=[24,141,239,297,372,588],tableTop=580,rowH=33;
-        rect(24,tableTop,564,22,.85,.89,.92);
-        for(let j=0;j<cols.length-1;j++)stroke(cols[j],tableTop,cols[j+1]-cols[j],22);
-        [['Item',29],['Serial Number',146],['Size',244],['Date of Manuf.',302],['Known Issues',377]].forEach(([label,x])=>text(x,tableTop+7,label,8,true));
+        // FMFD source header: exact official band color and logo placement.
+        box(18.36,50.76,569.28,31.07,[.082,.376,.51]);
+        text(27.8,75.0,'PPE CLEAN AND REPAIR FORM',26,false,true);
+        draw.push('q 97.97 0 0 83.50 489.80 695.20 cm /FMFDLogo Do Q');
+        box(18,97.68,558,19.56,[0,0,0]);
+        text(23.4,112,'CUSTOMER INFORMATION',12,true,true);
+        const grid=[118.2,139.2,156.72,174.24];
+        for(const y of grid)line(18,y,576,y,.8,.5);
+        for(const [a,b] of [[18,174.24],[403.9,174.24],[576,174.24]])
+            line(a,118.2,a,b,.8,.5);
+        text(23.4,133,'Flower Mound Fire Dept.',12,true);
+        text(409.4,133,'Date:',10);
+        text(445,133,form.date||'',10);
+        text(23.4,151,'First and Last Name:',10);
+        text(117,151,form.name||'',10,false,false,53);
+        text(409.4,151,'ID Number:',10);
+        text(465,151,form.idNumber||'',10);
+        text(23.4,169,'Station picked up at:',9);
+        text(119,169,form.pickupStation||'',9);
+        text(214,169,'Preferred Station delivery:',9);
+        text(331,169,form.deliveryStation||'',9);
+        text(409.4,169,'Shift:',9);
+        text(438,169,form.shift||'',9);
+        box(18,175.2,561,37.56,[0,0,0]);
+        text(234,198,'PPE ITEMS SENT IN',13,true,true);
+        const xs=[18,141,287,331,399,579];
+        box(18,213.2,561,38.08,[.745,.745,.745]);
+        text(23.4,235,'Item',10,true);
+        text(146.4,235,'Serial Number',10,true);
+        text(290,235,'Size',10,true);
+        text(334,229,'Date of',9,true);
+        text(334,240,'Manuf.',9,true);
+        text(403,235,'Known Issues',10,true);
+        for(const x of xs)line(x,213.2,x,669.72,.52,0);
+        for(let i=0;i<=11;i++)line(18,251.28+i*38.04,579,251.28+i*38.04,.52,0);
+        line(18,213.2,579,213.2,.7,.5);
+        // Original table row positions. Data is always inside the correct
+        // Primary/Secondary/Helmet/Boots boxes of the supplied form.
         for(let i=0;i<PPE_REPAIR_ROWS.length;i++){
-            const item=form.items?.[i]||{};
-            const bottom=tableTop-(i+1)*rowH;
-            if(i%2===0)rect(24,bottom,564,rowH,.96,.97,.98);
-            for(let j=0;j<cols.length-1;j++)stroke(cols[j],bottom,cols[j+1]-cols[j],rowH);
-            text(29,bottom+13,PPE_REPAIR_ROWS[i],8,true,23);
-            if(item.asset){
-                text(146,bottom+13,item.serial||'',8,false,19);
-                text(244,bottom+13,item.size||'',8,false,11);
-                text(302,bottom+13,item.manufacture||'',8,false,18);
-                const issues=repairPdfWrap(item.issues||'',42);
-                if(issues[0])text(377,bottom+20,issues[0],7,false,42);
-                if(issues[1])text(377,bottom+9,issues.length>2?issues[1].slice(0,29)+' (see notes)':issues[1],7,false,42);
+            const label=PPE_REPAIR_ROWS[i],item=form.items?.[i]||{};
+            const baseline=276.2+i*38.04;
+            text(23.4,baseline,label,9.5,false,false,29);
+            if(!item.asset)continue;
+            text(146.4,baseline,item.serial||'',9,false,false,28);
+            text(291,baseline,item.size||'',9,false,false,8);
+            text(334,baseline,item.manufacture||'',9,false,false,12);
+            const issues=repairPdfWrap(item.issues||'',39);
+            for(let lineNum=0;lineNum<Math.min(2,issues.length);lineNum++){
+                const end=issues.length>2&&lineNum===1?'...':issues[lineNum];
+                text(402.5,baseline-5+lineNum*11,end,7.5,false,false,44);
             }
         }
-        rect(24,177,564,24,.89,.93,.96);
-        text(32,185,'PICKUP / RETURN INFORMATION',10,true);
-        text(30,157,'Pick-up By: '+(form.pickupBy||''),9,false,60);
-        text(330,157,'Pick-up Date: '+(form.pickupDate||''),9,false,45);
-        text(30,134,'Returned By: '+(form.returnedBy||''),9,false,60);
-        text(330,134,'Returned Date: '+(form.returnedDate||''),9,false,45);
-        text(30,87,'Prepared from verified Vector Responsible Party PPE records.',8);
-        text(30,72,'Blank fields were not available in the collected item details. Review before use.',8);
-        text(30,41,'Saved locally; no equipment record or inspection was changed.',8);
-        return c.join('\n')+'\n';
+        const footX=[18,96.2,293.3,371.3,471.25], footY=[695.0,716.3,738.0];
+        for(const x of footX)line(x,footY[0],x,footY[2],.5,0);
+        for(const y of footY)line(footX[0],y,footX[4],y,.5,0);
+        text(23.6,709.9,'Pick-up By',9,true);
+        text(98.7,709.9,form.pickupBy||'',9,false,false,42);
+        text(298.7,709.9,'Pick-up Date',9,true);
+        text(375,709.9,form.pickupDate||'',9,false,false,21);
+        text(23.6,732.4,'Returned By',9,true);
+        text(98.7,732.4,form.returnedBy||'',9,false,false,42);
+        text(298.7,732.4,'Returned Date',9,true);
+        text(375,732.4,form.returnedDate||'',9,false,false,21);
+        return draw.join('\n')+'\n';
     }
-    function repairPdfPages(forms) {
-        const pages=[];
-        for(const form of forms){
-            const details=[];
-            for(let i=0;i<PPE_REPAIR_ROWS.length;i++){
-                const item=form.items?.[i];
-                if(!item?.asset||!String(item.issues||'').trim())continue;
-                details.push({heading:PPE_REPAIR_ROWS[i]+' - '+(item.serial||item.asset.assetId||'')});
-                for(const line of repairPdfWrap(item.issues,92))details.push({text:line});
-                details.push({text:''});
-            }
-            const extra=[];
-            if(details.length){
-                let batch=[],count=0;
-                for(const line of details){
-                    if(count>=40){extra.push(batch);batch=[];count=0;}
-                    batch.push(line);count++;
-                }
-                if(batch.length)extra.push(batch);
-            }
-            pages.push({form,part:0,lines:[]});
-            extra.forEach((lines,i)=>pages.push({form,part:i+1,lines}));
-        }
-        return pages;
-    }
-    function repairPdfDocument(forms) {
-        if(!Array.isArray(forms)||!forms.length)throw Error('Select a firefighter first.');
+    function repairPdfDocument(forms){
+        if(!Array.isArray(forms)||!forms.length)throw Error('No person selected.');
         const enc=new TextEncoder(),objects=[];
-        const add=body=>{objects.push(body);return objects.length;};
-        const f1=add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
-        const f2=add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
-        const catalog=add(''),pagesId=add('');
-        const pageIds=[],allPages=repairPdfPages(forms);
-        for(let i=0;i<allPages.length;i++){
-            const page=allPages[i];
-            const stream=repairPdfPaint(page.form,page.part,page.lines,i+1,allPages.length);
-            const length=enc.encode(stream).length;
-            const contents=add('<< /Length '+length+' >>\nstream\n'+stream+'endstream');
-            const pageId=add('<< /Type /Page /Parent '+pagesId+' 0 R /MediaBox [0 0 612 792] '+
-                '/Resources << /Font << /F1 '+f1+' 0 R /F2 '+f2+' 0 R >> >> '+
-                '/Contents '+contents+' 0 R >>');
-            pageIds.push(pageId);
+        const add=body=>{objects.push(body);return objects.length};
+        const font=add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+        const bold=add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
+        const raw=atob(REPAIR_OFFICIAL_LOGO_BASE64);
+        const hex=Array.from(raw,x=>x.charCodeAt(0).toString(16).padStart(2,'0')).join('')+'>';
+        const image=add('<< /Type /XObject /Subtype /Image /Width 145 /Height 125 '+
+            '/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter [/ASCIIHexDecode /DCTDecode] '+
+            '/Length '+hex.length+' >>\nstream\n'+hex+'\nendstream');
+        const root=add(''),pages=add(''),ids=[];
+        for(const form of forms){
+            const body=repairPdfOfficialPaint(form);
+            const stream=add('<< /Length '+enc.encode(body).length+' >>\nstream\n'+body+'endstream');
+            ids.push(add('<< /Type /Page /Parent '+pages+' 0 R /MediaBox [0 0 612 792] '+
+                '/Resources << /Font << /F1 '+font+' 0 R /F2 '+bold+' 0 R >> '+
+                '/XObject << /FMFDLogo '+image+' 0 R >> >> '+
+                '/Contents '+stream+' 0 R >>'));
         }
-        objects[catalog-1]='<< /Type /Catalog /Pages '+pagesId+' 0 R >>';
-        objects[pagesId-1]='<< /Type /Pages /Kids ['+
-            pageIds.map(id=>id+' 0 R').join(' ')+'] /Count '+pageIds.length+' >>';
-        const chunks=[],offsets=[0];let offset=0;
-        const append=text=>{
-            const bytes=enc.encode(text);chunks.push(bytes);offset+=bytes.length;
-        };
+        objects[root-1]='<< /Type /Catalog /Pages '+pages+' 0 R >>';
+        objects[pages-1]='<< /Type /Pages /Kids ['+ids.map(x=>x+' 0 R').join(' ')+'] /Count '+ids.length+' >>';
+        const pieces=[],offsets=[0];let offset=0;
+        const append=txt=>{const u=enc.encode(txt);pieces.push(u);offset+=u.length};
         append('%PDF-1.4\n');
-        objects.forEach((body,i)=>{
-            offsets.push(offset);
-            append((i+1)+' 0 obj\n'+body+'\nendobj\n');
-        });
-        const xref=offset;
-        append('xref\n0 '+(objects.length+1)+'\n0000000000 65535 f \n');
-        for(let i=1;i<offsets.length;i++){
-            append(String(offsets[i]).padStart(10,'0')+' 00000 n \n');
-        }
-        append('trailer\n<< /Size '+(objects.length+1)+' /Root '+catalog+' 0 R >>\n'+
+        objects.forEach((body,i)=>{offsets.push(offset);append((i+1)+' 0 obj\n'+body+'\nendobj\n')});
+        const xref=offset;append('xref\n0 '+(objects.length+1)+'\n0000000000 65535 f \n');
+        for(let i=1;i<offsets.length;i++)append(String(offsets[i]).padStart(10,'0')+' 00000 n \n');
+        append('trailer\n<< /Size '+(objects.length+1)+' /Root '+root+' 0 R >>\n'+
             'startxref\n'+xref+'\n%%EOF\n');
-        return new Blob(chunks,{type:'application/pdf'});
-    }
-
-    const PPE_REPAIR_DRAFTS_KEY='vr_ppe_clean_repair_saved_info_v1';
+        return new Blob(pieces,{type:'application/pdf'});
+    }    const PPE_REPAIR_DRAFTS_KEY='vr_ppe_clean_repair_saved_info_v1';
     const PPE_REPAIR_FORM_FIELDS=[
         'date','name','idNumber','shift','pickupStation','deliveryStation',
         'pickupBy','pickupDate','returnedBy','returnedDate'
