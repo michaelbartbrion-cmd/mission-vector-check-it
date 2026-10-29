@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.35
+// @version      3.2.36
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.35',
+        version: '3.2.36',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.35';
+    const VERSION = '3.2.36';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -10148,6 +10148,400 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         updateMinimizedPanelBadge(run);
     }
 
+    // Read-only PPE Clean & Repair worksheet exporter. Source fields are
+    // scanned using the SAME verified Responsible Party finder as inspections.
+    // No safety inspection, pass/fail answer, CrewSense write, or PPE edit occurs.
+    const PPE_REPAIR_ROWS = Object.freeze([
+        'Primary Pant', 'Primary Coat', 'Primary Gloves', 'Primary Hood',
+        'Secondary Pant', 'Secondary Coat', 'Secondary Gloves', 'Secondary Hood',
+        'Helmet', 'Helmet (Personal)', 'Boots'
+    ]);
+    function repairGearMatches(label, item) {
+        const type = String(item?.type || '').toLowerCase();
+        const category = label.replace(/^(primary|secondary) /i,'').toLowerCase();
+        if (category.includes('pant')) return /\bpant\b/.test(type);
+        if (category.includes('coat')) return /\bcoat\b/.test(type);
+        if (category.includes('glove')) return /\bglove/.test(type);
+        if (category.includes('hood')) return /\bhood\b/.test(type);
+        if (category.includes('helmet')) return /\bhelmet\b/.test(type);
+        if (category.includes('boot')) return /\bboot/.test(type);
+        return false;
+    }
+    function repairXml(value) {
+        return String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g,'')
+            .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+            .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+    }
+    function repairXmlCell(ref, value, style = 0) {
+        const v = String(value ?? '');
+        return '<c r="'+ref+'" s="'+style+'" t="inlineStr"><is><t xml:space="preserve">'+
+            repairXml(v)+'</t></is></c>';
+    }
+    function repairSheetName(name, used) {
+        const safe = String(name || 'Person').replace(/[\\\/\?\*\[\]:]/g,'').slice(0,31).trim()||'Person';
+        let proposal=safe, n=2;
+        while (used.has(proposal.toLowerCase())) proposal=safe.slice(0,27)+' '+n++;
+        used.add(proposal.toLowerCase());
+        return proposal;
+    }
+    function repairFormSheet(form) {
+        const rows=[], merges=['A1:H1','A3:H3','A4:B4','C4:F4','A5:B5','C5:F5',
+            'B6:C6','E6:F6','A8:H8','A9:B9','C9:D9','G9:H9',
+            'A22:B22','C22:D22','E22:F22','G22:H22',
+            'A23:B23','C23:D23','E23:F23','G23:H23','A25:H25'];
+        const row=(num,height,cells)=>{
+            rows.push('<row r="'+num+'" ht="'+height+'" customHeight="1">'+
+                cells.map(x=>repairXmlCell(x[0]+num,x[1],x[2])).join('')+'</row>');
+        };
+        row(1,39,[['A','PPE CLEAN AND REPAIR FORM',1]]);
+        row(2,10,[]);
+        row(3,27,[['A','CUSTOMER INFORMATION',2]]);
+        row(4,26,[['A','Department',4],['C','Flower Mound Fire Dept.',5],
+            ['G','Date',4],['H',form.date,5]]);
+        row(5,26,[['A','First and Last Name',4],['C',form.name,5],
+            ['G','ID Number',4],['H',form.idNumber,5]]);
+        row(6,26,[['A','Picked up at',4],['B',form.pickupStation,5],
+            ['D','Preferred delivery',4],['E',form.deliveryStation,5],
+            ['G','Shift',4],['H',form.shift,5]]);
+        row(7,13,[]);
+        row(8,30,[['A','PPE ITEMS SENT IN',2]]);
+        row(9,32,[['A','Item',3],['C','Serial Number',3],['E','Size',3],
+            ['F','Date of Manuf.',3],['G','Known Issues',3]]);
+        PPE_REPAIR_ROWS.forEach((label,index)=>{
+            const r=10+index;
+            const item=form.items[index]||{};
+            const arr=[['A',label,4],['C',item.serial,5],['E',item.size,5],
+                ['F',item.manufacture,5],['G',item.issues,5]];
+            row(r,36,arr);
+            merges.push('A'+r+':B'+r,'C'+r+':D'+r,'G'+r+':H'+r);
+        });
+        row(21,16,[]);
+        row(22,28,[['A','Pick-up By',4],['C',form.pickupBy,5],
+            ['E','Pick-up Date',4],['G',form.pickupDate,5]]);
+        row(23,28,[['A','Returned By',4],['C',form.returnedBy,5],
+            ['E','Returned Date',4],['G',form.returnedDate,5]]);
+        row(24,10,[]);
+        row(25,42,[['A','Editable form. Verify serial numbers, sizes, manufacture dates and issues before sending items. The Source Index sheet lists the exact verified Vector item links.',6]]);
+        const columnWidths=[18,17,17,17,15,19,24,24];
+        const cols=columnWidths.map((w,i)=>'<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>').join('');
+        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+            '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView showGridLines="0" workbookViewId="0"/></sheetViews>'+
+            '<sheetFormatPr defaultRowHeight="17"/><cols>'+cols+'</cols><sheetData>'+rows.join('')+'</sheetData>'+
+            '<mergeCells count="'+merges.length+'">'+merges.map(ref=>'<mergeCell ref="'+ref+'"/>').join('')+'</mergeCells>'+
+            '<printOptions horizontalCentered="1"/><pageMargins left=".3" right=".3" top=".4" bottom=".4" header=".1" footer=".1"/>'+
+            '<pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="1"/></worksheet>';
+    }
+    function repairSourceSheet(forms) {
+        const rows=[['Person','Form line','Vector PPE name','Pool ID','Item ID',
+            'Responsible Party verified','Captured at','Vector item URL']];
+        for (const form of forms) for (let i=0;i<PPE_REPAIR_ROWS.length;i++) {
+            const item=form.items[i]||{};
+            if (!item.asset) continue;
+            rows.push([form.name,PPE_REPAIR_ROWS[i],item.asset.assetId,item.asset.pool,
+                item.asset.itemId,item.asset.ownerName,form.capturedAt,item.asset.url]);
+        }
+        const rowXml=rows.map((row,i)=>'<row r="'+(i+1)+'">'+row.map((v,j)=>
+            repairXmlCell(String.fromCharCode(65+j)+(i+1),v,i===0?3:0)).join('')+'</row>').join('');
+        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+            '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'+
+            '<cols><col min="1" max="2" width="24" customWidth="1"/>'+
+            '<col min="3" max="3" width="30" customWidth="1"/>'+
+            '<col min="4" max="5" width="12" customWidth="1"/>'+
+            '<col min="6" max="6" width="25" customWidth="1"/>'+
+            '<col min="7" max="7" width="22" customWidth="1"/>'+
+            '<col min="8" max="8" width="75" customWidth="1"/></cols>'+
+            '<sheetData>'+rowXml+'</sheetData></worksheet>';
+    }
+    const REPAIR_XLSX_STYLES='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+        '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+        '<fonts count="4"><font><sz val="11"/><name val="Aptos"/></font>'+
+        '<font><b/><sz val="19"/><color rgb="FFFFFFFF"/><name val="Aptos"/></font>'+
+        '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/></font>'+
+        '<font><b/><sz val="11"/><color rgb="FF24394A"/></font></fonts>'+
+        '<fills count="4"><fill><patternFill patternType="none"/></fill>'+
+        '<fill><patternFill patternType="gray125"/></fill>'+
+        '<fill><patternFill patternType="solid"><fgColor rgb="FF1D3446"/><bgColor indexed="64"/></patternFill></fill>'+
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFDCE7ED"/><bgColor indexed="64"/></patternFill></fill></fills>'+
+        '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'+
+        '<border><left style="thin"><color rgb="FF9DABB4"/></left>'+
+        '<right style="thin"><color rgb="FF9DABB4"/></right>'+
+        '<top style="thin"><color rgb="FF9DABB4"/></top>'+
+        '<bottom style="thin"><color rgb="FF9DABB4"/></bottom><diagonal/></border></borders>'+
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'+
+        '<cellXfs count="7">'+
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'+
+        '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center"/></xf>'+
+        '<xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'+
+        '<xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>'+
+        '<xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>'+
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>'+
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>'+
+        '</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+    // Minimal standards-compliant, uncompressed ZIP for Excel .xlsx.
+    // Entirely local; no cloud export endpoint or new userscript dependency.
+    function repairZip(files) {
+        const enc=new TextEncoder(), parts=[], central=[]; let offset=0;
+        const crc32=bytes=>{
+            let c=-1;
+            for(const b of bytes){c^=b;for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xEDB88320:0);}
+            return (c^-1)>>>0;
+        };
+        const u16=(v)=>[v&255,(v>>>8)&255],u32=(v)=>[v&255,(v>>>8)&255,(v>>>16)&255,(v>>>24)&255];
+        for(const [name,text] of Object.entries(files)){
+            const path=enc.encode(name),body=enc.encode(text),crc=crc32(body);
+            const head=Uint8Array.from([80,75,3,4,...u16(20),...u16(0),...u16(0),
+                ...u16(0),...u16(0),...u32(crc),...u32(body.length),...u32(body.length),
+                ...u16(path.length),...u16(0)]);
+            parts.push(head,path,body);
+            central.push(Uint8Array.from([80,75,1,2,...u16(20),...u16(20),...u16(0),...u16(0),
+                ...u16(0),...u16(0),...u32(crc),...u32(body.length),...u32(body.length),
+                ...u16(path.length),...u16(0),...u16(0),...u16(0),...u16(0),
+                ...u32(0),...u32(offset)]),path);
+            offset+=head.length+path.length+body.length;
+        }
+        const centralSize=central.reduce((sum,b)=>sum+b.length,0), n=Object.keys(files).length;
+        const end=Uint8Array.from([80,75,5,6,...u16(0),...u16(0),...u16(n),...u16(n),
+            ...u32(centralSize),...u32(offset),...u16(0)]);
+        return new Blob([...parts,...central,end],
+            {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    }
+    function repairWorkbook(forms) {
+        if (!Array.isArray(forms)||!forms.length) throw new Error('Select at least one person.');
+        const used=new Set(['source index']);
+        const sheetNames=forms.map(f=>repairSheetName(f.name,used));
+        const names=[...sheetNames,'Source Index'];
+        const paths=['[Content_Types].xml','_rels/.rels','xl/workbook.xml','xl/_rels/workbook.xml.rels','xl/styles.xml'];
+        const files={};
+        files[paths[0]]='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
+            '<Default Extension="xml" ContentType="application/xml"/>'+
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+
+            names.map((_,i)=>'<Override PartName="/xl/worksheets/sheet'+(i+1)+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join('')+'</Types>';
+        files[paths[1]]='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+        files[paths[2]]='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '+
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'+
+            '<sheets>'+names.map((n,i)=>'<sheet name="'+repairXml(n)+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>').join('')+
+            '</sheets></workbook>';
+        files[paths[3]]='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+            names.map((_,i)=>'<Relationship Id="rId'+(i+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>').join('')+
+            '<Relationship Id="rId'+(names.length+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
+        files[paths[4]]=REPAIR_XLSX_STYLES;
+        forms.forEach((f,i)=>{files['xl/worksheets/sheet'+(i+1)+'.xml']=repairFormSheet(f)});
+        files['xl/worksheets/sheet'+names.length+'.xml']=repairSourceSheet(forms);
+        return repairZip(files);
+    }
+
+    function showPpeCleanRepairForm() {
+        if (getRun()) {
+            setStatus('Finish or abort the active inspection before preparing a clean/repair form.',false);
+            return;
+        }
+        const roster=getActiveMasterRoster().sort((a,b)=>a.name.localeCompare(b.name));
+        const {overlay,box}=makeOverlayBox('1150px');
+        const h=document.createElement('h2');
+        h.textContent='PPE Clean and Repair Form';
+        h.style.cssText='margin:0 0 6px;color:#153e5c;font:700 23px Arial,sans-serif';
+        const info=document.createElement('p');
+        info.textContent='Select people, load their PPE by verified Responsible Party, choose which gear is being sent, then export an editable Excel workbook. Nothing is submitted to Vector.';
+        info.style.cssText='margin:0 0 12px;color:#577083;font:13px/1.5 Arial,sans-serif';
+        const note=document.createElement('p');
+        note.textContent='Vector Rebel verifies PPE name, pool/item ID and owner. Serial number, size, manufacturing date, issues and delivery details stay editable when not verified by its collection.';
+        note.style.cssText='padding:9px;border:1px solid #c0d5e4;background:#eff6fb;color:#234760;border-radius:7px;font:12px/1.45 Arial,sans-serif';
+        const status=document.createElement('div');
+        status.setAttribute('role','status');
+        status.style.cssText='margin:9px 0;color:#36556b;font:12px/1.5 Arial,sans-serif;min-height:17px';
+        const close=makeButton('Close');
+        close.onclick=()=>overlay.remove();
+        const controls=document.createElement('div');
+        controls.style.cssText='display:flex;flex-wrap:wrap;gap:7px;align-items:center';
+        const search=document.createElement('input');
+        search.placeholder='Find crew member...';
+        search.setAttribute('aria-label','Search crew members');
+        search.style.cssText='padding:10px;border:1px solid #b9cad6;border-radius:6px;flex:1;min-width:170px;font:13px Arial';
+        const counter=document.createElement('span');
+        counter.style.cssText='font:11px Arial;color:#567085';
+        controls.append(search,counter,close);
+        const list=document.createElement('div');
+        list.style.cssText='border:1px solid #d6e3eb;border-radius:8px;margin:8px 0;max-height:180px;overflow:auto;padding:4px 8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:3px 14px';
+        const selection=new Set();
+        const myName=masterNameKey(getConfig().inspectorName);
+        const me=roster.find(p=>masterNameKey(p.name)===myName);
+        if(me)selection.add(me.prefix);
+        const draw=()=>{
+            list.innerHTML='';
+            const term=search.value.trim().toLowerCase();
+            const visiblePeople=roster.filter(p=>!term||p.name.toLowerCase().includes(term));
+            for(const person of visiblePeople) {
+                const row=document.createElement('label');
+                row.style.cssText='display:flex;align-items:center;gap:8px;padding:4px 0;font:12px Arial;color:#28465b;cursor:pointer';
+                const cb=document.createElement('input');cb.type='checkbox';cb.checked=selection.has(person.prefix);
+                cb.onchange=()=>{if(cb.checked)selection.add(person.prefix);else selection.delete(person.prefix);counter.textContent=selection.size+' selected';};
+                const n=document.createElement('span');n.textContent=person.name;row.append(cb,n);list.appendChild(row);
+            }
+            counter.textContent=selection.size+' selected · '+roster.length+' available';
+        };
+        draw();search.addEventListener('input',draw);
+        const load=makeButton('Load selected PPE',{background:'#176b8e',color:'#fff'});
+        const review=document.createElement('div');
+        review.style.cssText='margin-top:12px;';
+        const footer=document.createElement('div');
+        footer.style.cssText='display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:10px 0;';
+        const exportBtn=makeButton('Download editable Excel (.xlsx)',{background:'#187450',color:'#fff'});
+        exportBtn.disabled=true;
+        footer.append(load,exportBtn);
+        box.append(h,info,note,controls,list,status,footer,review);
+        const forms=[];
+        const makeInput=(placeholder,value,onchange)=>{
+            const el=document.createElement('input');el.type='text';
+            el.placeholder=placeholder;el.value=String(value||'');
+            el.style.cssText='min-width:0;width:100%;box-sizing:border-box;padding:7px;border:1px solid #c3d4de;border-radius:5px;font:12px Arial;color:#173e56';
+            el.addEventListener('input',()=>onchange(el.value));
+            return el;
+        };
+        const field=(parent,label,value,onchange)=>{
+            const wrap=document.createElement('label');wrap.style.cssText='display:flex;flex-direction:column;gap:4px;min-width:140px;flex:1;font:700 11px Arial;color:#385972';
+            const title=document.createElement('span');title.textContent=label;
+            wrap.append(title,makeInput(label,value,onchange));parent.appendChild(wrap);
+        };
+        function showReview(){
+            review.innerHTML='';
+            for(const form of forms){
+                const section=document.createElement('section');
+                section.style.cssText='border:1px solid #b9d0df;border-radius:9px;padding:12px;margin:12px 0;background:#f8fbfd';
+                const title=document.createElement('h3');
+                title.textContent=form.name+' · '+form.sourceItems.length+' assigned PPE found';
+                title.style.cssText='margin:0 0 6px;font:700 16px Arial;color:#174561';
+                const verified=document.createElement('p');
+                verified.textContent='Verified by Vector Responsible Party · '+form.capturedAt+' · Only selected gear will appear on the form.';
+                verified.style.cssText='font:11px/1.4 Arial;color:#637f90;margin:0 0 10px';
+                const fields=document.createElement('div');
+                fields.style.cssText='display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px';
+                for(const [label,key] of [['Date','date'],['ID Number','idNumber'],['Shift','shift'],
+                    ['Station picked up at','pickupStation'],['Preferred station delivery','deliveryStation'],
+                    ['Pick-up By','pickupBy'],['Pick-up Date','pickupDate'],
+                    ['Returned By','returnedBy'],['Returned Date','returnedDate']]){
+                    field(fields,label,form[key],v=>{form[key]=v;});
+                }
+                const table=document.createElement('table');
+                table.style.cssText='width:100%;border-collapse:collapse;font:11px Arial;color:#26465b';
+                const thead=document.createElement('thead');thead.innerHTML='<tr>'+
+                    ['Form line','Choose owned PPE','Serial number','Size','Date of manuf.','Known issues'].map(t=>
+                        '<th style="text-align:left;padding:6px;border-bottom:2px solid #8faebf">'+t+'</th>').join('')+'</tr>';
+                table.append(thead);
+                const tbody=document.createElement('tbody');
+                PPE_REPAIR_ROWS.forEach((label,i)=>{
+                    const slot=form.items[i],tr=document.createElement('tr');
+                    tr.style.background=i%2?'#ffffff':'#eef4f7';
+                    const labelCell=document.createElement('td');
+                    labelCell.textContent=label;labelCell.style.cssText='min-width:105px;padding:6px;font-weight:bold';
+                    tr.appendChild(labelCell);
+                    const optionCell=document.createElement('td');
+                    optionCell.style.cssText='padding:4px;min-width:180px';
+                    const picker=document.createElement('select');
+                    picker.style.cssText='width:100%;max-width:230px;min-height:31px;border:1px solid #aac1d0;border-radius:4px;background:#fff;font:11px Arial';
+                    const empty=document.createElement('option');empty.value='';empty.textContent='Not included';picker.append(empty);
+                    const options=form.sourceItems.filter(item=>repairGearMatches(label,item));
+                    for(const item of options){
+                        const opt=document.createElement('option');
+                        opt.value=item.pool+':'+item.itemId;
+                        opt.textContent=item.assetId+' ('+item.type+')';
+                        picker.append(opt);
+                    }
+                    const chosen=slot.asset;
+                    if(chosen)picker.value=chosen.pool+':'+chosen.itemId;
+                    picker.onchange=()=>{
+                        slot.asset=form.sourceItems.find(item=>item.pool+':'+item.itemId===picker.value)||null;
+                        for(const k of ['serial','size','manufacture','issues'])slot[k]='';
+                        [...tr.querySelectorAll('input')].forEach(el=>el.value='');
+                    };
+                    optionCell.append(picker);tr.appendChild(optionCell);
+                    for(const [placeholder,key] of [['Serial','serial'],['Size','size'],['Mfg. date','manufacture'],['Describe issue','issues']]){
+                        const td=document.createElement('td');td.style.cssText='padding:4px';
+                        const input=makeInput(placeholder,slot[key],v=>{slot[key]=v;});
+                        td.append(input);tr.append(td);
+                    }
+                    tbody.append(tr);
+                });
+                table.append(tbody);section.append(title,verified,fields,table);
+                review.append(section);
+            }
+            status.textContent=forms.length+' person form(s) ready for review. Choose primary/secondary items and verify missing fields before download.';
+            exportBtn.disabled=!forms.length;
+        }
+        load.onclick=async()=>{
+            if(getRun()){status.textContent='An inspection is active. Finish or abort it before exporting.';return;}
+            const chosen=roster.filter(p=>selection.has(p.prefix));
+            if(!chosen.length){status.textContent='Choose at least one person.';return;}
+            if(chosen.length>12){status.textContent='Select up to 12 people per export to keep live PPE searches bounded.';return;}
+            load.disabled=true;exportBtn.disabled=true;forms.length=0;review.innerHTML='';
+            try{
+                for(let i=0;i<chosen.length;i++){
+                    const person=chosen[i];
+                    status.textContent='Scanning '+(i+1)+'/'+chosen.length+': '+person.name;
+                    const inventory=await scanPpeByResponsibleParty(person.name,msg=>{
+                        status.textContent='Scanning '+(i+1)+'/'+chosen.length+': '+person.name+' · '+msg;
+                    });
+                    // No guesses from family names, equipment prefixes, or prior ownership.
+                    const sourceItems=inventory.items.map(item=>({...item}));
+                    const slots=PPE_REPAIR_ROWS.map(label=>{
+                        const group=sourceItems.filter(item=>repairGearMatches(label,item));
+                        const isSecondary=/secondary|personal/i.test(label);
+                        // One unambiguous owned item may fill a primary slot;
+                        // never guess which of two identical coats is primary.
+                        return {asset:!isSecondary&&group.length===1?group[0]:null,
+                            serial:'',size:'',manufacture:'',issues:''};
+                    });
+                    const d=new Date();
+                    const localDate=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+                    forms.push({name:person.name,idNumber:'',date:localDate,shift:'',
+                        pickupStation:'',deliveryStation:'',pickupBy:'',pickupDate:'',
+                        returnedBy:'',returnedDate:'',items:slots,sourceItems,
+                        capturedAt:inventory.capturedAt});
+                }
+                showReview();
+            }catch(error){
+                forms.length=0;
+                review.innerHTML='';
+                status.textContent='Cannot verify full PPE inventory: '+(error?.message||error)+
+                    '. No partial workbook was produced. Refresh Vector and retry.';
+            }finally{load.disabled=false;}
+        };
+        exportBtn.onclick=()=>{
+            try{
+                if(!forms.length)throw Error('Load one or more people first.');
+                for(const form of forms){
+                    const seen=new Set();
+                    for(const slot of form.items){
+                        if(!slot.asset)continue;
+                        const k=slot.asset.pool+':'+slot.asset.itemId;
+                        if(seen.has(k))throw Error(form.name+': '+slot.asset.assetId+
+                            ' was selected in two form lines. Choose one line per asset.');
+                        seen.add(k);
+                    }
+                    if(!seen.size)throw Error(form.name+': choose at least one PPE item to send.');
+                }
+                const xlsx=repairWorkbook(forms);
+                const url=URL.createObjectURL(xlsx),a=document.createElement('a');
+                const stamp=new Date().toISOString().slice(0,10);
+                a.href=url;a.download='PPE_Clean_and_Repair_'+stamp+
+                    (forms.length===1?'_'+forms[0].name.replace(/[^A-Za-z0-9]+/g,'_'):'_Crew')+'.xlsx';
+                document.body.appendChild(a);a.click();a.remove();
+                setTimeout(()=>URL.revokeObjectURL(url),30000);
+                status.textContent='Editable Excel workbook downloaded for '+forms.length+
+                    ' people. The Source Index lists the exact verified Vector PPE records.';
+                setStatus('PPE clean/repair Excel form prepared for '+forms.length+' selected people.');
+            }catch(error){status.textContent=error?.message||String(error);}
+        };
+    }
+
     function installPanel() {
         if (document.getElementById(PANEL_ID)) return;
 
@@ -10231,6 +10625,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             mainAction('My After-Fire', () => launchMyInspectionFromAnywhere('afterFire')),
             mainAction("Captain's Monthly", launchCaptainInspectionFromAnywhere),
             mainAction('Daily Captain Check', launchCaptainDailyCheckFromAnywhere, false),
+            mainAction('PPE Clean / Repair Form', showPpeCleanRepairForm, false),
             mainAction('Settings', () => showSettings('profile'), false)
         );
 
