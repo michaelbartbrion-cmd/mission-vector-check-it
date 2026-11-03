@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.3
+// @version      0.1.4
 // @description  Prepare T504 daily and weekly Operative IQ inspection drafts, save in process, never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.3' };
+  window.__rebelIqT504 = { version: '0.1.4' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.3';
+  const IQ_VERSION = '0.1.4';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -239,7 +239,7 @@
     header.append(label);
     const update = document.createElement('a');
     update.href = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js';
-    update.textContent = 'Check for Update · v0.1.3';
+    update.textContent = 'Check for Update · v0.1.4';
     update.target = '_blank';
     update.rel = 'noopener noreferrer';
     update.style.cssText = 'display:block;text-align:center;padding:9px;margin-top:8px;' +
