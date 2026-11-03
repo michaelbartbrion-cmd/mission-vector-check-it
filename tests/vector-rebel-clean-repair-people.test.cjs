@@ -47,7 +47,7 @@ test('Personal profile plus admin roster plus added names are deduplicated by fu
 test('Form selection uses name identity, never a legacy gear prefix',()=>{
  const fn=source.slice(source.indexOf('function showPpeCleanRepairForm()'),
    source.indexOf('function installPanel()',source.indexOf('function showPpeCleanRepairForm()')));
- assert.match(fn,/const roster=repairPersonChoices\(getActiveMasterRoster\(\)/);
+ assert.match(fn,/repairPersonChoices\(getActiveMasterRoster\(\),\[\],'',\[\]\)/);
  assert.match(fn,/if\(me\)selection\.add\(myName\)/);
  assert.match(fn,/selection\.has\(masterNameKey\(p\.name\)\)/);
  assert.match(fn,/const person=repairSavePersonName\(clean\(manualName\.value\)\)/);

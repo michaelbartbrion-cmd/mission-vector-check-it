@@ -14,10 +14,10 @@ const ownerKey=value=>'PERSON-'+clean(value).toUpperCase().replace(/[^A-Z0-9]+/g
 const config={inspectorName:'Michael Baldree',peopleDirectory:[],captainSets:[]};
 const newPeople=[{name:'Jared Weston'},{name:'Jerry Weems'}];
 const captainFn=extract('function getCaptainPersonOptions() {','function masterRosterExportPayload(');
-const cap=new Function('getConfig','getActiveMasterRoster','normalizePeopleDirectory',
+const cap=new Function('getConfig','getActiveMasterRoster','getMasterRosterState','normalizePeopleDirectory',
     'repairSavedPersonNames','isOrganizationOrBadRosterName','clean','masterNameKey','ownerRosterKey',
     captainFn+';return {getCaptainPersonOptions,rosterPersonByPrefix,resolveCaptainSetPeople};')(
-    ()=>config,()=>[],v=>v,()=>newPeople,()=>false,clean,nameKey,ownerKey
+    ()=>config,()=>[],()=>({source:'local-admin'}),v=>v,()=>newPeople,()=>false,clean,nameKey,ownerKey
 );
 test('Daily Captain Check works with no master roster on a newly installed browser',()=>{
     const opts=cap.getCaptainPersonOptions();

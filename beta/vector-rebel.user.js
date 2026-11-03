@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.42
+// @version      3.2.43
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.42',
+        version: '3.2.43',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.42';
+    const VERSION = '3.2.43';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -261,7 +261,7 @@
         });
     }
 
-    async function submitRebelCommandFeedback(details) {
+    async function submitRebelCommandFeedback(details, options={}) {
         const message = String(details == null ? '' : details).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 2000);
         if (!message) return false;
         if (!rebelCommandPaired()) {
@@ -273,12 +273,12 @@
             version: VERSION,
             suggestions: [{
                 suggestionId: `feedback:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`,
-                title: 'Vector Rebel feedback',
+                title: clean(options.title||'Vector Rebel feedback').slice(0,160),
                 details: message,
                 sourceVersion: VERSION,
                 category: 'feedback',
-                priority: 'medium',
-                sourceContext: 'settings_general',
+                priority: options.priority==='high'?'high':'medium',
+                sourceContext: clean(options.sourceContext||'settings_general').slice(0,120),
                 timestamp: new Date().toISOString()
             }]
         };
@@ -293,7 +293,14 @@
                 },
                 data: JSON.stringify(body),
                 timeout: 12000,
-                onload: response => resolve(response.status >= 200 && response.status < 300),
+                onload: response => {
+                    try{
+                        const receipt=JSON.parse(response.responseText||'{}');
+                        resolve(response.status>=200&&response.status<300&&receipt.ok===true&&
+                            (Number(receipt.acceptedSuggestions)>0||
+                             Number(receipt.duplicateSuggestions)>0));
+                    }catch{resolve(false);}
+                },
                 onerror: () => resolve(false),
                 ontimeout: () => resolve(false)
             });
@@ -308,6 +315,26 @@
             .replace(/\s+/g, ' ')
             .trim()
             .slice(0, 300);
+    }
+
+    const ERROR_FEEDBACK_THROTTLE_KEY='vectorRebelErrorFeedbackThrottleV1';
+    function errorFeedbackText(reason,workflow='unknown',stage='unknown'){
+        const safeReason=telemetrySafeErrorMessage(reason||'Unexpected Vector Rebel error.');
+        return 'Automatic Vector Rebel error report | Version '+VERSION+
+            ' | Workflow '+clean(workflow).slice(0,60)+
+            ' | Stage '+clean(stage).slice(0,60)+
+            ' | Error '+safeReason;
+    }
+    async function reportRebelErrorToCommand(reason,workflow='',stage=''){
+        const message=errorFeedbackText(reason,workflow,stage);
+        const previous=loadJSON(ERROR_FEEDBACK_THROTTLE_KEY,{})||{};
+        const key=message.slice(0,400);
+        // Reduce duplicates when a page reloads during the same failed run.
+        if(previous.key===key&&Date.now()-Number(previous.at||0)<10*60*1000)return false;
+        saveJSON(ERROR_FEEDBACK_THROTTLE_KEY,{key,at:Date.now()});
+        return submitRebelCommandFeedback(message,{
+            title:'Vector Rebel error report',priority:'high',sourceContext:'automatic_error'
+        });
     }
 
     function looksLikeVectorRebelRuntime(error, source = '') {
@@ -347,6 +374,72 @@
     window.addEventListener('unhandledrejection', event => {
         reportUnexpectedVectorRebelError('UnhandledRejection', event?.reason || '', '');
     });
+
+    const SHARED_ROSTER_KEY = 'vectorRebelApprovedRosterV1';
+    const SHARED_ROSTER_SYNC_KEY = 'vectorRebelRosterSyncStateV1';
+    let sharedRosterRequest = null;
+    function sharedRosterSyncState() {
+        return loadJSON(SHARED_ROSTER_SYNC_KEY, {}) || {};
+    }
+    function sharedRosterFromCache() {
+        const stored=loadJSON(SHARED_ROSTER_KEY,null);
+        if(!stored||!stored.version||!Array.isArray(stored.people)||!stored.people.length)return null;
+        const normalized=normalizeMasterRoster(stored.people);
+        if(normalized.people.length!==stored.people.length)return null;
+        return {source:'shared-command',version:clean(stored.version),
+            updatedAt:clean(stored.publishedAt),people:normalized.people};
+    }
+    // Fetch administrator-approved names using the current per-device bearer token.
+    // This is read-only; no Source Vector records or PPE inspections are changed.
+    async function refreshSharedRebelRoster(force=false){
+        if(sharedRosterRequest)return sharedRosterRequest;
+        const previous=sharedRosterSyncState(),now=Date.now();
+        if(!force&&Number(previous.lastAttempt||0)>now-10*60*1000)return !!sharedRosterFromCache();
+        saveJSON(SHARED_ROSTER_SYNC_KEY,{...previous,lastAttempt:now});
+        sharedRosterRequest=(async()=>{
+            try{
+                if(!rebelCommandPaired()&&!await ensureRebelCommandEnrollment(false)){
+                    throw Error('This installation is not paired with Rebel Command.');
+                }
+                const pair=rebelCommandPairing();
+                const response=await new Promise(resolve=>GM_xmlhttpRequest({
+                    method:'GET',
+                    url:REBEL_COMMAND_ENDPOINT+'?action=vr-shared-roster',
+                    headers:{Authorization:'Bearer '+pair.token,'X-Rebel-Device-ID':pair.deviceId},
+                    timeout:14000,
+                    onload:r=>resolve({status:r.status,text:r.responseText||''}),
+                    onerror:()=>resolve({status:0,text:''}),
+                    ontimeout:()=>resolve({status:0,text:''})
+                }));
+                let data;
+                try{data=JSON.parse(response.text||'{}');}catch{data={};}
+                if(response.status!==200||data?.ok!==true){
+                    throw Error(clean(data?.error||('Roster service HTTP '+response.status)).slice(0,150));
+                }
+                if(!Array.isArray(data.people)||data.people.length<1||data.people.length>500||
+                    !clean(data.version)||data.scope!=='vector-rebel-shared-roster'){
+                    throw Error('Shared roster response was incomplete or invalid.');
+                }
+                const normalized=normalizeMasterRoster(data.people);
+                if(normalized.people.length!==data.people.length||normalized.rejected.length||
+                    normalized.merged.length)throw Error('Shared roster names or personnel keys were ambiguous.');
+                saveJSON(SHARED_ROSTER_KEY,{
+                    version:clean(data.version),publishedAt:clean(data.publishedAt),
+                    people:normalized.people,receivedAt:new Date().toISOString()
+                });
+                saveJSON(SHARED_ROSTER_SYNC_KEY,{lastAttempt:now,
+                    lastSuccess:new Date().toISOString(),status:'synced',error:''});
+                return true;
+            }catch(error){
+                saveJSON(SHARED_ROSTER_SYNC_KEY,{
+                    ...sharedRosterSyncState(),lastAttempt:now,status:'unavailable',
+                    error:clean(error?.message||String(error)).slice(0,180)
+                });
+                return false;
+            }finally{sharedRosterRequest=null;}
+        })();
+        return sharedRosterRequest;
+    }
 
     function verifyRebelCommandPairing() {
         if (!rebelCommandPaired()) return Promise.resolve(false);
@@ -1318,6 +1411,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     function getMasterRosterState() {
+        const shared=sharedRosterFromCache();
+        if(shared)return shared;
         const local = loadJSON(MASTER_ROSTER_OVERRIDE_KEY, null);
         const normalizedLocal = normalizeMasterRoster(local?.people || []);
         if (local && normalizedLocal.people.length) {
@@ -1385,6 +1480,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // exact live Vector Responsible Party owner check.
     function getCaptainPersonOptions() {
         const config=getConfig();
+        const published=getMasterRosterState();
+        if(published.source==='shared-command')return getActiveMasterRoster()
+            .map(p=>({name:p.name,prefix:p.prefix}))
+            .sort((a,b)=>a.name.localeCompare(b.name));
         const sources=[...getActiveMasterRoster(),
             ...normalizePeopleDirectory(config.peopleDirectory||[]),
             ...repairSavedPersonNames(),
@@ -2255,6 +2354,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             metadata: { stage: run?.phase || 'unknown', itemCount: run?.items?.length || 0 }
         });
         saveDiagnostic(message, run);
+        void reportRebelErrorToCommand(message,run?.modeKey||'ppe',run?.phase||'stopped');
         if (run) {
             const deferred = loadJSON(CAPTAIN_DAILY_DEFERRED_KEY, null);
             if (deferred?.runId === run.runId) persistentRemoveRaw(CAPTAIN_DAILY_DEFERRED_KEY);
@@ -5549,6 +5649,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 metadata: { stage: 'start' }
             });
             clearCaptainDailyCheck();
+            void reportRebelErrorToCommand(error?.message||error,'captainDaily','start');
             setStatus(`Daily Captain Check stopped: ${error.message}`, false);
         } finally {
             captainDailyBusy = false;
@@ -9319,6 +9420,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const config = getConfig();
             const rosterState = getMasterRosterState();
             const roster = getCaptainPersonOptions();
+            const centrallyManaged=getMasterRosterState().source==='shared-command';
 
             const c = card(
                 'Captain Sets',
@@ -9351,6 +9453,19 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const newSet = makeButton('New Captain Set', { background: '#176b8e', color: '#fff' });
             newSet.disabled = false;
             controls.appendChild(newSet);
+            const syncRoster=makeButton('Refresh approved roster');
+            syncRoster.onclick=async()=>{
+                syncRoster.disabled=true;
+                const good=await refreshSharedRebelRoster(true);
+                syncRoster.disabled=false;
+                if(!good){
+                    setStatus('Approved roster unavailable: '+
+                        (sharedRosterSyncState().error||'Unknown error'),false);
+                    return;
+                }
+                renderContent();
+            };
+            controls.append(syncRoster);
             c.appendChild(controls);
 
             const savedHost = document.createElement('div');
@@ -9449,6 +9564,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const addCrewPerson=makeButton('Add to Captain Set',
                     {background:'#176b8e',color:'#fff'});
                 editor.append(addCrewName.wrap,addCrewPerson);
+                if(centrallyManaged){
+                    addCrewName.input.disabled=true;addCrewPerson.disabled=true;
+                    const note=document.createElement('div');
+                    note.textContent='Personnel choices are managed centrally in Rebel Command. Select people from the approved roster above.';
+                    note.style.cssText='font:11px Arial;color:#54758b;padding:5px;';
+                    editor.appendChild(note);
+                }
 
                 const count = document.createElement('div');
                 count.style.cssText = 'font-size:11px;color:#6a7f8c;margin:5px 0;';
@@ -9707,6 +9829,19 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             feedbackBox.style.cssText = 'width:100%;min-height:88px;resize:vertical;border:1px solid #cbd9e2;border-radius:7px;padding:8px 9px;font:12px/1.4 Arial,sans-serif;color:#233b4a;background:#fff;';
             const feedbackStatus = document.createElement('div');
             feedbackStatus.style.cssText = 'min-height:16px;margin-top:6px;font-size:10px;color:#607483;';
+            const fillLastError=makeButton('Use Last Error');
+            fillLastError.onclick=()=>{
+                const last=loadJSON(LAST_DIAGNOSTIC_KEY,null);
+                const stopped=loadJSON(STOPPED_RUN_KEY,null);
+                const message=last?.message||stopped?.stopReason||'';
+                feedbackBox.value=message ?
+                    errorFeedbackText(message,
+                        stopped?.modeKey||'unknown',stopped?.stoppedFromPhase||'manual_review') :
+                    'I encountered an error in Vector Rebel v'+VERSION+'. Here is what happened: ';
+                feedbackStatus.textContent=message ?
+                    'Last error loaded. Review and click Send Feedback.' :
+                    'Describe the error, then click Send Feedback.';
+            };
             const feedbackSend = makeButton('Send Feedback');
             feedbackSend.onclick = async () => {
                 const message = String(feedbackBox.value || '').trim();
@@ -9720,12 +9855,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 feedbackSend.disabled = false;
                 if (sent) {
                     feedbackBox.value = '';
-                    feedbackStatus.textContent = 'Feedback sent.';
+                    feedbackStatus.textContent = 'Received by Rebel Command. Thank you.';
                 } else {
                     feedbackStatus.textContent = 'Feedback could not be sent. Try again later.';
                 }
             };
-            feedback.append(feedbackBox, feedbackSend, feedbackStatus);
+            feedback.append(feedbackBox, fillLastError, feedbackSend, feedbackStatus);
             content.appendChild(feedback);
 
             const run = getRun();
@@ -9756,6 +9891,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             rosterStatus.style.cssText =
                 'font-size:12px;line-height:1.5;margin:8px 0;padding:9px;background:#f3f7f9;border-radius:7px;';
             rosterCard.appendChild(rosterStatus);
+            const centralNote=document.createElement('p');
+            centralNote.style.cssText='padding:9px;border-radius:6px;background:#eaf4f7;color:#285872;font:12px/1.5 Arial;';
+            centralNote.textContent='The shared firefighter roster is managed in Rebel Command → Roster. Local roster edits here are only a backup; they do not publish changes to other installations.';
+            rosterCard.appendChild(centralNote);
 
             const rosterProgress = document.createElement('div');
             rosterProgress.style.cssText = 'font-size:11px;color:#607483;min-height:16px;margin:5px 0 8px;';
@@ -10919,8 +11058,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             return;
         }
         const config=getConfig();
-        const roster=repairPersonChoices(getActiveMasterRoster(),
-            config.peopleDirectory||[],config.inspectorName,repairSavedPersonNames());
+        const centrallyManaged=getMasterRosterState().source==='shared-command';
+        const roster=centrallyManaged ?
+            repairPersonChoices(getActiveMasterRoster(),[],'',[]) :
+            repairPersonChoices(getActiveMasterRoster(),
+                config.peopleDirectory||[],config.inspectorName,repairSavedPersonNames());
         const {overlay,box}=makeOverlayBox('1150px');
         const h=document.createElement('h2');
         h.textContent='PPE Clean and Repair Form';
@@ -10957,6 +11099,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         guidance.style.cssText='font:11px/1.5 Arial;color:#567085;width:100%';
         guidance.textContent='Your Profile name appears automatically. Add others by their exact Vector Responsible Party name; names are remembered on this browser. PPE ownership is verified before export.';
         manualRow.append(manualName,addPerson,guidance);
+        if(centrallyManaged){
+            manualName.disabled=true;addPerson.disabled=true;
+            guidance.textContent='Approved department roster is managed in Rebel Command. Contact your roster administrator to add or change a name.';
+        }
         const list=document.createElement('div');
         list.style.cssText='border:1px solid #d6e3eb;border-radius:8px;margin:8px 0;max-height:180px;overflow:auto;padding:4px 8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:3px 14px';
         const selection=new Set();
@@ -10981,6 +11127,22 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             drawCount();
         };
         draw();search.addEventListener('input',draw);
+        const syncRosterBtn=makeButton('Refresh approved roster',{background:'#dceef6',color:'#153e5c'});
+        syncRosterBtn.onclick=async()=>{
+            syncRosterBtn.disabled=true;
+            status.textContent='Checking the central approved roster...';
+            const good=await refreshSharedRebelRoster(true);
+            syncRosterBtn.disabled=false;
+            if(!good){
+                status.textContent='Roster sync unavailable: '+
+                    (sharedRosterSyncState().error||'Unknown error')+
+                    '. Existing names were not replaced.';
+                return;
+            }
+            overlay.remove();
+            showPpeCleanRepairForm();
+        };
+        controls.append(syncRosterBtn);
         if(!roster.length)status.textContent='No names saved on this installation. Enter the full Vector Responsible Party name above, then click Add firefighter.';
         addPerson.onclick=()=>{
             try{
@@ -11329,6 +11491,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             mainAction("Captain's Monthly", launchCaptainInspectionFromAnywhere),
             mainAction('Daily Captain Check', launchCaptainDailyCheckFromAnywhere, false),
             mainAction('PPE Clean / Repair Form', showPpeCleanRepairForm, false),
+            mainAction('Report Problem', () => showSettings('general'), false),
             mainAction('Settings', () => showSettings('profile'), false)
         );
 
@@ -11410,8 +11573,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     setTimeout(repairCaptureVisibleItemPage,1200);
     ensureRebelCommandEnrollment(true).finally(() => {
         rebelCommandEvent('app_loaded', { success: true, description: 'Vector Rebel loaded.' });
+        void refreshSharedRebelRoster(false);
         refreshPanelInfo();
     });
+    setInterval(()=>{void refreshSharedRebelRoster(false);},10*60*1000);
 
     const migrationNotice = loadJSON(MIGRATION_NOTICE_KEY, null);
     if (migrationNotice?.message) {
