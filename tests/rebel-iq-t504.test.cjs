@@ -21,7 +21,7 @@ test('Both actions save in process without submission',()=>{
 });
 test('Form layout is checked before any answer is changed',()=>{
   const chunk=src.slice(src.indexOf('function validateForm(kind)'),src.indexOf('function applyTextarea('));
-  assert.match(chunk,/groups\.length !== task\.count/);
+  assert.match(chunk,/radioMap\.size !== task\.count/);
   assert.match(chunk,/textMap\.size !== 11/);
   assert.match(chunk,/radioMap\.size !== 41/);
   assert.match(chunk,/Unrecognized weekly option/);
@@ -50,57 +50,119 @@ test('Rebel IQ shares exact 54px Starbird launcher used by the Rebel fleet',()=>
 });
 
 
-test('Daily Tour accepts 41 radio questions and optional General Comments #42 without overwriting it',async()=>{
-  const start=src.indexOf('  function validateForm(kind) {');
-  const end=src.indexOf('  function applyTextarea(',start);
-  assert.ok(start>=0&&end>start,'validator boundaries');
-  const functionText=src.slice(start,end)+'\nreturn validateForm;';
-  const clean=x=>String(x??'').replace(/\s+/g,' ').trim();
-  const radioGroups=[];
-  for(let i=1;i<=41;i++){
-    const name=i===1?'Fuel':i===41?'Hand Tools':'Inspection Item '+i;
-    const value=i===1?'Full':i===41?'Present':'Pass';
-    const options=[value,'Fail'].map(v=>({value:v,checked:false,click(){this.checked=true}}));
-    const group={innerText:i+'.\n'+name+'\n*\n'+options.map(x=>x.value).join('\n'),
-      querySelector:selector=>selector==='mat-radio-group'?{}:null,
-      querySelectorAll:selector=>selector==='mat-radio-group input[type="radio"]'?options:[]};
-    radioGroups.push(group);
+
+function formHarness(kind='daily') {
+  const clean = value=>String(value??'').replace(/\s+/g,' ').trim();
+  const body = {innerText:'63000-13(T504)',parentElement:null};
+  const inputs=[], textareas=[], groups=new Map();
+  const makeGroup=(number,name)=>{
+    const group={
+      innerText:number+'. '+name+' *\n',parentElement:body,
+      closest:()=>null
+    };
+    groups.set(number,group);return group;
+  };
+  const radio=(number,name,labels)=>{
+    const group=makeGroup(number,name);
+    for(const label of labels){
+      const wrapper={innerText:label,parentElement:group,closest:()=>null};
+      const node={
+        value:'on',checked:false,parentElement:wrapper,closest:()=>null,
+        getAttribute:k=>k==='aria-label'?label:null,
+        click(){this.checked=true;}
+      };
+      inputs.push(node);
+    }
+  };
+  const text=(number,name,value='')=>{
+    const group=makeGroup(number,name);
+    const textarea={
+      value,parentElement:group,closest:()=>null
+    };
+    textareas.push(textarea);
+    return textarea;
+  };
+  let comment;
+  if(kind==='daily'){
+    for(let n=1;n<=41;n++){
+      const name=n===1?'Fuel':n===41?'Hand Tools':'Inspection Item '+n;
+      const label=n===1?'Full':n===41?'Present':'Pass';
+      radio(n,name,[label,n===1?'3/4':'Fail']);
+    }
+    comment=text(42,'General Comments','Keep this inspector note');
+  }else{
+    text(1,'Odometer');
+    text(2,'Aerial Hours');
+    text(3,'Engine Hours');
+    for(let n=4;n<=15;n++){
+      const name=n===7?'Aerial Lubrication':'Inspection Item '+n;
+      radio(n,name,n===7?['Needed','Not needed']:[n<=6?'Full':'Pass','Fail']);
+    }
+    for(let n=16;n<=23;n++)text(n,'Tire Pressure '+n);
   }
-  const comment={innerText:'42.\nGeneral Comments\nType something',
-    querySelector:()=>null,querySelectorAll:()=>[]};
-  const commentInput={value:'Existing inspector note',closest:selector=>selector==='.form-group'?comment:null};
-  const save={textContent:'Save In Process',disabled:false,clicked:0,click(){this.clicked++}};
+  const save={
+    textContent:'Save In Process',disabled:false,clicked:0,
+    click(){this.clicked++;}
+  };
   const doc={
-    body:{innerText:'63000-13 Tour Check\n63000-13(T504)'},
+    body,
     querySelectorAll(selector){
-      if(selector==='.form-group')return [...radioGroups,comment];
-      if(selector==='.form-group textarea.text-qs-input')return [commentInput];
+      if(selector==='input[type="radio"]')return inputs;
+      if(selector==='[role="radio"]')return [];
+      if(selector==='textarea')return textareas;
       if(selector==='button')return [save];
+      if(selector==='.form-group')return []; // Current Operative IQ is not Angular Material.
       return [];
     }
   };
-  const num=container=>Number(clean(container?.innerText).match(/^(\d+)\s*\./)?.[1]||0);
-  const name=container=>clean((container?.innerText||'').split(/\r?\n/).map(clean).filter(Boolean).slice(1,3).filter(x=>x!=='*').join(' '));
-  const validate=new Function('TASKS','formId','t504Visible','clean','document',
-    'questionNumber','questionName','visible',functionText)(
+  const from=src.indexOf('  const questionNumber = container =>');
+  const to=src.indexOf('  function applyTextarea(',from);
+  assert.ok(from>0&&to>from,'reader extraction');
+  const code=src.slice(from,to)+'\nreturn {validateForm,readIqForm};';
+  const result=new Function('document','PANEL','TASKS','formId','t504Visible','clean','visible',code)(
+    doc,'rebel-iq-t504-panel',
     {daily:{name:'63000-13 Tour Check',count:41},weekly:{name:'Weekly 63000-13 Check',count:12}},
-    ()=>'91546',()=>true,clean,doc,num,name,()=>true);
-  const parsed=validate('daily');
+    ()=>kind==='daily'?'91546':'91545',()=>true,clean,()=>true);
+  doc.body.innerText=(kind==='daily'?'63000-13 Tour Check':'Weekly 63000-13 Check')+'\n63000-13(T504)';
+  return {validate:()=>result.validateForm(kind),inputs,textareas,groups,save,comment,doc};
+}
+test('Daily Tour recognizes 41 native radio questions plus General Comments, without mat-radio-group',()=>{
+  const h=formHarness('daily');
+  const parsed=h.validate();
   assert.equal(parsed.radioMap.size,41);
   assert.equal(parsed.textMap.size,1);
-  assert.equal(parsed.textMap.get(42).textarea.value,'Existing inspector note');
-  assert.equal(parsed.save,save);
-  assert.equal(save.clicked,0);
-  comment.innerText='42.\nRenamed Comments\nType something';
-  assert.throws(()=>validate('daily'),/Daily questionnaire changed/);
-  assert.equal(save.clicked,0);
+  assert.equal(parsed.textMap.get(42).textarea.value,'Keep this inspector note');
+  assert.equal(parsed.radioMap.get(1).choices[0].value,'Full');
+  assert.equal(parsed.radioMap.get(41).choices[0].value,'Present');
+  assert.equal(h.save.clicked,0);
+  h.groups.get(42).innerText='42. Renamed Comments *\n';
+  assert.throws(h.validate,/Daily questionnaire changed/);
+  assert.equal(h.save.clicked,0);
+});
+test('Weekly Check recognizes 12 native-radio and 11 textarea questions without mat-radio-group',()=>{
+  const h=formHarness('weekly');
+  const parsed=h.validate();
+  assert.equal(parsed.radioMap.size,12);
+  assert.equal(parsed.textMap.size,11);
+  assert.equal(parsed.radioMap.get(7).choices[1].value,'Not needed');
+  assert.equal(parsed.textMap.get(1).textarea.value,'');
+  assert.equal(h.save.clicked,0);
+  h.groups.get(7).innerText='7. Changed Aerial Activity *\n';
+  assert.throws(h.validate,/Weekly questionnaire changed/);
+  assert.equal(h.save.clicked,0);
+});
+test('Missing, extra or duplicated real radio card blocks before any draft save',()=>{
+  const h=formHarness('daily');
+  h.inputs.splice(0,2);
+  assert.throws(h.validate,/Unexpected questionnaire layout/);
+  assert.equal(h.save.clicked,0);
 });
 
 test('Rebel IQ exposes a direct Check for Update button and preserves Tampermonkey URLs',()=>{
  assert.match(src,/Check for Update/);
  assert.match(src,/update\.href = 'https:\/\/raw\.githubusercontent\.com\/michaelbartbrion-cmd\/mission-vector-check-it\/main\/beta\/rebel-iq\.user\.js'/);
  assert.match(src,/@updateURL\s+https:\/\/raw\.githubusercontent\.com/);
- assert.match(src,/v0\.1\.3/);
+ assert.match(src,/v0\.1\.4/);
 });
 test('Rebel IQ automatically collects failures and keeps them queued until confirmed delivery',()=>{
  assert.match(src,/@grant\s+GM_getValue/);
