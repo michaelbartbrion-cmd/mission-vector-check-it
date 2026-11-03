@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.44
+// @version      3.2.45
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.44',
+        version: '3.2.45',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.44';
+    const VERSION = '3.2.45';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -272,7 +272,7 @@
         const body = {
             version: VERSION,
             suggestions: [{
-                suggestionId: `feedback:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`,
+                suggestionId: clean(options.suggestionId || `feedback:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`).slice(0,140),
                 title: clean(options.title||'Vector Rebel feedback').slice(0,160),
                 details: message,
                 sourceVersion: VERSION,
@@ -318,6 +318,8 @@
     }
 
     const ERROR_FEEDBACK_THROTTLE_KEY='vectorRebelErrorFeedbackThrottleV1';
+    const PENDING_ERROR_REPORTS_KEY='vectorRebelPendingErrorReportsV1';
+    let errorReportSending=false;
     function errorFeedbackText(reason,workflow='unknown',stage='unknown'){
         const safeReason=telemetrySafeErrorMessage(reason||'Unexpected Vector Rebel error.');
         return 'Automatic Vector Rebel error report | Version '+VERSION+
@@ -325,16 +327,40 @@
             ' | Stage '+clean(stage).slice(0,60)+
             ' | Error '+safeReason;
     }
+    function pendingErrorReports(){
+        const stored=loadJSON(PENDING_ERROR_REPORTS_KEY,[]);
+        return Array.isArray(stored)?stored.filter(x=>x&&
+            typeof x.id==='string'&&typeof x.message==='string').slice(-20):[];
+    }
+    // Offline incidents remain on the local installation until the existing
+    // Rebel Command feedback intake confirms them; retries reuse the same ID.
+    async function flushPendingErrorReports(){
+        if(errorReportSending)return false;
+        errorReportSending=true;
+        try{
+            for(const item of pendingErrorReports()){
+                const received=await submitRebelCommandFeedback(item.message,{
+                    title:'Vector Rebel error report',priority:'high',
+                    sourceContext:'automatic_error',suggestionId:item.id
+                });
+                if(!received)return false;
+                saveJSON(PENDING_ERROR_REPORTS_KEY,
+                    pendingErrorReports().filter(x=>x.id!==item.id));
+                saveJSON(ERROR_FEEDBACK_THROTTLE_KEY,{key:item.message,at:Date.now()});
+            }
+            return true;
+        }finally{errorReportSending=false;}
+    }
     async function reportRebelErrorToCommand(reason,workflow='',stage=''){
-        const message=errorFeedbackText(reason,workflow,stage);
-        const previous=loadJSON(ERROR_FEEDBACK_THROTTLE_KEY,{})||{};
-        const key=message.slice(0,400);
-        // Reduce duplicates when a page reloads during the same failed run.
-        if(previous.key===key&&Date.now()-Number(previous.at||0)<10*60*1000)return false;
-        saveJSON(ERROR_FEEDBACK_THROTTLE_KEY,{key,at:Date.now()});
-        return submitRebelCommandFeedback(message,{
-            title:'Vector Rebel error report',priority:'high',sourceContext:'automatic_error'
-        });
+        const message=errorFeedbackText(reason,workflow,stage),now=Date.now();
+        const last=loadJSON(ERROR_FEEDBACK_THROTTLE_KEY,{})||{};
+        if(last.key===message&&now-Number(last.at||0)<10*60*1000)return false;
+        const pending=pendingErrorReports();
+        if(pending.some(x=>x.message===message&&now-Number(x.at||0)<10*60*1000))return false;
+        pending.push({id:'feedback:vr-error:'+now+':'+Math.random().toString(36).slice(2,10),
+            message,at:now});
+        saveJSON(PENDING_ERROR_REPORTS_KEY,pending.slice(-20));
+        return flushPendingErrorReports();
     }
 
     function looksLikeVectorRebelRuntime(error, source = '') {
@@ -365,6 +391,7 @@
             errorMessage: message,
             metadata: { stage: 'global' }
         });
+        void reportRebelErrorToCommand(message,'runtime',kind);
     }
 
     window.addEventListener('error', event => {
@@ -11673,9 +11700,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     ensureRebelCommandEnrollment(true).finally(() => {
         rebelCommandEvent('app_loaded', { success: true, description: 'Vector Rebel loaded.' });
         void refreshSharedRebelRoster(false);
+        void flushPendingErrorReports();
         refreshPanelInfo();
     });
     setInterval(()=>{void refreshSharedRebelRoster(false);},10*60*1000);
+    setInterval(()=>{void flushPendingErrorReports();},5*60*1000);
 
     const migrationNotice = loadJSON(MIGRATION_NOTICE_KEY, null);
     if (migrationNotice?.message) {
