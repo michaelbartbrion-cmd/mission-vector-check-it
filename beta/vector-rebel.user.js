@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.48
+// @version      3.2.49
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.48',
+        version: '3.2.49',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.48';
+    const VERSION = '3.2.49';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -5260,7 +5260,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const captainMode = getMode('captain');
         if (!captainMode) throw new Error('Captain inspection mode is unavailable.');
         if (!isAssetPageFor(item)) throw new Error(`${item.assetId}: wrong PPE asset page.`);
-        if (!(await verifyExpectedAssetPage(item))) throw new Error(`${item.assetId}: asset identity could not be verified.`);
+        // The same live PPE Name truncation can affect READ-ONLY Captain
+        // audits. Use the proven detail heading + labeled serial recovery,
+        // but do not mutate the audit inventory's original item ID.
+        const restoredName = resolveClippedPpeNameFromVerifiedDetail(item);
+        const verifiedItem = restoredName ? { ...item, assetId: restoredName } : item;
+        if (!(await verifyExpectedAssetPage(verifiedItem))) {
+            throw new Error(`${item.assetId}: asset identity could not be verified.`);
+        }
 
         if (item.inspectionModeKey === 'scbaTour') {
             const scbaMode = getMode('scbaTour');
@@ -5268,16 +5275,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 item.template !== scbaMode.templates[item.pool]) {
                 throw new Error(item.assetId + ': SCBA pool/template mismatch; history not trusted.');
             }
-            await revealAssetHistory(item, scbaMode.title, 600);
-            const tour = await readModeCompletionHistory(item, 'scbaTour');
+            await revealAssetHistory(verifiedItem, scbaMode.title, 600);
+            const tour = await readModeCompletionHistory(verifiedItem, 'scbaTour');
             return {
                 captain: { dates: [], latestDate: '', notApplicable: true },
                 tour
             };
         }
-        await revealAssetHistory(item, captainMode.title, 600);
-        const captain = await readModeCompletionHistory(item, 'captain');
-        const tour = await readModeCompletionHistory(item, 'tour');
+        await revealAssetHistory(verifiedItem, captainMode.title, 600);
+        const captain = await readModeCompletionHistory(verifiedItem, 'captain');
+        const tour = await readModeCompletionHistory(verifiedItem, 'tour');
         return { captain, tour };
     }
 
