@@ -15,7 +15,9 @@ test('Both actions save in process without submission',()=>{
   assert.match(src, /clean\(button\.textContent\) === 'Save In Process'/);
   assert.match(src, /verified\.save\.click\(\)/);
   assert.doesNotMatch(src, /\.click\(\).*Submit/);
-  assert.doesNotMatch(src, /fetch\(|XMLHttpRequest|Submit Inspection/);
+  const form = src.slice(src.indexOf('async function prepare(kind)'),src.indexOf('async function runPending()'));
+  assert.doesNotMatch(form, /fetch\(|XMLHttpRequest|Submit Inspection/);
+  assert.doesNotMatch(src, /\.click\(\).*Submit/);
 });
 test('Form layout is checked before any answer is changed',()=>{
   const chunk=src.slice(src.indexOf('function validateForm(kind)'),src.indexOf('function applyTextarea('));
@@ -92,4 +94,26 @@ test('Daily Tour accepts 41 radio questions and optional General Comments #42 wi
   comment.innerText='42.\nRenamed Comments\nType something';
   assert.throws(()=>validate('daily'),/Daily questionnaire changed/);
   assert.equal(save.clicked,0);
+});
+
+test('Rebel IQ exposes a direct Check for Update button and preserves Tampermonkey URLs',()=>{
+ assert.match(src,/Check for Update/);
+ assert.match(src,/update\.href = 'https:\/\/raw\.githubusercontent\.com\/michaelbartbrion-cmd\/mission-vector-check-it\/main\/beta\/rebel-iq\.user\.js'/);
+ assert.match(src,/@updateURL\s+https:\/\/raw\.githubusercontent\.com/);
+ assert.match(src,/v0\.1\.3/);
+});
+test('Rebel IQ automatically collects failures and keeps them queued until confirmed delivery',()=>{
+ assert.match(src,/@grant\s+GM_getValue/);
+ assert.match(src,/@grant\s+GM_setValue/);
+ assert.match(src,/@grant\s+GM_xmlhttpRequest/);
+ assert.match(src,/@connect\s+base44\.app/);
+ assert.match(src,/captureIqError\(error, pending\.kind \+ ':prepare'\)/);
+ assert.match(src,/captureIqError\('Questionnaire navigation did not settle'/);
+ assert.match(src,/if \(!await submitIqReport\(device, report\)\)/);
+ assert.match(src,/acceptedSuggestions/);
+ assert.match(src,/duplicateSuggestions/);
+ assert.match(src,/GM_setValue\(IQ_ERRORS_KEY,\s*readIqErrors\(\)\.filter/);
+ assert.match(src,/setInterval\(\(\) => \{ void flushIqErrors\(\); \}, 5 \* 60 \* 1000\)/);
+ assert.match(src,/Rebel Command:/);
+ assert.doesNotMatch(src,/document\.body\.outerHTML|localStorage\.(?:get|set)Item|sessionStorage\.getItem\(.*token/i);
 });

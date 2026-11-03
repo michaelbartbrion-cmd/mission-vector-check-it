@@ -1,19 +1,157 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.2
+// @version      0.1.3
 // @description  Prepare T504 daily and weekly Operative IQ inspection drafts, save in process, never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
 // @run-at       document-idle
-// @grant        none
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_xmlhttpRequest
+// @connect      base44.app
 // ==/UserScript==
 
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.2' };
+  window.__rebelIqT504 = { version: '0.1.3' };
+  // Minimal RC diagnostics: only stage, redacted error, URL path, version.
+  // Never transmit form answers, notes, asset readings, or login credentials.
+  const IQ_VERSION = '0.1.3';
+  const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
+  const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
+  const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
+  const IQ_ERRORS_KEY = 'rebelIqErrorQueueV1';
+  const randomToken = count => {
+    let binary = '';
+    for (const value of crypto.getRandomValues(new Uint8Array(count))) {
+      binary += String.fromCharCode(value);
+    }
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  };
+  const scrubError = value => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[email]')
+    .replace(/\b\d{5,}\b/g, '[id]')
+    .replace(/\b[A-Z]{3,}[-_]\d[\w.-]*/gi, '[asset]')
+    .replace(/\s+/g, ' ').trim().slice(0, 260);
+  const readIqErrors = () => {
+    try {
+      const rows = GM_getValue(IQ_ERRORS_KEY, []);
+      return Array.isArray(rows) ? rows.filter(x => x && x.suggestionId).slice(-20) : [];
+    } catch { return []; }
+  };
+  let rcStatusEl = null, reporting = false, rcStatus = 'Not verified';
+  let lastReportSignature = '', lastReportAt = 0;
+  const setRcStatus = message => {
+    rcStatus = message;
+    if (rcStatusEl) rcStatusEl.textContent = 'Rebel Command: ' + message;
+  };
+  function captureIqError(error, stage) {
+    try {
+      const detail = scrubError(error?.message || error || 'Unexpected error');
+      const safeStage = scrubError(stage || 'unknown');
+      const signature = safeStage + '|' + detail;
+      const timestamp = Date.now();
+      if (signature === lastReportSignature && timestamp - lastReportAt < 60000) return;
+      lastReportSignature = signature;
+      lastReportAt = timestamp;
+      const rows = readIqErrors();
+      rows.push({
+        suggestionId: 'feedback:riq-error:' + timestamp + ':' + Math.random().toString(36).slice(2, 10),
+        timestamp: new Date(timestamp).toISOString(),
+        title: 'Rebel IQ automatic error',
+        details: 'Rebel IQ v' + IQ_VERSION + ' | stage: ' + safeStage +
+          ' | error: ' + detail + ' | route: ' + scrubError(location.pathname),
+        category: 'feedback',
+        priority: 'high',
+        sourceContext: 'automatic_error',
+        sourceVersion: IQ_VERSION
+      });
+      GM_setValue(IQ_ERRORS_KEY, rows.slice(-20));
+      setRcStatus(readIqErrors().length + ' error(s) pending delivery');
+      void flushIqErrors();
+    } catch { /* A reporting failure must not touch an inspection. */ }
+  }
+
+  function getIqDevice() {
+    let device = GM_getValue(IQ_DEVICE_KEY, null);
+    if (device?.installationId && device?.deviceToken) return device;
+    device = {
+      installationId: 'riq-install-' + randomToken(16),
+      deviceToken: randomToken(32),
+      deviceId: ''
+    };
+    GM_setValue(IQ_DEVICE_KEY, device);
+    return device;
+  }
+  async function enrollIqDevice() {
+    const device = getIqDevice();
+    if (device.deviceId) return device;
+    const response = await fetch(IQ_ENROLL_ENDPOINT, {
+      method: 'POST', credentials: 'omit',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        program: 'Rebel IQ',
+        installationId: device.installationId,
+        deviceToken: device.deviceToken,
+        profileName: 'Truck 504', version: IQ_VERSION
+      })
+    });
+    const json = await response.json().catch(() => null);
+    if (!response.ok || json?.ok !== true || !json.deviceId) {
+      throw Error('RC enrollment was not accepted (HTTP ' + response.status + ')');
+    }
+    const enrolled = { ...device, deviceId: String(json.deviceId) };
+    GM_setValue(IQ_DEVICE_KEY, enrolled);
+    return enrolled;
+  }
+  function submitIqReport(device, report) {
+    return new Promise(resolve => {
+      try {
+        GM_xmlhttpRequest({
+          method: 'POST', url: IQ_REPORT_ENDPOINT, timeout: 12000,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + device.deviceToken,
+            'X-Rebel-Device-ID': device.deviceId
+          },
+          data: JSON.stringify({version: IQ_VERSION, suggestions: [report]}),
+          onload: response => {
+            let receipt = null;
+            try { receipt = JSON.parse(response.responseText || 'null'); } catch {}
+            resolve(response.status >= 200 && response.status < 300 &&
+              receipt?.ok === true &&
+              (Number(receipt.acceptedSuggestions) > 0 ||
+               Number(receipt.duplicateSuggestions) > 0));
+          },
+          onerror: () => resolve(false),
+          ontimeout: () => resolve(false)
+        });
+      } catch { resolve(false); }
+    });
+  }
+  async function flushIqErrors() {
+    if (reporting || !readIqErrors().length) return false;
+    reporting = true;
+    try {
+      const device = await enrollIqDevice();
+      for (const report of readIqErrors()) {
+        if (!await submitIqReport(device, report)) {
+          throw Error('RC did not acknowledge error receipt');
+        }
+        GM_setValue(IQ_ERRORS_KEY,
+          readIqErrors().filter(row => row.suggestionId !== report.suggestionId));
+      }
+      setRcStatus('error reporting connected');
+      return true;
+    } catch {
+      setRcStatus('offline or not confirmed, ' + readIqErrors().length + ' queued');
+      return false;
+    } finally { reporting = false; }
+  }
+
   const KEY = 'rebelIqT504PendingV1';
   const RESULT = 'rebelIqT504ResultV1';
   const PANEL = 'rebel-iq-t504-panel';
@@ -86,6 +224,10 @@
     detail.setAttribute('role', 'status');
     detail.style.cssText = 'font:11px/1.5 Arial;margin:8px 0 2px;color:#205b48;';
     detail.textContent = 'Open T504 Unit Inspection first.';
+    rcStatusEl = document.createElement('div');
+    rcStatusEl.style.cssText = 'font:11px/1.5 Arial;color:#536c77;margin:7px 0 0;';
+    setRcStatus(readIqErrors().length ?
+      readIqErrors().length + ' error(s) pending delivery' : 'no errors queued');
     const button = (text, kind) => {
       const el = document.createElement('button');
       el.type = 'button';
@@ -95,8 +237,16 @@
       return el;
     };
     header.append(label);
+    const update = document.createElement('a');
+    update.href = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js';
+    update.textContent = 'Check for Update · v0.1.3';
+    update.target = '_blank';
+    update.rel = 'noopener noreferrer';
+    update.style.cssText = 'display:block;text-align:center;padding:9px;margin-top:8px;' +
+      'border:1px solid #9ebdcc;border-radius:7px;background:#edf4f8;color:#163c58;' +
+      'font:bold 12px Arial;text-decoration:none;cursor:pointer;';
     menu.append(header, help, button('Daily Tour: Save In Process', 'daily'),
-      button('Weekly: Save In Process', 'weekly'), detail);
+      button('Weekly: Save In Process', 'weekly'), update, detail, rcStatusEl);
     const setExpanded = (expanded) => {
       opened = expanded;
       menu.style.display = expanded ? 'block' : 'none';
@@ -266,6 +416,7 @@
     if (formId()) {
       if (!clean(document.body.innerText).includes(task.name)) {
         notify('Wrong questionnaire open. No answers changed.', true);
+      captureIqError('Unexpected questionnaire route', pending.kind + ':wrong-form');
         return;
       }
       busy = true;
@@ -276,6 +427,7 @@
         notify(result);
       } catch (error) {
         notify('Stopped safely: ' + error.message, true);
+        captureIqError(error, pending.kind + ':prepare');
       } finally {
         clearPending();
         busy = false;
@@ -287,6 +439,7 @@
     if (++attempts > 8) {
       clearPending();
       notify('Could not locate questionnaire. Open it manually; no answers were changed.', true);
+      captureIqError('Questionnaire navigation did not settle', pending.kind + ':navigation');
       return;
     }
     const leaf = [...document.querySelectorAll('h1,h2,h3,h4,h5,span,div,p,button,a')]
@@ -313,7 +466,11 @@
       lastRoute = location.pathname;
       attempts = 0;
     }
-    if (readPending()) void runPending();
+    if (readPending()) void runPending().catch(error => {
+      clearPending();
+      captureIqError(error, 'navigation');
+      notify('Stopped safely: ' + scrubError(error?.message || error), true);
+    });
     else if (sessionStorage.getItem(KEY)) clearPending();
     const result = sessionStorage.getItem(RESULT);
     if (result && isGroupPage() && t504Visible()) {
@@ -329,6 +486,22 @@
       }
     }
   }
-  setInterval(tick, 700);
-  tick();
+  // Only capture global errors that identify Rebel IQ itself.
+  window.addEventListener('error', event => {
+    const source = String(event.filename || '') + ' ' + String(event.error?.stack || '');
+    if (/rebel-iq(?:\.user)?\.js/i.test(source)) {
+      captureIqError(event.error || event.message, 'runtime');
+    }
+  });
+  window.addEventListener('unhandledrejection', event => {
+    if (/rebel-iq(?:\.user)?\.js/i.test(String(event.reason?.stack || ''))) {
+      captureIqError(event.reason, 'unhandled-promise');
+    }
+  });
+  setInterval(() => {
+    try { tick(); } catch (error) { captureIqError(error, 'ui'); }
+  }, 700);
+  setInterval(() => { void flushIqErrors(); }, 5 * 60 * 1000);
+  try { tick(); } catch (error) { captureIqError(error, 'startup'); }
+  if (readIqErrors().length) void flushIqErrors();
 })();
