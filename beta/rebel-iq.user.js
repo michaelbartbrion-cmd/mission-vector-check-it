@@ -299,6 +299,81 @@
     const text = (container?.innerText || '').split(/\r?\n/).map(clean).filter(Boolean);
     return clean(text.slice(1, 3).filter(part => part !== '*').join(' '));
   };
+  // Operative IQ currently renders plain radio controls rather than
+  // Angular Material mat-radio-group inside .form-group. Locate a question
+  // from its numbered heading, independent of the UI component library.
+  function findIqQuestion(node) {
+    for (let el = node; el && el !== document.body; el = el.parentElement) {
+      if (el.closest?.('#' + PANEL)) break;
+      const raw = String(el.innerText || el.textContent || '');
+      const number = questionNumber(el);
+      if (!number || number > 80) continue;
+      const headings = [...raw.matchAll(/(?:^|\n)\s*(\d{1,2})\s*\.\s*[A-Za-z]/g)]
+        .map(match => Number(match[1]));
+      if (headings.length === 1 && headings[0] === number) return el;
+    }
+    return null;
+  }
+
+  const knownRadioAnswer = /^(Full|Pass|Present|Fail|Missing|Added|Not needed|3\/4|7\/8|Less than 3\/4)$/i;
+  function readableIqRadio(node) {
+    const labelNodes = [
+      node.closest?.('label'),
+      ...(node.labels ? [...node.labels] : [])
+    ].filter(Boolean);
+    const candidates = [
+      node.getAttribute?.('aria-label'),
+      ...labelNodes.map(label => label.innerText || label.textContent),
+      node.parentElement?.innerText || node.parentElement?.textContent,
+      node.innerText || node.textContent,
+      node.value
+    ];
+    const answer = candidates.map(value => clean(value || ''))
+      .find(value => knownRadioAnswer.test(value)) || '';
+    return {
+      value: answer === 'Not Needed' ? 'Not needed' : answer,
+      get checked() { return node.checked === true || node.getAttribute?.('aria-checked') === 'true'; },
+      click() { node.click(); }
+    };
+  }
+
+  function iqRadioControls() {
+    const native = [...document.querySelectorAll('input[type="radio"]')];
+    const aria = [...document.querySelectorAll('[role="radio"]')]
+      .filter(node => !node.querySelector('input[type="radio"]'));
+    const custom = native.length || aria.length ? [] :
+      [...document.querySelectorAll('mat-radio-button,p-radioButton,.mat-radio-button')]
+        .filter(node => !node.querySelector('input[type="radio"],[role="radio"]'));
+    return [...native, ...aria, ...custom].filter(node => !node.closest('#' + PANEL));
+  }
+
+  function readIqForm() {
+    const radioMap = new Map(), textMap = new Map();
+    const radioNodes = iqRadioControls();
+    for (const node of radioNodes) {
+      const group = findIqQuestion(node), number = questionNumber(group);
+      if (!number) continue;
+      const prior = radioMap.get(number);
+      if (prior && prior.group !== group) {
+        throw Error('Conflicting radio groups at question ' + number + '. No answers changed.');
+      }
+      if (!prior) radioMap.set(number, { group, choices: [] });
+      radioMap.get(number).choices.push(readableIqRadio(node));
+    }
+    for (const textarea of document.querySelectorAll('textarea')) {
+      if (textarea.closest('#' + PANEL)) continue;
+      const group = findIqQuestion(textarea), number = questionNumber(group);
+      if (!number) continue;
+      if (textMap.has(number)) throw Error('Multiple text inputs at question ' + number + '.');
+      textMap.set(number, { group, textarea });
+    }
+    return {
+      radioMap, textMap,
+      radioCount: radioNodes.length,
+      textareaCount: document.querySelectorAll('textarea').length
+    };
+  }
+
   function validateForm(kind) {
     const task = TASKS[kind];
     if (!formId() || !t504Visible() || !clean(document.body.innerText).includes(task.name)) {
