@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.47
+// @version      3.2.48
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.47',
+        version: '3.2.48',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.47';
+    const VERSION = '3.2.48';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -4178,6 +4178,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
 
     // When Vector clips a table PPE Name like BALDREE-10948322-F...,
+    // or adds a display ellipsis to an already complete name (BU...),
     // recover the full value ONLY from this same pool/item detail heading
     // plus its exact labeled serial. Never guess the missing suffix.
     function resolveClippedPpeNameFromVerifiedDetail(item) {
@@ -4209,7 +4210,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const observedType = normalizedPpeTypeText(match[1]);
             if (expectedType && observedType && expectedType !== observedType) return '';
             const full = clean(match[2]).toUpperCase();
-            if (full.startsWith(stem) && full.length > stem.length &&
+            if (full.startsWith(stem) && full.length >= stem.length &&
                 full.length <= 160 && !/(?:\.{3}|\u2026)$/.test(full) &&
                 full.includes(serialToken)) fullNames.add(full);
         }
