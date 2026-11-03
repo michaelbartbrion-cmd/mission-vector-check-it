@@ -32,3 +32,17 @@ test('Weekly defaults preserve unread hours and stage tire values for verificati
   assert.match(src,/for \(let i = 16; i <= 23; i\+\+\)/);
   assert.match(src,/You must verify every item at the truck/);
 });
+
+test('Rebel IQ shares exact 54px Starbird launcher used by the Rebel fleet',()=>{
+  const vector=fs.readFileSync(path.join(__dirname,'../beta/vector-rebel.user.js'),'utf8');
+  const match=vector.match(/function rebelStarbirdSvg\(\) \{[\s\S]*?return `([\s\S]*?)`;/);
+  const icon=match?.[1]?.trim();
+  assert.ok(icon&&icon.includes('data:image/png;base64,'),'Vector Rebel icon source found');
+  assert.ok(src.includes('const rebelStarbirdIcon = `'+icon+'`;'), 'Must use the exact source artwork');
+  assert.match(src,/toggle\.innerHTML = rebelStarbirdIcon/);
+  assert.match(src,/width:54px;height:54px/);
+  assert.doesNotMatch(src,/toggle\.textContent = 'RIQ'/);
+  assert.match(src,/header\.append\(toggle\)/);
+  assert.match(src,/root\.append\(toggle\)/);
+  assert.match(src,/Minimize Rebel IQ/);
+});
