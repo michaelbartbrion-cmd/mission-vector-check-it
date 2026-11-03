@@ -15,7 +15,8 @@ const normalized=people=>({
  rejected:[],merged:[]
 });
 const env={
- loadJSON,saveJSON,normalizeMasterRoster:normalized,clean:v=>String(v??'').trim(),
+ loadJSON,saveJSON,persistentRemoveRaw:key=>{delete stored[key]},
+ normalizeMasterRoster:normalized,clean:v=>String(v??'').trim(),
  rebelCommandPaired:()=>true,ensureRebelCommandEnrollment:async()=>true,
  rebelCommandPairing:()=>({token:'mock-only',deviceId:'vr-test'}),
  GM_xmlhttpRequest:opts=>{requests.push(opts);queueMicrotask(()=>opts.onload(nextReply))},
@@ -53,6 +54,12 @@ test('Network failure never erases last approved central names',async()=>{
  assert.equal(current().source,'shared-command');
  assert.equal(shared.sharedRosterSyncState().status,'unavailable');
  assert.equal(current().people.length,2);
+});
+test('Revoked or inactive credentials revoke the cached shared roster',async()=>{
+ nextReply={status:403,responseText:JSON.stringify({ok:false,error:'Not on approved roster'})};
+ assert.equal(await shared.refreshSharedRebelRoster(true),false);
+ assert.equal(current().source,'local-admin');
+ assert.equal(stored.vectorRebelApprovedRosterV1,undefined);
 });
 test('Without a central publication the existing local master remains available',()=>{
  delete stored.vectorRebelApprovedRosterV1;

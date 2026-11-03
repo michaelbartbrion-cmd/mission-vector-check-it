@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.43
+// @version      3.2.44
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.43',
+        version: '3.2.44',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.43';
+    const VERSION = '3.2.44';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -414,6 +414,11 @@
                 let data;
                 try{data=JSON.parse(response.text||'{}');}catch{data={};}
                 if(response.status!==200||data?.ok!==true){
+                    if(response.status===401||response.status===403||response.status===409){
+                        // A revoked, disabled or unpublished roster may not remain
+                        // accepted as a previously approved shared publication.
+                        persistentRemoveRaw(SHARED_ROSTER_KEY);
+                    }
                     throw Error(clean(data?.error||('Roster service HTTP '+response.status)).slice(0,150));
                 }
                 if(!Array.isArray(data.people)||data.people.length<1||data.people.length>500||
