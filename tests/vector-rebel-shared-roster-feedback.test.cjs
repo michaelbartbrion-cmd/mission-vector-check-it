@@ -77,10 +77,76 @@ test('No roster editing is performed by the shared download',()=>{
 });
 test('Failures report through both automatic event and optional incident feedback',()=>{
  assert.match(src,/function reportRebelErrorToCommand\(reason,workflow='',stage=''\)/);
- assert.match(src,/submitRebelCommandFeedback\(message,/);
+ assert.match(src,/submitRebelCommandFeedback\(item\.message,/);
  assert.match(src,/sourceContext:'automatic_error'/);
  assert.match(src,/const fillLastError=makeButton\('Use Last Error'\)/);
  assert.match(src,/mainAction\('Report Problem'/);
  assert.match(src,/Number\(receipt\.acceptedSuggestions\)>0/);
  assert.match(src,/telemetrySafeErrorMessage\(reason/);
+});
+
+test('Master List buttons expose local publish and recipient download without PPE writes',()=>{
+ assert.match(src,/makeButton\('Share My Master List'/);
+ assert.match(src,/makeButton\('Get Latest Master List'/);
+ assert.match(src,/action=vr-publish-roster/);
+ assert.match(src,/if\(!rebelCommandPairing\(\)\?\.autoEnrolled\)rosterCard.append\(shareRoster\)/);
+ assert.match(src,/setInterval\(\(\)=>\{void refreshSharedRebelRoster\(false\);\},10\*60\*1000\)/);
+});
+test('admin-roster publication sends approved names only and confirms server receipt',async()=>{
+ stored.localMaster={people:[
+  {name:'Michael Baldree',prefix:'PERSON-MICHAEL-BALDREE',active:true},
+  {name:'Robert Brooks',prefix:'PERSON-ROBERT-BROOKS',active:true}
+ ]};
+ nextReply={status:200,responseText:JSON.stringify({ok:true,version:'v1',count:2})};
+ const publish=new Function('loadJSON','normalizeMasterRoster','rebelCommandPaired',
+  'rebelCommandPairing','masterRosterExportPayload','GM_xmlhttpRequest',
+  'REBEL_COMMAND_ENDPOINT','MASTER_ROSTER_OVERRIDE_KEY','clean',
+  pure('async function publishLocalMasterRoster()','function prefixesOverlap(aRaw, bRaw) {')+
+  ';return publishLocalMasterRoster;')(
+   loadJSON,normalized,()=>true,()=>({deviceId:'admin-1',token:'mock-token'}),
+   people=>({people}),env.GM_xmlhttpRequest,env.REBEL_COMMAND_ENDPOINT,'localMaster',env.clean
+  );
+ const response=await publish();
+ assert.equal(response.count,2);
+ const request=requests.at(-1);
+ assert.equal(request.method,'POST');
+ assert.ok(request.url.endsWith('?action=vr-publish-roster'));
+ const body=JSON.parse(request.data);
+ assert.deepEqual(body.people.map(p=>p.name),['Michael Baldree','Robert Brooks']);
+ assert.equal(JSON.stringify(body).includes('signature'),false);
+ assert.equal(JSON.stringify(body).includes('assetId'),false);
+});
+test('failed publication receipt cannot be mistaken for success',async()=>{
+ nextReply={status:503,responseText:JSON.stringify({ok:false,error:'no receipt'})};
+ const publish=new Function('loadJSON','normalizeMasterRoster','rebelCommandPaired',
+  'rebelCommandPairing','masterRosterExportPayload','GM_xmlhttpRequest',
+  'REBEL_COMMAND_ENDPOINT','MASTER_ROSTER_OVERRIDE_KEY','clean',
+  pure('async function publishLocalMasterRoster()','function prefixesOverlap(aRaw, bRaw) {')+
+  ';return publishLocalMasterRoster;')(
+   loadJSON,normalized,()=>true,()=>({deviceId:'admin-1',token:'mock-token'}),
+   people=>({people}),env.GM_xmlhttpRequest,env.REBEL_COMMAND_ENDPOINT,'localMaster',env.clean
+  );
+ await assert.rejects(publish(),/no receipt/);
+});
+test('automatic error reports remain queued until Rebel Command confirms receipt',async()=>{
+ const key='vectorRebelPendingErrorReportsV1';
+ delete stored[key];
+ const deliveries=[];
+ let serverAvailable=false;
+ const setup=new Function('loadJSON','saveJSON','clean','telemetrySafeErrorMessage',
+   'submitRebelCommandFeedback','VERSION',
+   pure("const ERROR_FEEDBACK_THROTTLE_KEY=",'function looksLikeVectorRebelRuntime(')+
+   ';return {reportRebelErrorToCommand,flushPendingErrorReports};')(
+    loadJSON,saveJSON,env.clean,v=>String(v||'').replace(/\b\d{5,}\b/g,'[id]'),
+    async (message,options)=>{deliveries.push({message,options});return serverAvailable},'3.2.45'
+   );
+ assert.equal(await setup.reportRebelErrorToCommand('Expected asset 123456','captainDaily','start'),false);
+ assert.equal(stored[key].length,1);
+ assert.match(stored[key][0].message,/\[id\]/);
+ const id=stored[key][0].id;
+ serverAvailable=true;
+ assert.equal(await setup.flushPendingErrorReports(),true);
+ assert.equal(stored[key].length,0);
+ assert.equal(deliveries.at(-1).options.suggestionId,id);
+ assert.equal(deliveries.at(-1).options.sourceContext,'automatic_error');
 });
