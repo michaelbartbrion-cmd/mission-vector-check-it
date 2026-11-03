@@ -74,3 +74,16 @@ test('hood still blocks on wrong serial, wrong gear label, wrong route or ambigu
  assert.equal(create({serial:'3290326',title:'Hood: BALDREE-3290326-BU',correctRoute:false})(hood),'');
  assert.equal(create({serial:'3290326',headings:['Hood: BALDREE-3290326-BU','Hood: BALDREE-3290326-BU-2']})(hood),'');
 });
+
+
+test('Baldree Structural Boot name clipping recovers exact singular heading',()=>{
+ const boot={assetId:'BALDREE-5633595-BB...',pool:'299881',itemId:'4598714',type:'Structural Boot'};
+ assert.equal(create({serial:'5633595',title:'Structural Boot: BALDREE-5633595-BB'})(boot),'BALDREE-5633595-BB');
+ assert.equal(create({serial:'5633595',title:'Structural Boots: BALDREE-5633595-BB'})(boot),'BALDREE-5633595-BB');
+ assert.equal(create({serial:'1234567',title:'Structural Boot: BALDREE-5633595-BB'})(boot),'');
+ assert.equal(create({correctRoute:false,serial:'5633595',title:'Structural Boot: BALDREE-5633595-BB'})(boot),'');
+ assert.equal(create({serial:'5633595',title:'Bunker Coat: BALDREE-5633595-BB'})(boot),'');
+});
+test('both exact-name and serial identity validators recognize singular Structural Boot',()=>{
+ assert.equal((src.match(/Structural \(\?:Gloves\|Helmet\|Boots\?\)/g)||[]).length,2);
+});
