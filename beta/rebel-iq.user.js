@@ -296,8 +296,13 @@
     return match ? Number(match[1]) : null;
   };
   const questionName = container => {
-    const text = (container?.innerText || '').split(/\r?\n/).map(clean).filter(Boolean);
-    return clean(text.slice(1, 3).filter(part => part !== '*').join(' '));
+    const lines = String(container?.innerText || container?.textContent || '')
+      .split(/\r?\n/).map(clean).filter(Boolean);
+    const match = lines[0]?.match(/^\d+\s*\.\s*(.*)$/);
+    if (!match) return '';
+    // On the live Operative IQ screen, "1. Fuel *" is all one heading.
+    // Some older versions split the number and question title across lines.
+    return clean((match[1] || lines[1] || '').replace(/\s*\*\s*$/, ''));
   };
   // Operative IQ currently renders plain radio controls rather than
   // Angular Material mat-radio-group inside .form-group. Locate a question
@@ -379,22 +384,12 @@
     if (!formId() || !t504Visible() || !clean(document.body.innerText).includes(task.name)) {
       throw Error('This page is not the T504 ' + task.name + ' questionnaire.');
     }
-    const groups = [...document.querySelectorAll('.form-group')]
-      .filter(group => group.querySelector('mat-radio-group'));
-    if (groups.length !== task.count) throw Error('Unexpected questionnaire layout: found ' +
-      groups.length + ' choices, expected ' + task.count + '. Nothing was saved.');
-    const radioMap = new Map();
-    for (const group of groups) {
-      const number = questionNumber(group);
-      const choices = [...group.querySelectorAll('mat-radio-group input[type="radio"]')];
-      if (!number || !choices.length || radioMap.has(number)) throw Error('Duplicate or missing radio question.');
-      radioMap.set(number, { group, choices });
-    }
-    const textMap = new Map();
-    for (const textarea of document.querySelectorAll('.form-group textarea.text-qs-input')) {
-      const group = textarea.closest('.form-group'), number = questionNumber(group);
-      if (!number || textMap.has(number)) throw Error('Invalid numeric field mapping.');
-      textMap.set(number, { group, textarea });
+    const { radioMap, textMap, radioCount, textareaCount } = readIqForm();
+    if (radioMap.size !== task.count) {
+      throw Error('Unexpected questionnaire layout: found ' +
+        radioMap.size + ' choices, expected ' + task.count +
+        '. DOM: ' + radioCount + ' radio controls, ' + textareaCount +
+        ' text fields. Nothing was saved.');
     }
     if (kind === 'daily') {
       // Live T504 Tour form contains 41 required radio choices PLUS a
