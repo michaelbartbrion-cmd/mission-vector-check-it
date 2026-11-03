@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.49
+// @version      3.2.50
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.49',
+        version: '3.2.50',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.49';
+    const VERSION = '3.2.50';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -8112,6 +8112,35 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // Search the specified PPE asset prefix via Vector's own search field and
     // verify every returned row against Responsible Party. Never infer owner
     // from Location, an asset ID, or a PERSON-* master-roster key.
+    // React-select is a multiselect. Merely finding Baldree among its chips
+    // must NEVER be accepted if Brandon Barth or anyone else is also selected.
+    // Read chip labels without inferring identity from the typed search text.
+    function responsiblePartySelectionLabels(input) {
+        const box = input?.parentElement?.parentElement;
+        if (!box) return [];
+        return [...box.querySelectorAll(
+            '[class*="multiValue"],[class*="singleValue"],[class*="MultiValue"]'
+        )].filter(visible).map(el =>
+            masterNameKey(clean(el.innerText || el.textContent || '')
+                .replace(/[×✕]/g, ''))
+        ).filter(Boolean);
+    }
+
+    function exactlyOneResponsiblePartySelected(input, expectedNameKey) {
+        const box = input?.parentElement?.parentElement;
+        if (!box || !expectedNameKey) return false;
+        const labels = responsiblePartySelectionLabels(input);
+        if (labels.length) {
+            // Any additional chip is unsafe, even if the expected owner is
+            // also present. Never Apply Filters in this state.
+            return labels.length === 1 && labels[0] === expectedNameKey;
+        }
+        // Legacy Vector variant with no recognizable CSS chip class.
+        // This fallback must match the ENTIRE rendered value, not a substring.
+        const rendered = clean(box.textContent || '').replace(/[×✕]/g, '');
+        return masterNameKey(rendered) === expectedNameKey;
+    }
+
     // Direct Vector PPE filter by Responsible Party, verified live on 2026-10-22.
     // This can return serial-number SCBA masks as well as surname-marked bunker
     // PPE without guessing gear ID prefixes, and without a department-wide crawl.
@@ -8170,27 +8199,23 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         // string. Searching a name fragment produces options; the resulting
         // choice MUST match the complete requested person name exactly.
         const tokens = name.split(/[\s-]+/).filter(t => t.length >= 2);
-        const shortSurname = tokens.at(-1)?.slice(0, 2);
-        const probes = [...new Set([shortSurname, tokens.at(-1), tokens[0], name]
+        // "Ba" is shared by Baldree and Barth. Do not lead with two-letter
+        // probes or allow a stale chip for another firefighter to survive.
+        // Search the full unique name first, then surname or given name.
+        const probes = [...new Set([name, tokens.at(-1), tokens[0]]
             .filter(Boolean))];
         // React-select's multiselect value must actually contain a selected
         // chip. Finding an option is NOT proof it was selected (v3.2.29 live
         // video showed Apply Filters running with an empty Responsible Party).
-        const partyIsSelected = () => {
-            const valueContainer = input.parentElement?.parentElement;
-            if (!valueContainer) return false;
-            const labels = [...valueContainer.querySelectorAll(
-                '[class*="multiValue"],[class*="singleValue"],[class*="MultiValue"]'
-            )].filter(el => visible(el));
-            if (labels.some(el =>
-                masterNameKey(el.innerText || el.textContent || '') === ownerKey)) return true;
-            // Some Vector builds give the selected chip a generated CSS class.
-            // Input.value is NOT DOM textContent, so this checks rendered labels,
-            // not an uncommitted search phrase typed into the combobox.
-            const rendered = clean(valueContainer.textContent || '')
-                .replace(/[×✕]/g, '').trim();
-            return masterNameKey(rendered) === ownerKey;
-        };
+        const partyIsSelected = () => exactlyOneResponsiblePartySelected(input, ownerKey);
+        // Clear Filters may race the React-select chip state. Never select
+        // a second person on top of a retained/foreign Responsible Party.
+        const clearedAt = Date.now();
+        while (Date.now() - clearedAt < 1600 &&
+            responsiblePartySelectionLabels(input).length) await sleep(120);
+        if (responsiblePartySelectionLabels(input).length) {
+            throw new Error('Responsible Party filter still contains a selected person after Clear Filters. Stopped before inspection.');
+        }
         let chosen = false;
         for (const term of probes) {
             input.focus();
@@ -8217,14 +8242,26 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     await sleep(200);
                 }
                 chosen = partyIsSelected();
+                if (!chosen && responsiblePartySelectionLabels(input).length) {
+                    // A wrong or additional person was selected by the UI.
+                    // Clear immediately, do not Apply or silently try again.
+                    clear.click();
+                    throw new Error('Vector selected an unexpected or additional Responsible Party while searching for "' +
+                        name + '". Cleared filter. No inspection started.');
+                }
                 if (chosen) break;
             }
             if (chosen) break;
         }
-        if (!chosen) throw new Error('Responsible Party "' + name +
-            '" was not confirmed selected in the Vector filter. No check was started.');
+        if (!chosen || !partyIsSelected()) throw new Error('Responsible Party "' + name +
+            '" was not confirmed as the ONE selected owner. No check was started.');
         const apply = findButton('Apply Filters');
         if (!apply) throw new Error('Vector did not show Apply Filters.');
+        // One final check immediately before the consequential filter action.
+        // A separate owner must never be included with the selected inspector.
+        if (!exactlyOneResponsiblePartySelected(input, ownerKey)) {
+            throw new Error('Responsible Party selection changed. Refusing to filter multiple people.');
+        }
         apply.click();
 
         const started = Date.now();
