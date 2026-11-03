@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.50
+// @version      3.2.51
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.50',
+        version: '3.2.51',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.50';
+    const VERSION = '3.2.51';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -4203,7 +4203,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const fullNames = new Set();
         for (const title of headings) {
             const match = title.match(
-                /^(Bunker (?:Coat|Pant)|Structural (?:Gloves|Helmet|Boots)|SCBA (?:Face )?Mask|PPE (?:Coat|Pant|Hood)|Hood|Helmet|Boots)\s*:\s*([A-Z0-9_. -]+)$/i
+                /^(Bunker (?:Coat|Pant)|Structural (?:Gloves|Helmet|Boots?)|SCBA (?:Face )?Mask|PPE (?:Coat|Pant|Hood)|Hood|Helmet|Boots)\s*:\s*([A-Z0-9_. -]+)$/i
             );
             if (!match) continue;
             const expectedType = normalizedPpeTypeText(item.type);
@@ -4238,7 +4238,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             .filter(visible)
             .map(node=>uiText(node.textContent||''));
         for(const title of titles){
-            const match=title.match(/^(?:Bunker (?:Coat|Pant)|Structural (?:Gloves|Helmet|Boots)|SCBA (?:Face )?Mask|PPE (?:Coat|Pant|Hood)|Hood|Helmet|Boots)\s*:\s*([A-Z0-9_.-]+)/i);
+            const match=title.match(/^(?:Bunker (?:Coat|Pant)|Structural (?:Gloves|Helmet|Boots?)|SCBA (?:Face )?Mask|PPE (?:Coat|Pant|Hood)|Hood|Helmet|Boots)\s*:\s*([A-Z0-9_.-]+)/i);
             if(match && match[1].toUpperCase()!==expected) return null;
         }
         const proof=document.querySelector('main') || document.querySelector('h1') || document.body;
