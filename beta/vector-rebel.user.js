@@ -1438,6 +1438,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         };
     }
 
+    // Local administrator edits must remain visible before they are published.
+    function getLocallyMaintainedMasterRosterState(){
+        const local=loadJSON(MASTER_ROSTER_OVERRIDE_KEY,null);
+        const normalized=normalizeMasterRoster(local?.people||[]);
+        if(normalized.people.length)return {
+            source:'local-admin',version:clean(local.version)||'local',
+            updatedAt:clean(local.updatedAt),people:normalized.people
+        };
+        return getMasterRosterState();
+    }
+
     // Retain legitimate PERSON identities while allowing a legacy master list
     // to be selected WITHOUT treating its former gear prefix as ownership.
     // Migration is a display/identity projection only; stored configuration and
@@ -1559,6 +1570,37 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 active: person.active !== false
             }))
         };
+    }
+
+    // Only the owner's existing admin-paired Vector Rebel installation can
+    // publish. Firefighters receive the approved names read-only.
+    async function publishLocalMasterRoster(){
+        const local=loadJSON(MASTER_ROSTER_OVERRIDE_KEY,null);
+        if(!Array.isArray(local?.people)||!local.people.length)
+            throw Error('Save your local Master Roster before sharing it.');
+        const normalized=normalizeMasterRoster(local.people);
+        if(!normalized.people.length||normalized.rejected.length||normalized.merged.length||
+           normalized.people.length!==local.people.length)
+            throw Error('Review the master list: invalid or duplicate people cannot be shared.');
+        if(!rebelCommandPaired()||rebelCommandPairing()?.autoEnrolled)
+            throw Error('Only the administrator-paired installation can share the master list.');
+        const pair=rebelCommandPairing();
+        const response=await new Promise(resolve=>GM_xmlhttpRequest({
+            method:'POST',url:REBEL_COMMAND_ENDPOINT+'?action=vr-publish-roster',
+            headers:{Authorization:'Bearer '+pair.token,
+                'X-Rebel-Device-ID':pair.deviceId,'Content-Type':'application/json'},
+            data:JSON.stringify({people:masterRosterExportPayload(normalized.people).people}),
+            timeout:15000,
+            onload:r=>resolve({status:r.status,text:r.responseText||''}),
+            onerror:()=>resolve({status:0,text:''}),
+            ontimeout:()=>resolve({status:0,text:''})
+        }));
+        let receipt;
+        try{receipt=JSON.parse(response.text||'{}');}catch{receipt={};}
+        if(response.status!==200||receipt.ok!==true||!receipt.version||
+           receipt.count!==normalized.people.length)
+            throw Error(clean(receipt.error||'Could not confirm that the roster was published.'));
+        return receipt;
     }
 
     function prefixesOverlap(aRaw, bRaw) {
@@ -9827,6 +9869,28 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             backup.append(backupInfo, exportBackup, importBackup, importBackupFile);
             content.appendChild(backup);
 
+            const sharedRoster=card('Shared Master List',
+                'Get the latest firefighter names approved by the maintainer. PPE ownership is still checked directly in Vector.');
+            const sharedStatus=document.createElement('div');
+            sharedStatus.style.cssText='font-size:12px;color:#546f80;margin:8px 0';
+            const published=sharedRosterFromCache();
+            sharedStatus.textContent=published?
+                published.people.length+' approved names · '+published.version:
+                'No shared roster received on this installation yet.';
+            const getLatest=makeButton('Get Latest Master List',{background:'#176b8e',color:'#fff'});
+            getLatest.onclick=async()=>{
+                getLatest.disabled=true;
+                sharedStatus.textContent='Downloading the latest approved names...';
+                const ok=await refreshSharedRebelRoster(true);
+                getLatest.disabled=false;
+                sharedStatus.textContent=ok?
+                    'Latest names received. Crew selection will use this list.':
+                    'Could not update: '+(sharedRosterSyncState().error||'Connection unavailable');
+                if(ok)setTimeout(renderContent,850);
+            };
+            sharedRoster.append(sharedStatus,getLatest);
+            content.appendChild(sharedRoster);
+
             const feedback = card('Feedback', 'Send a comment or problem report to the Vector Rebel maintainer.');
             const feedbackBox = document.createElement('textarea');
             feedbackBox.placeholder = 'Type feedback here...';
@@ -9898,7 +9962,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             rosterCard.appendChild(rosterStatus);
             const centralNote=document.createElement('p');
             centralNote.style.cssText='padding:9px;border-radius:6px;background:#eaf4f7;color:#285872;font:12px/1.5 Arial;';
-            centralNote.textContent='The shared firefighter roster is managed in Rebel Command → Roster. Local roster edits here are only a backup; they do not publish changes to other installations.';
+            centralNote.textContent='Maintain your master list here, save it locally, then click Share My Master List. Other installations can download it without changing PPE records.';
             rosterCard.appendChild(centralNote);
 
             const rosterProgress = document.createElement('div');
@@ -9982,7 +10046,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             };
 
             const refreshRosterStatus = () => {
-                const state = getMasterRosterState();
+                const state = getLocallyMaintainedMasterRosterState();
                 rosterStatus.innerHTML =
                     `<b>Current master:</b> ${escapeHtml(state.version)}<br>` +
                     `<b>People:</b> ${state.people.length}<br>` +
@@ -10001,7 +10065,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         rosterProgress.textContent = message;
                     });
 
-                    const prior = getMasterRosterState().people;
+                    const prior = getLocallyMaintainedMasterRosterState().people;
                     const priorByName = new Map(prior.map(p => [masterNameKey(p.name), p]));
                     const nextByName = new Map(result.people.map(p => [masterNameKey(p.name), p]));
 
@@ -10069,7 +10133,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
             const editRoster = makeButton('Edit Master Roster');
             editRoster.onclick = () => {
-                const current = getMasterRosterState();
+                const current = getLocallyMaintainedMasterRosterState();
                 const { overlay: editOverlay, box: editBox } = makeOverlayBox('900px');
 
                 const title = document.createElement('div');
@@ -10080,8 +10144,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const note = document.createElement('div');
                 note.style.cssText = 'font-size:11px;color:#607483;line-height:1.45;margin-bottom:10px;';
                 note.textContent =
-                    'Changes here stay local until they are incorporated into a Vector Rebel program update. ' +
-                    'Normal users do not see this admin screen.';
+                    'Save changes locally, then click Share My Master List to update everyone. ' +
+                    'Only an administrator-paired installation can publish.';
                 editBox.appendChild(note);
 
                 let working = current.people.map(p => ({ ...p }));
@@ -10169,14 +10233,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
             const copyRoster = makeButton('Copy Master Roster JSON');
             copyRoster.onclick = async () => {
-                const payload = JSON.stringify(masterRosterExportPayload(), null, 2);
+                const payload = JSON.stringify(masterRosterExportPayload(getLocallyMaintainedMasterRosterState().people), null, 2);
                 const ok = await copyText(payload);
                 setStatus(ok ? 'Master roster JSON copied.' : 'Could not copy master roster JSON.', ok);
             };
 
             const downloadRoster = makeButton('Download Master Roster JSON');
             downloadRoster.onclick = () => {
-                const payload = JSON.stringify(masterRosterExportPayload(), null, 2);
+                const payload = JSON.stringify(masterRosterExportPayload(getLocallyMaintainedMasterRosterState().people), null, 2);
                 downloadTextFile(
                     `vector-rebel-master-roster-${new Date().toISOString().slice(0, 10)}.json`,
                     payload
@@ -10191,7 +10255,37 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 refreshRosterStatus();
             };
 
-            rosterCard.append(refreshFromPpe, editRoster, copyRoster, downloadRoster, useEmbedded);
+            const shareRoster=makeButton('Share My Master List',{background:'#176b8e',color:'#fff'});
+            shareRoster.onclick=async()=>{
+                const local=loadJSON(MASTER_ROSTER_OVERRIDE_KEY,null);
+                if(!Array.isArray(local?.people)||!local.people.length){
+                    rosterProgress.textContent='Use Edit Master Roster and Save Local Master first.';
+                    return;
+                }
+                const normalized=normalizeMasterRoster(local.people);
+                if(!normalized.people.length||normalized.rejected.length||normalized.merged.length||
+                   normalized.people.length!==local.people.length){
+                    rosterProgress.textContent='The local roster has invalid or duplicate names. Fix those before sharing.';
+                    return;
+                }
+                const count=normalized.people.length,active=normalized.people.filter(p=>p.active!==false).length;
+                if(!confirm('Share '+count+' approved names ('+active+' active) with everyone using Vector Rebel?\n\nOnly personnel identities are shared. PPE and inspection records are never changed.'))return;
+                shareRoster.disabled=true;
+                rosterProgress.textContent='Sharing the approved master list...';
+                try{
+                    const receipt=await publishLocalMasterRoster();
+                    const downloaded=await refreshSharedRebelRoster(true);
+                    rosterProgress.textContent='Shared '+receipt.count+' names. '+
+                        (downloaded?'Your list is current.':'Your own download will retry.')+
+                        ' Others can click Get Latest Master List or will update automatically while Vector Rebel is open.';
+                    refreshRosterStatus();
+                }catch(error){
+                    rosterProgress.textContent='Could not share roster: '+(error?.message||String(error));
+                }finally{shareRoster.disabled=false;}
+            };
+            rosterCard.append(refreshFromPpe, editRoster);
+            if(!rebelCommandPairing()?.autoEnrolled)rosterCard.append(shareRoster);
+            rosterCard.append(copyRoster, downloadRoster, useEmbedded);
             refreshRosterStatus();
             content.appendChild(rosterCard);
 
