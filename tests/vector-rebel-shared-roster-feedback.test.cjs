@@ -78,11 +78,12 @@ test('No roster editing is performed by the shared download',()=>{
 test('Failures report through both automatic event and optional incident feedback',()=>{
  assert.match(src,/function reportRebelErrorToCommand\(reason,workflow='',stage=''\)/);
  assert.match(src,/submitRebelCommandFeedback\(item\.message,/);
- assert.match(src,/sourceContext:'automatic_error'/);
+ assert.match(src,/sourceContext:item\.context\|\|'automatic_error'/);
  assert.match(src,/const fillLastError=makeButton\('Use Last Error'\)/);
- assert.match(src,/mainAction\('Report Problem'/);
+ assert.match(src,/mainAction\('Report Problem', showProblemReport, false\)/);
  assert.match(src,/Number\(receipt\.acceptedSuggestions\)>0/);
  assert.match(src,/telemetrySafeErrorMessage\(reason/);
+ assert.match(src,/detailedProblemReport\(reason,workflow,stage\)/);
 });
 
 test('Master List buttons expose local publish and recipient download without PPE writes',()=>{
@@ -134,11 +135,12 @@ test('automatic error reports remain queued until Rebel Command confirms receipt
  const deliveries=[];
  let serverAvailable=false;
  const setup=new Function('loadJSON','saveJSON','clean','telemetrySafeErrorMessage',
-   'submitRebelCommandFeedback','VERSION',
+   'submitRebelCommandFeedback','VERSION','detailedProblemReport',
    pure("const ERROR_FEEDBACK_THROTTLE_KEY=",'function looksLikeVectorRebelRuntime(')+
    ';return {reportRebelErrorToCommand,flushPendingErrorReports};')(
     loadJSON,saveJSON,env.clean,v=>String(v||'').replace(/\b\d{5,}\b/g,'[id]'),
-    async (message,options)=>{deliveries.push({message,options});return serverAvailable},'3.2.45'
+    async (message,options)=>{deliveries.push({message,options});return serverAvailable},'3.2.46',
+    ()=>'{"report":"mock diagnostic"}'
    );
  assert.equal(await setup.reportRebelErrorToCommand('Expected asset 123456','captainDaily','start'),false);
  assert.equal(stored[key].length,1);
@@ -149,4 +151,75 @@ test('automatic error reports remain queued until Rebel Command confirms receipt
  assert.equal(stored[key].length,0);
  assert.equal(deliveries.at(-1).options.suggestionId,id);
  assert.equal(deliveries.at(-1).options.sourceContext,'automatic_error');
+});
+
+
+test('Detailed error snapshot captures expected and observed PPE identities without submission data',()=>{
+ const sampleRun={modeKey:'tour',phase:'stopped',stoppedFromPhase:'asset',index:0,items:[{
+    assetId:'BALDREE-SAMPLE-COAT',pool:'33',itemId:'44',serial:'SER123',type:'Bunker Coat'
+ }]};
+ const nodes=[{textContent:'Bunker Coat: DIFFERENT-123',closest:()=>false},
+  {textContent:'Serial Number',closest:()=>false}];
+ const environment={
+  loadJSON:(key)=>key==='lastDiagnostic'?{at:'2026-11-03T20:02:14Z',message:'identity failed',
+     url:'https://checkitapp.targetsolutions.com/PPE/pool/33/44/item?token=SECRET',
+     pageSignals:{expectedAssetIdVisible:false,isExpectedAssetPage:true}}:sampleRun,
+  STOPPED_RUN_KEY:'stopRun',LAST_DIAGNOSTIC_KEY:'lastDiagnostic',
+  getRun:()=>sampleRun,
+  document:{querySelectorAll:()=>nodes},
+  PANEL_ID:'panel',OVERLAY_ID:'overlay',
+  visible:()=>true,clean:value=>String(value??'').trim(),
+  isAssetPageFor:()=>true,
+  repairReadDetailDocument:()=>({serial:'OBSERVED456'}),
+  findAssetIdentityElement:()=>null,
+  telemetrySafeErrorMessage:value=>String(value||'').slice(0,300),
+  VERSION:'3.2.46',
+  location:{pathname:'/PPE/pool/33/44/item'}
+ };
+ const fn=new Function(...Object.keys(environment),
+  pure('function detailedProblemReport(','const ERROR_FEEDBACK_THROTTLE_KEY=')+
+  ';return detailedProblemReport;')(...Object.values(environment));
+ const result=fn('Expected name or serial did not match','tour','asset');
+ assert.match(result,/BALDREE-SAMPLE-COAT/);
+ assert.match(result,/OBSERVED456/);
+ assert.match(result,/DIFFERENT-123/);
+ assert.match(result,/expectedPoolItemPath/);
+ assert.doesNotMatch(result,/SECRET/);
+ assert.doesNotMatch(result,/signature|password|accessToken/i);
+});
+test('Report Problem starts direct delivery and retains a failed report for retry',async()=>{
+ assert.doesNotMatch(src,/mainAction\('Report Problem',\s*\(\)\s*=>\s*showSettings/);
+ const box={nodes:[],append(...nodes){this.nodes.push(...nodes)}};
+ const store={};
+ const requests=[];
+ const environment={
+  loadJSON:key=>key==='last'?{message:'asset stopped'}:null,
+  STOPPED_RUN_KEY:'stop',LAST_DIAGNOSTIC_KEY:'last',
+  getRun:()=>null,
+  detailedProblemReport:()=>'{\"version\":\"3.2.46\",\"expected\":\"BALDREE\"}',
+  makeOverlayBox:()=>({overlay:{remove(){}},box}),
+  document:{createElement:()=>({
+    style:{},setAttribute(){},readOnly:false,textContent:'',value:'',onclick:null
+  })},
+  makeButton:text=>({textContent:text,disabled:false,onclick:null}),
+  copyText:async()=>true,
+  submitRebelCommandFeedback:async (details,options)=>{
+    requests.push({details,options});return false;
+  },
+  pendingErrorReports:()=>store.pending||[],
+  saveJSON:(key,value)=>{store.pending=value},
+  PENDING_ERROR_REPORTS_KEY:'pending',
+  setStatus:()=>{}
+ };
+ const fn=new Function(...Object.keys(environment),
+    pure('function showProblemReport()','function showDiagnostics() {')+
+    ';return showProblemReport;')(...Object.values(environment));
+ fn();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(requests.length,1);
+ assert.equal(requests[0].options.sourceContext,'manual_problem_report');
+ assert.equal(requests[0].options.priority,'high');
+ assert.equal(store.pending.length,1);
+ assert.equal(store.pending[0].context,'manual_problem_report');
+ assert.match(box.nodes.map(x=>x.textContent||'').join(' '),/Delivery NOT confirmed/);
 });
