@@ -94,12 +94,12 @@ test('Wrong Responsible Party result is never accepted',async()=>{
 });
 test('No exact selectable Responsible Party option means no filter is applied',async()=>{
  const h=harness({rows:[item('BRION-1')],selectable:false});
- await assert.rejects(h.run('Michael Brion'),/not confirmed selected/);
+ await assert.rejects(h.run('Michael Brion'),/not confirmed.*selected owner/);
  assert.equal(h.record().applyCount,0);
 });
 test('Unselected React-select option is rejected before applying an unfiltered scan',async()=>{
  const h=harness({rows:[item('BRION-1')],selectOn:'none'});
- await assert.rejects(h.run('Michael Brion'),/not confirmed selected/);
+ await assert.rejects(h.run('Michael Brion'),/not confirmed.*selected owner/);
  assert.equal(h.record().applyCount,0);
 });
 test('React-select mousedown choice must not be undone by an extra click',async()=>{
