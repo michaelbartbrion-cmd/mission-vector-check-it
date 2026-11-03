@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "project": "Mission Vector Check It",
   "channel": "beta",
-  "latestVersion": "3.2.7",
+  "latestVersion": "3.2.45",
   "minimumSupportedVersion": "2.3.1",
-  "status": "testing",
-  "message": "Vector Rebel v3.2.7 is the current managed release.",
-  "releaseNotes": "Adds improved automatic diagnostics, user feedback, and distribution reliability refinements.",
+  "status": "current",
+  "message": "Vector Rebel v3.2.45 is the current managed beta release.",
+  "releaseNotes": "Administrator Share My Master List button, Get Latest Master List for recipients, and automatically retried error reports to Rebel Command.",
   "installUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js",
   "legacyUpdateUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
   "repoUrl": "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
-  "publishedAt": "2026-10-06"
+  "publishedAt": "2026-11-03"
 }
