@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.1
+// @version      0.1.2
 // @description  Prepare T504 daily and weekly Operative IQ inspection drafts, save in process, never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -13,7 +13,7 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.1' };
+  window.__rebelIqT504 = { version: '0.1.2' };
   const KEY = 'rebelIqT504PendingV1';
   const RESULT = 'rebelIqT504ResultV1';
   const PANEL = 'rebel-iq-t504-panel';
@@ -172,9 +172,14 @@
       textMap.set(number, { group, textarea });
     }
     if (kind === 'daily') {
-      if (textMap.size !== 0 || radioMap.size !== 41 ||
+      // Live T504 Tour form contains 41 required radio choices PLUS a
+      // separate optional Question 42: General Comments textarea.
+      // It is not a change to the form and must be preserved untouched.
+      if (textMap.size !== 1 || radioMap.size !== 41 ||
         !/Fuel/i.test(questionName(radioMap.get(1)?.group)) ||
-        !/Hand Tools/i.test(questionName(radioMap.get(41)?.group))) {
+        !/Hand Tools/i.test(questionName(radioMap.get(41)?.group)) ||
+        !textMap.has(42) ||
+        !/General Comments/i.test(questionName(textMap.get(42).group))) {
         throw Error('Daily questionnaire changed. No answers were modified.');
       }
       for (let i = 1; i <= 41; i++) {
