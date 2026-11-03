@@ -57,3 +57,20 @@ test('inspection flow checks restored full name before persisting, never bypasse
  assert.match(block,/item\.assetId = restoredName;\s*saveRun\(run\)/);
  assert.match(block,/stopRun\(/);
 });
+
+test('Baldree hood has a complete PPE Name before display ellipsis; restore exact heading',()=>{
+ const hood={assetId:'BALDREE-3290326-BU...',pool:'299900',itemId:'4599982',
+  ownerName:'Michael Baldree',type:'Hood'};
+ const fn=create({serial:'3290326',title:'Hood: BALDREE-3290326-BU'});
+ assert.equal(fn(hood),'BALDREE-3290326-BU');
+ assert.equal(hood.assetId,'BALDREE-3290326-BU...');
+ assert.equal(fn({...hood,assetId:'BALDREE-3290326-BU\u2026'}),'BALDREE-3290326-BU');
+});
+test('hood still blocks on wrong serial, wrong gear label, wrong route or ambiguous names',()=>{
+ const hood={assetId:'BALDREE-3290326-BU...',pool:'299900',itemId:'4599982',type:'Hood'};
+ assert.equal(create({serial:'9999999',title:'Hood: BALDREE-3290326-BU'})(hood),'');
+ assert.equal(create({serial:'3290326',title:'Hood: OTHER-3290326-BU'})(hood),'');
+ assert.equal(create({serial:'3290326',title:'Bunker Coat: BALDREE-3290326-BU'})(hood),'');
+ assert.equal(create({serial:'3290326',title:'Hood: BALDREE-3290326-BU',correctRoute:false})(hood),'');
+ assert.equal(create({serial:'3290326',headings:['Hood: BALDREE-3290326-BU','Hood: BALDREE-3290326-BU-2']})(hood),'');
+});
