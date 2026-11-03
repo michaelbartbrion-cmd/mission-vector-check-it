@@ -79,7 +79,7 @@ test('SCBA direct inspection starts without a chooser, persisting phase before c
 test('Daily Captain checks SCBA tour history, not a nonexistent Captain monthly mask checklist',()=>{
  const daily=body('async function readCaptainComplianceHistory(item) {',
    'function buildCaptainDailyReport(check) {');
- assert.match(daily,/readModeCompletionHistory\(item, 'scbaTour'\)/);
+ assert.match(daily,/readModeCompletionHistory\(verifiedItem, 'scbaTour'\)/);
  assert.match(daily,/notApplicable: true/);
  const start=body('async function startCaptainDailyCheck(set, auditAsOfDate) {',
    'async function resumeCaptainDailyCheck() {');
