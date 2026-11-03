@@ -4,14 +4,14 @@ const script=fs.readFileSync(path.join(__dirname,'../beta/vector-rebel.user.js')
 function extract(a,b){const i=script.indexOf('    '+a),j=script.indexOf('    '+b,i+1);assert.ok(i>=0&&j>i);return script.slice(i,j);}
 const clean=s=>String(s??'').trim();
 const key=s=>clean(s).toLowerCase().replace(/\s+/g,' ');
-const finderCode=extract('async function scanPpeByResponsibleParty(personName, progress = null) {',
+const finderCode=extract('function responsiblePartySelectionLabels(input) {',
   'async function scanPpeOwnerSearch(owner, progress = null) {')+
   '\nreturn scanPpeByResponsibleParty;';
 function harness({owner='Michael Brion',rows=[],showFilter=true,selectable=true,selectOn='mousedown'}={}){
  let now=100,open=false,selected='',applied=false,currentPage=0,clearCount=0,applyCount=0,updates=[],search={value:'BRION',isConnected:true};
  class FakeDate extends Date{static now(){return now;}}
  const chipContainer={
-   querySelectorAll(){return selected?[{innerText:selected,textContent:selected}]:[];}
+   querySelectorAll(){return selected?[{innerText:selected,textContent:selected,parentElement:{closest:()=>null}}]:[];}
  };
  const input={id:'filter-equip-std-responsibleParty',value:'',
     parentElement:{parentElement:chipContainer},
@@ -85,7 +85,7 @@ test('Native Responsible Party filter returns both surname PPE and serial-number
  assert.equal(h.record().clearCount,1);
  assert.equal(h.record().applyCount,1);
  assert.equal(h.record().search,'');
- assert.ok(h.record().updates.includes('Br'));
+ assert.ok(h.record().updates.includes('Brion'));
 });
 test('Wrong Responsible Party result is never accepted',async()=>{
  const h=harness({rows:[item('E004015306F2D8FE','Jarred Weston','556677')]});
