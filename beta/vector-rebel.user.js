@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.45
+// @version      3.2.46
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.45',
+        version: '3.2.46',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.45';
+    const VERSION = '3.2.46';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -262,7 +262,7 @@
     }
 
     async function submitRebelCommandFeedback(details, options={}) {
-        const message = String(details == null ? '' : details).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 2000);
+        const message = String(details == null ? '' : details).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 3900);
         if (!message) return false;
         if (!rebelCommandPaired()) {
             const enrolled = await ensureRebelCommandEnrollment(false);
@@ -317,6 +317,65 @@
             .slice(0, 300);
     }
 
+
+    // Read-only troubleshooting snapshot. Sends only the selected PPE identity
+    // and a few page-structure clues; no signatures, notes, full DOM or credentials.
+    function detailedProblemReport(reason = '', workflow = '', stage = '') {
+        const stopped = loadJSON(STOPPED_RUN_KEY, null);
+        const run = getRun() || stopped;
+        const item = run?.items?.[run?.index] || null;
+        const last = loadJSON(LAST_DIAGNOSTIC_KEY, null);
+        const inExpectedPage = !!(item && isAssetPageFor(item));
+        const sampledHeadings = [...document.querySelectorAll('h1,h2,h3,h4,[data-testid*="title"]')]
+            .filter(visible)
+            .filter(el => !el.closest('#' + PANEL_ID + ', #' + OVERLAY_ID))
+            .map(el => clean(el.textContent || '').slice(0, 120))
+            .filter(Boolean).slice(0, 12);
+        const identityLabels = [...document.querySelectorAll('label,dt,th,strong,b')]
+            .filter(visible)
+            .filter(el => !el.closest('#' + PANEL_ID + ', #' + OVERLAY_ID))
+            .map(el => clean(el.textContent || '').slice(0, 120))
+            .filter(value => /serial|PPE name|asset|responsible party|equipment/i.test(value))
+            .slice(0, 12);
+        let serialInDetail = '';
+        if (inExpectedPage) {
+            try { serialInDetail = clean(repairReadDetailDocument(document).serial).slice(0, 100); }
+            catch { serialInDetail = '[serial parser error]'; }
+        }
+        const lastItem = last?.run?.currentItem || null;
+        const info = {
+            report: 'Vector Rebel PPE incident',
+            at: new Date().toISOString(),
+            version: VERSION,
+            issue: telemetrySafeErrorMessage(reason || stopped?.stopReason || last?.message || 'Manual report'),
+            workflow: clean(workflow || run?.modeKey || last?.run?.modeKey || 'unknown'),
+            stage: clean(stage || run?.stoppedFromPhase || run?.phase || last?.run?.phase || 'unknown'),
+            run: run ? { phase: run.phase || '', index: run.index, total: run.items?.length || 0 } : null,
+            target: item ? {
+                assetId: clean(item.assetId).slice(0, 100), pool: clean(item.pool),
+                itemId: clean(item.itemId), serial: clean(item.serial).slice(0, 100),
+                type: clean(item.type).slice(0, 80)
+            } : lastItem ? {
+                assetId: clean(lastItem.assetId).slice(0, 100), pool: clean(lastItem.pool),
+                itemId: clean(lastItem.itemId), type: clean(lastItem.type).slice(0, 80)
+            } : null,
+            observed: {
+                path: location.pathname.slice(0, 200),
+                expectedPoolItemPath: inExpectedPage,
+                exactPpeNameOrSerialMatch: inExpectedPage ? !!findAssetIdentityElement(item) : false,
+                serialInDetail, headings: sampledHeadings, identityLabels
+            },
+            lastStop: last ? {
+                time: last.at || '',
+                path: (() => { try { return new URL(last.url).pathname; } catch { return ''; } })(),
+                expectedAssetIdVisible: last.pageSignals?.expectedAssetIdVisible ?? null,
+                isExpectedAssetPage: last.pageSignals?.isExpectedAssetPage ?? null,
+                failure: telemetrySafeErrorMessage(last.message || '')
+            } : null
+        };
+        return 'VECTOR REBEL DETAILED PROBLEM REPORT\n' + JSON.stringify(info).slice(0, 3800);
+    }
+
     const ERROR_FEEDBACK_THROTTLE_KEY='vectorRebelErrorFeedbackThrottleV1';
     const PENDING_ERROR_REPORTS_KEY='vectorRebelPendingErrorReportsV1';
     let errorReportSending=false;
@@ -340,8 +399,8 @@
         try{
             for(const item of pendingErrorReports()){
                 const received=await submitRebelCommandFeedback(item.message,{
-                    title:'Vector Rebel error report',priority:'high',
-                    sourceContext:'automatic_error',suggestionId:item.id
+                    title:item.title||'Vector Rebel error report',priority:'high',
+                    sourceContext:item.context||'automatic_error',suggestionId:item.id
                 });
                 if(!received)return false;
                 saveJSON(PENDING_ERROR_REPORTS_KEY,
@@ -352,7 +411,8 @@
         }finally{errorReportSending=false;}
     }
     async function reportRebelErrorToCommand(reason,workflow='',stage=''){
-        const message=errorFeedbackText(reason,workflow,stage),now=Date.now();
+        const message=(errorFeedbackText(reason,workflow,stage)+' | '+
+            detailedProblemReport(reason,workflow,stage)).slice(0,3900),now=Date.now();
         const last=loadJSON(ERROR_FEEDBACK_THROTTLE_KEY,{})||{};
         if(last.key===message&&now-Number(last.at||0)<10*60*1000)return false;
         const pending=pendingErrorReports();
@@ -3239,6 +3299,80 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const close = makeButton('Close');
         close.onclick = () => overlay.remove();
         box.append(copy, download, close);
+    }
+
+
+    // "Report Problem" is an immediate, authenticated incident submission, not
+    // a shortcut to Settings. The receipt is required before claiming delivery.
+    function showProblemReport() {
+        const stopped = loadJSON(STOPPED_RUN_KEY, null);
+        const last = loadJSON(LAST_DIAGNOSTIC_KEY, null);
+        const run = getRun() || stopped;
+        const message = stopped?.stopReason || last?.message || 'Manual problem report';
+        const details = detailedProblemReport(message, run?.modeKey || '', run?.stoppedFromPhase || run?.phase || '');
+        const reportId = 'feedback:vr-manual:' + Date.now() + ':' + Math.random().toString(36).slice(2, 10);
+        const { overlay, box } = makeOverlayBox('850px');
+        const title = document.createElement('h2');
+        title.textContent = 'Report Vector Rebel Problem';
+        title.style.cssText = 'font:700 20px Arial;color:#153e5c;margin:0 0 8px;';
+        const explanation = document.createElement('p');
+        explanation.textContent = 'Sending the last failure, software version, inspection stage, expected PPE item, and read-only page identity evidence to Rebel Command. No signatures, inspection answers, or credentials are included.';
+        explanation.style.cssText = 'font:12px/1.45 Arial;color:#425d6f;margin:4px 0 10px;';
+        const status = document.createElement('p');
+        status.setAttribute('role', 'status');
+        status.style.cssText = 'font:700 13px Arial;color:#285872;background:#eef5fb;padding:10px;border-radius:7px;';
+        status.textContent = 'Sending detailed report to Rebel Command...';
+        const preview = document.createElement('textarea');
+        preview.value = details;
+        preview.readOnly = true;
+        preview.style.cssText = 'width:100%;height:200px;box-sizing:border-box;font:11px/1.4 Consolas,monospace;margin:8px 0;';
+        const retry = makeButton('Retry Sending', { background: '#176b8e', color: '#fff' });
+        retry.disabled = true;
+        const copy = makeButton('Copy Report');
+        copy.onclick = async () => {
+            status.textContent = await copyText(details) ?
+                'Diagnostic copied. It can be shared with the maintainer.' :
+                'Could not copy the diagnostic. Select the report text to copy manually.';
+        };
+        const close = makeButton('Close');
+        close.onclick = () => overlay.remove();
+        box.append(title, explanation, status, preview, retry, copy, close);
+        const deliver = async () => {
+            retry.disabled = true;
+            status.textContent = 'Sending detailed report to Rebel Command...';
+            let received = false;
+            try {
+                received = await submitRebelCommandFeedback(details, {
+                    suggestionId: reportId,
+                    title: 'Vector Rebel detailed problem report',
+                    priority: 'high',
+                    sourceContext: 'manual_problem_report'
+                });
+            } catch { received = false; }
+            if (received) {
+                saveJSON(PENDING_ERROR_REPORTS_KEY,
+                    pendingErrorReports().filter(item => item.id !== reportId));
+                status.textContent = 'RECEIVED by Rebel Command. Report ID: ' + reportId;
+                setStatus('Detailed problem report received by Rebel Command.');
+                retry.disabled = true;
+            } else {
+                const pending = pendingErrorReports();
+                if (!pending.some(item => item.id === reportId)) {
+                    pending.push({
+                        id: reportId, message: details, at: Date.now(),
+                        title: 'Vector Rebel detailed problem report',
+                        context: 'manual_problem_report'
+                    });
+                    saveJSON(PENDING_ERROR_REPORTS_KEY, pending.slice(-20));
+                }
+                status.textContent = 'Delivery NOT confirmed. Report saved locally for automatic retry. ' +
+                    'You may copy the report here if needed.';
+                setStatus('Problem report queued; Rebel Command has not confirmed receipt.', false);
+                retry.disabled = false;
+            }
+        };
+        retry.onclick = deliver;
+        void deliver();
     }
 
     function showDiagnostics() {
@@ -11617,7 +11751,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             mainAction("Captain's Monthly", launchCaptainInspectionFromAnywhere),
             mainAction('Daily Captain Check', launchCaptainDailyCheckFromAnywhere, false),
             mainAction('PPE Clean / Repair Form', showPpeCleanRepairForm, false),
-            mainAction('Report Problem', () => showSettings('general'), false),
+            mainAction('Report Problem', showProblemReport, false),
             mainAction('Settings', () => showSettings('profile'), false)
         );
 
