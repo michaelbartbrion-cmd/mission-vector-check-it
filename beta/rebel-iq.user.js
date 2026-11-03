@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.2
+// @version      0.1.3
 // @description  Prepare T504 daily and weekly Operative IQ inspection drafts, save in process, never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -13,7 +13,7 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.2' };
+  window.__rebelIqT504 = { version: '0.1.3' };
   const KEY = 'rebelIqT504PendingV1';
   const RESULT = 'rebelIqT504ResultV1';
   const PANEL = 'rebel-iq-t504-panel';
@@ -95,8 +95,16 @@
       return el;
     };
     header.append(label);
+    const update = document.createElement('a');
+    update.href = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js';
+    update.textContent = 'Check for Update · v0.1.3';
+    update.target = '_blank';
+    update.rel = 'noopener noreferrer';
+    update.style.cssText = 'display:block;text-align:center;padding:9px;margin-top:8px;' +
+      'border:1px solid #9ebdcc;border-radius:7px;background:#edf4f8;color:#163c58;' +
+      'font:bold 12px Arial;text-decoration:none;cursor:pointer;';
     menu.append(header, help, button('Daily Tour: Save In Process', 'daily'),
-      button('Weekly: Save In Process', 'weekly'), detail);
+      button('Weekly: Save In Process', 'weekly'), update, detail);
     const setExpanded = (expanded) => {
       opened = expanded;
       menu.style.display = expanded ? 'block' : 'none';
