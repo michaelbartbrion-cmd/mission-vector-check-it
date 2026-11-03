@@ -8120,7 +8120,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         if (!box) return [];
         return [...box.querySelectorAll(
             '[class*="multiValue"],[class*="singleValue"],[class*="MultiValue"]'
-        )].filter(visible).map(el =>
+        )].filter(el => visible(el) && !el.parentElement?.closest('[class*="multiValue"],[class*="singleValue"],[class*="MultiValue"]')).map(el =>
             masterNameKey(clean(el.innerText || el.textContent || '')
                 .replace(/[×✕]/g, ''))
         ).filter(Boolean);
