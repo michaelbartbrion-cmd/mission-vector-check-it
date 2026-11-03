@@ -75,6 +75,83 @@
     } catch { /* A reporting failure must not touch an inspection. */ }
   }
 
+  function getIqDevice() {
+    let device = GM_getValue(IQ_DEVICE_KEY, null);
+    if (device?.installationId && device?.deviceToken) return device;
+    device = {
+      installationId: 'riq-install-' + randomToken(16),
+      deviceToken: randomToken(32),
+      deviceId: ''
+    };
+    GM_setValue(IQ_DEVICE_KEY, device);
+    return device;
+  }
+  async function enrollIqDevice() {
+    const device = getIqDevice();
+    if (device.deviceId) return device;
+    const response = await fetch(IQ_ENROLL_ENDPOINT, {
+      method: 'POST', credentials: 'omit',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        program: 'Rebel IQ',
+        installationId: device.installationId,
+        deviceToken: device.deviceToken,
+        profileName: 'Truck 504', version: IQ_VERSION
+      })
+    });
+    const json = await response.json().catch(() => null);
+    if (!response.ok || json?.ok !== true || !json.deviceId) {
+      throw Error('RC enrollment was not accepted (HTTP ' + response.status + ')');
+    }
+    const enrolled = { ...device, deviceId: String(json.deviceId) };
+    GM_setValue(IQ_DEVICE_KEY, enrolled);
+    return enrolled;
+  }
+  function submitIqReport(device, report) {
+    return new Promise(resolve => {
+      try {
+        GM_xmlhttpRequest({
+          method: 'POST', url: IQ_REPORT_ENDPOINT, timeout: 12000,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + device.deviceToken,
+            'X-Rebel-Device-ID': device.deviceId
+          },
+          data: JSON.stringify({version: IQ_VERSION, suggestions: [report]}),
+          onload: response => {
+            let receipt = null;
+            try { receipt = JSON.parse(response.responseText || 'null'); } catch {}
+            resolve(response.status >= 200 && response.status < 300 &&
+              receipt?.ok === true &&
+              (Number(receipt.acceptedSuggestions) > 0 ||
+               Number(receipt.duplicateSuggestions) > 0));
+          },
+          onerror: () => resolve(false),
+          ontimeout: () => resolve(false)
+        });
+      } catch { resolve(false); }
+    });
+  }
+  async function flushIqErrors() {
+    if (reporting || !readIqErrors().length) return false;
+    reporting = true;
+    try {
+      const device = await enrollIqDevice();
+      for (const report of readIqErrors()) {
+        if (!await submitIqReport(device, report)) {
+          throw Error('RC did not acknowledge error receipt');
+        }
+        GM_setValue(IQ_ERRORS_KEY,
+          readIqErrors().filter(row => row.suggestionId !== report.suggestionId));
+      }
+      setRcStatus('error reporting connected');
+      return true;
+    } catch {
+      setRcStatus('offline or not confirmed, ' + readIqErrors().length + ' queued');
+      return false;
+    } finally { reporting = false; }
+  }
+
   const KEY = 'rebelIqT504PendingV1';
   const RESULT = 'rebelIqT504ResultV1';
   const PANEL = 'rebel-iq-t504-panel';
