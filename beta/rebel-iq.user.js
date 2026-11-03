@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.3
+// @version      0.1.4
 // @description  Prepare T504 daily and weekly Operative IQ inspection drafts, save in process, never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.3' };
+  window.__rebelIqT504 = { version: '0.1.4' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.3';
+  const IQ_VERSION = '0.1.4';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -239,7 +239,7 @@
     header.append(label);
     const update = document.createElement('a');
     update.href = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js';
-    update.textContent = 'Check for Update · v0.1.3';
+    update.textContent = 'Check for Update · v0.1.4';
     update.target = '_blank';
     update.rel = 'noopener noreferrer';
     update.style.cssText = 'display:block;text-align:center;padding:9px;margin-top:8px;' +
@@ -296,30 +296,100 @@
     return match ? Number(match[1]) : null;
   };
   const questionName = container => {
-    const text = (container?.innerText || '').split(/\r?\n/).map(clean).filter(Boolean);
-    return clean(text.slice(1, 3).filter(part => part !== '*').join(' '));
+    const lines = String(container?.innerText || container?.textContent || '')
+      .split(/\r?\n/).map(clean).filter(Boolean);
+    const match = lines[0]?.match(/^\d+\s*\.\s*(.*)$/);
+    if (!match) return '';
+    // On the live Operative IQ screen, "1. Fuel *" is all one heading.
+    // Some older versions split the number and question title across lines.
+    return clean((match[1] || lines[1] || '').replace(/\s*\*\s*$/, ''));
   };
+  // Operative IQ currently renders plain radio controls rather than
+  // Angular Material mat-radio-group inside .form-group. Locate a question
+  // from its numbered heading, independent of the UI component library.
+  function findIqQuestion(node) {
+    for (let el = node; el && el !== document.body; el = el.parentElement) {
+      if (el.closest?.('#' + PANEL)) break;
+      const raw = String(el.innerText || el.textContent || '');
+      const number = questionNumber(el);
+      if (!number || number > 80) continue;
+      const headings = [...raw.matchAll(/(?:^|\n)\s*(\d{1,2})\s*\.\s*[A-Za-z]/g)]
+        .map(match => Number(match[1]));
+      if (headings.length === 1 && headings[0] === number) return el;
+    }
+    return null;
+  }
+
+  const knownRadioAnswer = /^(Full|Pass|Present|Fail|Missing|Added|Not needed|3\/4|7\/8|Less than 3\/4)$/i;
+  function readableIqRadio(node) {
+    const labelNodes = [
+      node.closest?.('label'),
+      ...(node.labels ? [...node.labels] : [])
+    ].filter(Boolean);
+    const candidates = [
+      node.getAttribute?.('aria-label'),
+      ...labelNodes.map(label => label.innerText || label.textContent),
+      node.parentElement?.innerText || node.parentElement?.textContent,
+      node.innerText || node.textContent,
+      node.value
+    ];
+    const answer = candidates.map(value => clean(value || ''))
+      .find(value => knownRadioAnswer.test(value)) || '';
+    return {
+      value: answer === 'Not Needed' ? 'Not needed' : answer,
+      get checked() { return node.checked === true || node.getAttribute?.('aria-checked') === 'true'; },
+      click() { node.click(); }
+    };
+  }
+
+  function iqRadioControls() {
+    const native = [...document.querySelectorAll('input[type="radio"]')];
+    const aria = [...document.querySelectorAll('[role="radio"]')]
+      .filter(node => !node.querySelector('input[type="radio"]'));
+    const custom = native.length || aria.length ? [] :
+      [...document.querySelectorAll('mat-radio-button,p-radioButton,.mat-radio-button')]
+        .filter(node => !node.querySelector('input[type="radio"],[role="radio"]'));
+    return [...native, ...aria, ...custom].filter(node => !node.closest('#' + PANEL));
+  }
+
+  function readIqForm() {
+    const radioMap = new Map(), textMap = new Map();
+    const radioNodes = iqRadioControls();
+    for (const node of radioNodes) {
+      const group = findIqQuestion(node), number = questionNumber(group);
+      if (!number) continue;
+      const prior = radioMap.get(number);
+      if (prior && prior.group !== group) {
+        throw Error('Conflicting radio groups at question ' + number + '. No answers changed.');
+      }
+      if (!prior) radioMap.set(number, { group, choices: [] });
+      radioMap.get(number).choices.push(readableIqRadio(node));
+    }
+    for (const textarea of document.querySelectorAll('textarea')) {
+      if (textarea.closest('#' + PANEL)) continue;
+      const group = findIqQuestion(textarea), number = questionNumber(group);
+      if (!number) continue;
+      if (textMap.has(number)) throw Error('Multiple text inputs at question ' + number + '.');
+      textMap.set(number, { group, textarea });
+    }
+    return {
+      radioMap, textMap,
+      radioCount: radioNodes.length,
+      textareaCount: document.querySelectorAll('textarea').length
+    };
+  }
+
   function validateForm(kind) {
     const task = TASKS[kind];
     if (!formId() || !t504Visible() || !clean(document.body.innerText).includes(task.name)) {
       throw Error('This page is not the T504 ' + task.name + ' questionnaire.');
     }
-    const groups = [...document.querySelectorAll('.form-group')]
-      .filter(group => group.querySelector('mat-radio-group'));
-    if (groups.length !== task.count) throw Error('Unexpected questionnaire layout: found ' +
-      groups.length + ' choices, expected ' + task.count + '. Nothing was saved.');
-    const radioMap = new Map();
-    for (const group of groups) {
-      const number = questionNumber(group);
-      const choices = [...group.querySelectorAll('mat-radio-group input[type="radio"]')];
-      if (!number || !choices.length || radioMap.has(number)) throw Error('Duplicate or missing radio question.');
-      radioMap.set(number, { group, choices });
-    }
-    const textMap = new Map();
-    for (const textarea of document.querySelectorAll('.form-group textarea.text-qs-input')) {
-      const group = textarea.closest('.form-group'), number = questionNumber(group);
-      if (!number || textMap.has(number)) throw Error('Invalid numeric field mapping.');
-      textMap.set(number, { group, textarea });
+    const { radioMap, textMap, radioCount, textareaCount } = readIqForm();
+    if (radioMap.size !== task.count) {
+      throw Error('Unexpected questionnaire layout: found ' +
+        radioMap.size + ' choices, expected ' + task.count +
+        '. DOM: ' + radioCount + ' radio controls, ' + textareaCount +
+        ' text fields. Nothing was saved.');
     }
     if (kind === 'daily') {
       // Live T504 Tour form contains 41 required radio choices PLUS a
