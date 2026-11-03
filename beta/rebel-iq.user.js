@@ -224,6 +224,10 @@
     detail.setAttribute('role', 'status');
     detail.style.cssText = 'font:11px/1.5 Arial;margin:8px 0 2px;color:#205b48;';
     detail.textContent = 'Open T504 Unit Inspection first.';
+    rcStatusEl = document.createElement('div');
+    rcStatusEl.style.cssText = 'font:11px/1.5 Arial;color:#536c77;margin:7px 0 0;';
+    setRcStatus(readIqErrors().length ?
+      readIqErrors().length + ' error(s) pending delivery' : 'no errors queued');
     const button = (text, kind) => {
       const el = document.createElement('button');
       el.type = 'button';
@@ -242,7 +246,7 @@
       'border:1px solid #9ebdcc;border-radius:7px;background:#edf4f8;color:#163c58;' +
       'font:bold 12px Arial;text-decoration:none;cursor:pointer;';
     menu.append(header, help, button('Daily Tour: Save In Process', 'daily'),
-      button('Weekly: Save In Process', 'weekly'), update, detail);
+      button('Weekly: Save In Process', 'weekly'), update, detail, rcStatusEl);
     const setExpanded = (expanded) => {
       opened = expanded;
       menu.style.display = expanded ? 'block' : 'none';
@@ -412,6 +416,7 @@
     if (formId()) {
       if (!clean(document.body.innerText).includes(task.name)) {
         notify('Wrong questionnaire open. No answers changed.', true);
+      captureIqError('Unexpected questionnaire route', pending.kind + ':wrong-form');
         return;
       }
       busy = true;
@@ -422,6 +427,7 @@
         notify(result);
       } catch (error) {
         notify('Stopped safely: ' + error.message, true);
+        captureIqError(error, pending.kind + ':prepare');
       } finally {
         clearPending();
         busy = false;
@@ -433,6 +439,7 @@
     if (++attempts > 8) {
       clearPending();
       notify('Could not locate questionnaire. Open it manually; no answers were changed.', true);
+      captureIqError('Questionnaire navigation did not settle', pending.kind + ':navigation');
       return;
     }
     const leaf = [...document.querySelectorAll('h1,h2,h3,h4,h5,span,div,p,button,a')]
@@ -459,7 +466,11 @@
       lastRoute = location.pathname;
       attempts = 0;
     }
-    if (readPending()) void runPending();
+    if (readPending()) void runPending().catch(error => {
+      clearPending();
+      captureIqError(error, 'navigation');
+      notify('Stopped safely: ' + scrubError(error?.message || error), true);
+    });
     else if (sessionStorage.getItem(KEY)) clearPending();
     const result = sessionStorage.getItem(RESULT);
     if (result && isGroupPage() && t504Visible()) {
@@ -475,6 +486,22 @@
       }
     }
   }
-  setInterval(tick, 700);
-  tick();
+  // Only capture global errors that identify Rebel IQ itself.
+  window.addEventListener('error', event => {
+    const source = String(event.filename || '') + ' ' + String(event.error?.stack || '');
+    if (/rebel-iq(?:\.user)?\.js/i.test(source)) {
+      captureIqError(event.error || event.message, 'runtime');
+    }
+  });
+  window.addEventListener('unhandledrejection', event => {
+    if (/rebel-iq(?:\.user)?\.js/i.test(String(event.reason?.stack || ''))) {
+      captureIqError(event.reason, 'unhandled-promise');
+    }
+  });
+  setInterval(() => {
+    try { tick(); } catch (error) { captureIqError(error, 'ui'); }
+  }, 700);
+  setInterval(() => { void flushIqErrors(); }, 5 * 60 * 1000);
+  try { tick(); } catch (error) { captureIqError(error, 'startup'); }
+  if (readIqErrors().length) void flushIqErrors();
 })();
