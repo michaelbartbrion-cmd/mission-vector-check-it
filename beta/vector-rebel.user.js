@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.46
+// @version      3.2.47
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.46',
+        version: '3.2.47',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.46';
+    const VERSION = '3.2.47';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -4176,6 +4176,47 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return !!m && m[1] === item.pool && m[2] === item.itemId;
     }
 
+
+    // When Vector clips a table PPE Name like BALDREE-10948322-F...,
+    // recover the full value ONLY from this same pool/item detail heading
+    // plus its exact labeled serial. Never guess the missing suffix.
+    function resolveClippedPpeNameFromVerifiedDetail(item) {
+        if (!item || !isAssetPageFor(item)) return '';
+        const clipped = clean(item.assetId).toUpperCase();
+        if (!/(?:\.{3}|\u2026)$/.test(clipped)) return '';
+        const stem = clipped.replace(/(?:\.{3}|\u2026)$/, '');
+        if (stem.length < 8) return '';
+        const serialToken = stem.match(/(?:^|[^0-9])(\d{6,})(?=$|[^0-9])/)?.[1] || '';
+        if (!serialToken) return '';
+        let observedSerial = '';
+        try {
+            observedSerial = clean(repairReadDetailDocument(document).serial).toUpperCase();
+        } catch { return ''; }
+        if (observedSerial !== serialToken) return '';
+
+        const headings = [...document.querySelectorAll('h1,h2,h3,h4,[data-testid*="title"]')]
+            .filter(visible)
+            .filter(el => !el.closest('#' + PANEL_ID + ', #' + OVERLAY_ID))
+            .map(el => uiText(el.textContent || ''))
+            .filter(Boolean);
+        const fullNames = new Set();
+        for (const title of headings) {
+            const match = title.match(
+                /^(Bunker (?:Coat|Pant)|Structural (?:Gloves|Helmet|Boots)|SCBA (?:Face )?Mask|PPE (?:Coat|Pant|Hood)|Hood|Helmet|Boots)\s*:\s*([A-Z0-9_. -]+)$/i
+            );
+            if (!match) continue;
+            const expectedType = normalizedPpeTypeText(item.type);
+            const observedType = normalizedPpeTypeText(match[1]);
+            if (expectedType && observedType && expectedType !== observedType) return '';
+            const full = clean(match[2]).toUpperCase();
+            if (full.startsWith(stem) && full.length > stem.length &&
+                full.length <= 160 && !/(?:\.{3}|\u2026)$/.test(full) &&
+                full.includes(serialToken)) fullNames.add(full);
+        }
+        // Ambiguous or conflicting headings fail closed.
+        return fullNames.size === 1 ? [...fullNames][0] : '';
+    }
+
     let identityElementCache = { key: '', element: null };
 
     function findAssetSerialEvidence(item) {
@@ -6764,13 +6805,24 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             return;
         }
 
-        const identityVerified = await verifyExpectedAssetPage(item);
+        // Restore clipped PPE Name only from an exact detail heading and serial.
+        // The existing identity verification still runs BEFORE any inspection.
+        const restoredName = resolveClippedPpeNameFromVerifiedDetail(item);
+        const verifiedItem = restoredName ? { ...item, assetId: restoredName } : item;
+        const identityVerified = await verifyExpectedAssetPage(verifiedItem);
         if (!identityVerified) {
             stopRun(
                 `${item.assetId}: Vector reached pool ${item.pool} / item ${item.itemId}, ` +
                 'but neither the exact PPE Name nor its labeled serial number matched the verified item. No inspection was started. Open DIAGNOSTICS and share the report.'
             );
             return;
+        }
+        if (restoredName) {
+            // Change the selected item's label only AFTER full identity proof.
+            // Its verified Responsible Party and pool/item URL are untouched.
+            item.assetId = restoredName;
+            saveRun(run);
+            setStatus('Verified exact PPE Name from heading and serial: ' + restoredName);
         }
 
         const itemKey = `${item.pool}:${item.itemId}`;
