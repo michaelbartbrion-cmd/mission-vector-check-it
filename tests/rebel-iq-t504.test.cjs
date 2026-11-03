@@ -179,3 +179,35 @@ test('Rebel IQ automatically collects failures and keeps them queued until confi
  assert.match(src,/Rebel Command:/);
  assert.doesNotMatch(src,/document\.body\.outerHTML|localStorage\.(?:get|set)Item|sessionStorage\.getItem\(.*token/i);
 });
+
+
+function prepareHarness(h,kind) {
+  const a=src.indexOf('  async function prepare(kind) {');
+  const b=src.indexOf('  async function runPending()',a);
+  const code=src.slice(a,b)+'\nreturn prepare;';
+  const prepare=new Function('validateForm','TASKS','setTimeout','applyTextarea',code)(
+    h.validate,
+    {daily:{name:'63000-13 Tour Check'},weekly:{name:'Weekly 63000-13 Check'}},
+    handler=>{handler();},
+    (field,value)=>{field.value=value;}
+  );
+  return prepare(kind);
+}
+test('Daily Tour prepares only the 41 validated answers and clicks Save In Process once',async()=>{
+  const h=formHarness('daily');
+  const oldComment=h.comment.value;
+  const result=await prepareHarness(h,'daily');
+  assert.match(result,/Save In Process clicked/);
+  assert.equal(h.save.clicked,1);
+  assert.equal(h.inputs.filter(x=>x.checked).length,41);
+  assert.equal(h.comment.value,oldComment);
+});
+test('Weekly prepares the twelve verified radio defaults and eight tire-pressure drafts, without filling odometer/hours',async()=>{
+  const h=formHarness('weekly');
+  const result=await prepareHarness(h,'weekly');
+  assert.match(result,/Save In Process clicked/);
+  assert.equal(h.save.clicked,1);
+  assert.equal(h.inputs.filter(x=>x.checked).length,12);
+  assert.equal(h.textareas.filter(x=>x.value==='').length,3);
+  assert.equal(h.textareas.filter(x=>x.value==='110').length,8);
+});
