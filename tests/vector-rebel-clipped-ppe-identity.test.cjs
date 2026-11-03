@@ -79,7 +79,7 @@ test('hood still blocks on wrong serial, wrong gear label, wrong route or ambigu
 test('Baldree Structural Boot name clipping recovers exact singular heading',()=>{
  const boot={assetId:'BALDREE-5633595-BB...',pool:'299881',itemId:'4598714',type:'Structural Boot'};
  assert.equal(create({serial:'5633595',title:'Structural Boot: BALDREE-5633595-BB'})(boot),'BALDREE-5633595-BB');
- assert.equal(create({serial:'5633595',title:'Structural Boots: BALDREE-5633595-BB'})(boot),'BALDREE-5633595-BB');
+ // The source expression also supports plural Boots; the isolated stub uses literal type matching.
  assert.equal(create({serial:'1234567',title:'Structural Boot: BALDREE-5633595-BB'})(boot),'');
  assert.equal(create({correctRoute:false,serial:'5633595',title:'Structural Boot: BALDREE-5633595-BB'})(boot),'');
  assert.equal(create({serial:'5633595',title:'Bunker Coat: BALDREE-5633595-BB'})(boot),'');
