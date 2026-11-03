@@ -17,6 +17,64 @@
   'use strict';
   if (window.__rebelIqT504) return;
   window.__rebelIqT504 = { version: '0.1.3' };
+  // Minimal RC diagnostics: only stage, redacted error, URL path, version.
+  // Never transmit form answers, notes, asset readings, or login credentials.
+  const IQ_VERSION = '0.1.3';
+  const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
+  const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
+  const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
+  const IQ_ERRORS_KEY = 'rebelIqErrorQueueV1';
+  const randomToken = count => {
+    let binary = '';
+    for (const value of crypto.getRandomValues(new Uint8Array(count))) {
+      binary += String.fromCharCode(value);
+    }
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  };
+  const scrubError = value => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[email]')
+    .replace(/\b\d{5,}\b/g, '[id]')
+    .replace(/\b[A-Z]{3,}[-_]\d[\w.-]*/gi, '[asset]')
+    .replace(/\s+/g, ' ').trim().slice(0, 260);
+  const readIqErrors = () => {
+    try {
+      const rows = GM_getValue(IQ_ERRORS_KEY, []);
+      return Array.isArray(rows) ? rows.filter(x => x && x.suggestionId).slice(-20) : [];
+    } catch { return []; }
+  };
+  let rcStatusEl = null, reporting = false, rcStatus = 'Not verified';
+  let lastReportSignature = '', lastReportAt = 0;
+  const setRcStatus = message => {
+    rcStatus = message;
+    if (rcStatusEl) rcStatusEl.textContent = 'Rebel Command: ' + message;
+  };
+  function captureIqError(error, stage) {
+    try {
+      const detail = scrubError(error?.message || error || 'Unexpected error');
+      const safeStage = scrubError(stage || 'unknown');
+      const signature = safeStage + '|' + detail;
+      const timestamp = Date.now();
+      if (signature === lastReportSignature && timestamp - lastReportAt < 60000) return;
+      lastReportSignature = signature;
+      lastReportAt = timestamp;
+      const rows = readIqErrors();
+      rows.push({
+        suggestionId: 'feedback:riq-error:' + timestamp + ':' + Math.random().toString(36).slice(2, 10),
+        timestamp: new Date(timestamp).toISOString(),
+        title: 'Rebel IQ automatic error',
+        details: 'Rebel IQ v' + IQ_VERSION + ' | stage: ' + safeStage +
+          ' | error: ' + detail + ' | route: ' + scrubError(location.pathname),
+        category: 'feedback',
+        priority: 'high',
+        sourceContext: 'automatic_error',
+        sourceVersion: IQ_VERSION
+      });
+      GM_setValue(IQ_ERRORS_KEY, rows.slice(-20));
+      setRcStatus(readIqErrors().length + ' error(s) pending delivery');
+      void flushIqErrors();
+    } catch { /* A reporting failure must not touch an inspection. */ }
+  }
+
   const KEY = 'rebelIqT504PendingV1';
   const RESULT = 'rebelIqT504ResultV1';
   const PANEL = 'rebel-iq-t504-panel';
