@@ -654,6 +654,140 @@
       ' No answers were modified or saved.');
   }
 
+
+  async function waitForRopeForm(task, currentRun, timeoutMs = 16000, pollMs = 180) {
+    const deadline = Date.now() + timeoutMs;
+    let stable = 0, lastFailure = null;
+    while (Date.now() < deadline) {
+      if (!currentRun()) throw Error('Thursday rope run or form changed while loading.');
+      try {
+        validateRopeForm(task); // read-only until all 11/27 radios or 17 boxes are verified
+        if (++stable >= 3) return;
+      } catch (error) {
+        stable = 0;
+        lastFailure = error;
+      }
+      await new Promise(resolve => setTimeout(resolve, pollMs));
+    }
+    throw Error('Thursday rope questionnaire did not finish loading: ' +
+      (lastFailure?.message || 'Unknown incomplete form'));
+  }
+
+  function prepareRopeDraft(task, currentRun) {
+    const form = validateRopeForm(task);
+    if (task.type === 'radio') {
+      for (let i = 1; i <= task.questions.length; i++) {
+        const answer = form.radioMap.get(i).choices.find(c => c.value === 'Present');
+        if (!answer) throw Error('Present option missing at rope question ' + i);
+        if (!answer.checked) answer.click();
+        if (!answer.checked) throw Error('Rope question ' + i + ' rejected draft selection.');
+      }
+    } else {
+      for (let i = 1; i <= task.questions.length; i++) {
+        for (const {node, label} of form.checkMap.get(i).boxes) {
+          if (!node.checked) node.click();
+          if (!node.checked) throw Error('Rope Gear ' + label + ' rejected draft checkbox.');
+        }
+      }
+    }
+    if (!currentRun() || location.pathname !==
+        '/inspections/' + ROPE_UNIT_ID + '/questionaries/' + task.id) {
+      throw Error('Thursday rope form changed before Save In Process.');
+    }
+    const current = readRopes();
+    if (!current || current.stage !== 'form') {
+      throw Error('Thursday rope transaction is not ready to save.');
+    }
+    // Persist BEFORE the only save click so page reloads cannot repeat it.
+    writeRopes({...current, stage:'receipt', savedClickAt:Date.now()});
+    form.save.click(); // Not Submit. Physical inspection remains the firefighter's responsibility.
+  }
+
+  function finishRopesWithError(error, run = readRopes()) {
+    const confirmed = Array.isArray(run?.confirmed) ? run.confirmed.length : 0;
+    clearRopes();
+    const message = 'Thursday rope drafts stopped at '+confirmed+'/3 confirmed: ' +
+      clean(error?.message || error || 'Unknown error') +
+      ' Check the other forms before retrying. No automatic resubmission.';
+    sessionStorage.setItem(ROPE_RESULT, message);
+    notify(message, true);
+    captureIqError(error, 'thursday-ropes:'+String(run?.stage||'unknown'));
+  }
+
+  function ropeSavedOnGroup(task) {
+    // A save click is not success. Require a visible, exact questionnaire card
+    // with Saved in Process on the returned unit group listing.
+    const links = [...document.querySelectorAll('a,[role="link"]')]
+      .filter(node => visible(node) && !node.closest('#' + PANEL));
+    return links.some(node => {
+      const label = clean(node.innerText || node.textContent);
+      return label.startsWith(task.name) && /saved in process/i.test(label) &&
+        (label.length === task.name.length ||
+          /\s/.test(label.charAt(task.name.length)));
+    });
+  }
+
+  async function runRopes() {
+    if (ropeBusy) return;
+    const run = readRopes();
+    if (!run) return;
+    ropeBusy = true;
+    try {
+      const task = ROPE_TASKS[run.index];
+      if (!task || inspectionId() !== ROPE_UNIT_ID || !t504Visible()) {
+        throw Error('Truck 504 inspection identity was not verified.');
+      }
+      if (run.stage === 'form') {
+        if (formId() !== task.id) {
+          if (Date.now() - (run.navigateAt || run.startedAt) > 12000) {
+            throw Error('Could not navigate to '+task.name+'. Nothing was saved for this item.');
+          }
+          return; // The requested route is still navigating.
+        }
+        const currentRun = () => {
+          const live = readRopes();
+          return live?.stage === 'form' && live?.index === run.index &&
+            inspectionId() === ROPE_UNIT_ID && formId() === task.id;
+        };
+        notify('Loading Thursday rope draft '+(run.index+1)+'/3: '+task.name);
+        await waitForRopeForm(task,currentRun);
+        if (!currentRun()) throw Error('Rope form changed during verification.');
+        prepareRopeDraft(task,currentRun);
+        notify('Save In Process clicked for '+task.name+
+          '. Waiting for unit-list confirmation, not submitting.');
+        return;
+      }
+      if (run.stage !== 'receipt' || !run.savedClickAt) {
+        throw Error('Unexpected Thursday rope draft transaction stage.');
+      }
+      if (isGroupPage() && ropeSavedOnGroup(task)) {
+        const confirmed = [...(run.confirmed || []),task.id];
+        if (run.index + 1 >= ROPE_TASKS.length) {
+          clearRopes();
+          const message = 'All 3 Thursday rope drafts: Saved in Process confirmed on unit list. ' +
+            'Physically inspect every item and submit manually only after verification.';
+          sessionStorage.setItem(ROPE_RESULT,message);
+          notify(message);
+          return;
+        }
+        const next = ROPE_TASKS[run.index+1];
+        writeRopes({...run,index:run.index+1,confirmed,
+          stage:'form',navigateAt:Date.now(),savedClickAt:null});
+        notify('Saved '+confirmed.length+'/3 rope drafts. Opening '+next.name+'...');
+        location.assign('/inspections/'+ROPE_UNIT_ID+'/questionaries/'+next.id);
+        return;
+      }
+      if (Date.now()-run.savedClickAt > 22000) {
+        throw Error('Save In Process was clicked for '+task.name+
+          ', but the unit-list receipt was not verified.');
+      }
+    } catch (error) {
+      finishRopesWithError(error,readRopes() || run);
+    } finally {
+      ropeBusy = false;
+    }
+  }
+
   function applyTextarea(field, value) {
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
     if (!setter) throw Error('Textarea controls unavailable.');
