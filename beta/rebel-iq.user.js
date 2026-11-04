@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.6
-// @description  Prepare T504 daily and weekly Operative IQ inspection drafts, save in process, never submit.
+// @version      0.1.7
+// @description  Prepare T504 daily, weekly, and Thursday rope drafts. Save In Process only; never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.6' };
+  window.__rebelIqT504 = { version: '0.1.7' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.6';
+  const IQ_VERSION = '0.1.7';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -249,78 +249,145 @@
   const notify = (message, error = false) => {
     if (!detail) return;
     detail.textContent = message;
-    detail.style.color = error ? '#9f2828' : '#205b48';
+    detail.style.color = error ? '#9f2828' : '#607483';
+    detail.style.borderLeftColor = error ? '#c65050' : '#176b8e';
+    detail.style.background = error ? '#fff6f5' : '#f7f9fa';
   };
 
+  // Match Vector Rebel's navy header, white card, two-column action grid,
+  // compact status footer and original Rebel Starbird launcher. One icon
+  // moves into the header as the minimize button, not a second floating icon.
   function makeUi() {
     if (document.getElementById(PANEL)) return;
     root = document.createElement('div');
     root.id = PANEL;
-    root.style.cssText = 'position:fixed;right:22px;bottom:24px;z-index:2147483645;font:13px/1.4 Arial,sans-serif;color:#143650;';
+    root.style.cssText =
+      'position:fixed;right:16px;bottom:16px;z-index:2147483646;' +
+      'font-family:Arial,sans-serif;color:#18384f;';
+
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.innerHTML = rebelStarbirdIcon;
-    toggle.title = 'Rebel IQ - Truck 504';
+    toggle.title = 'Rebel IQ - T504';
     toggle.setAttribute('aria-label', 'Open Rebel IQ');
-    toggle.style.cssText = 'display:flex;align-items:center;justify-content:center;' +
-      'width:54px;height:54px;border-radius:50%;border:2px solid #1b5a7a;' +
-      'background:#fff;color:#153e5c;box-shadow:0 5px 18px rgba(13,50,72,.28);' +
-      'padding:0;margin:0;cursor:pointer;flex:none;';
+    const floatingStyle =
+      'display:flex;align-items:center;justify-content:center;' +
+      'width:54px;height:54px;min-width:54px;flex:none;box-sizing:border-box;' +
+      'border:2px solid #1b5a7a;border-radius:50%;background:#fff;' +
+      'color:#153e5c;box-shadow:0 5px 18px rgba(13,50,72,.28);' +
+      'padding:0;margin:0;cursor:pointer;overflow:hidden;';
+    const headerStyle =
+      'display:flex;align-items:center;justify-content:center;' +
+      'width:43px;height:43px;min-width:43px;flex:none;box-sizing:border-box;' +
+      'border:2px solid rgba(255,255,255,.72);border-radius:50%;' +
+      'background:#fff;color:#153e5c;padding:0;margin:0;cursor:pointer;' +
+      'overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.18);';
+    toggle.style.cssText = floatingStyle;
+
     menu = document.createElement('div');
-    menu.style.cssText = 'display:none;width:315px;max-width:calc(100vw - 40px);' +
-      'padding:13px;background:#fff;border:2px solid #163c58;border-radius:12px;' +
-      'box-shadow:0 7px 26px #10324855;';
+    menu.setAttribute('data-rebel-iq-panel', '1');
+    menu.style.cssText =
+      'display:none;width:430px;max-width:calc(100vw - 28px);' +
+      'background:#fff;border:1px solid #cbd9e2;border-radius:12px;' +
+      'padding:0;overflow:hidden;box-shadow:0 10px 28px rgba(12,43,62,.22);';
+
     const header = document.createElement('div');
-    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px;';
+    header.style.cssText =
+      'display:flex;align-items:center;gap:10px;padding:13px 14px 11px;' +
+      'background:#153e5c;color:#fff;';
+    const titleWrap = document.createElement('div');
+    titleWrap.style.cssText = 'flex:1;min-width:0;';
     label = document.createElement('div');
-    label.textContent = 'REBEL IQ  |  T504';
-    label.style.cssText = 'font:bold 16px Arial;color:#163c58;margin-bottom:5px;';
+    label.textContent = 'Rebel IQ v' + IQ_VERSION;
+    label.style.cssText = 'font-size:17px;font-weight:700;letter-spacing:.1px;';
+    const subtitle = document.createElement('div');
+    subtitle.textContent = 'T504  ·  This is the way.';
+    subtitle.style.cssText = 'font-size:10px;opacity:.78;margin-top:2px;';
+    titleWrap.append(label, subtitle);
+    header.append(titleWrap);
+
+    const body = document.createElement('div');
+    body.style.cssText = 'padding:12px 13px 13px;background:#fff;';
     const help = document.createElement('div');
-    help.textContent = 'Prepare an UNVERIFIED draft. Physically inspect the truck and correct answers before you submit from your phone.';
-    help.style.cssText = 'font:12px/1.45 Arial;color:#546b79;margin:4px 0 10px;';
-    detail = document.createElement('div');
-    detail.setAttribute('role', 'status');
-    detail.style.cssText = 'font:11px/1.5 Arial;margin:8px 0 2px;color:#205b48;';
-    detail.textContent = 'Open T504 Unit Inspection first.';
-    rcStatusEl = document.createElement('div');
-    rcStatusEl.style.cssText = 'font:11px/1.5 Arial;color:#536c77;margin:7px 0 0;';
-    setRcStatus(readIqErrors().length ?
-      readIqErrors().length + ' error(s) pending delivery' : 'no errors queued');
+    help.textContent =
+      'Drafts only. Physically verify every item before submitting.';
+    help.style.cssText =
+      'font-size:11px;margin:0 0 10px;padding:9px 10px;line-height:1.45;' +
+      'background:#f3f7f9;border:1px solid #e0e8ed;' +
+      'border-radius:8px;color:#4f6878;';
+
+    const actions = document.createElement('div');
+    actions.setAttribute('data-rebel-iq-actions', '1');
+    actions.style.cssText =
+      'display:grid;grid-template-columns:1fr 1fr;gap:7px;';
     const button = (text, kind) => {
       const el = document.createElement('button');
       el.type = 'button';
       el.textContent = text;
-      el.style.cssText = 'width:100%;border:0;border-radius:7px;background:#176b8e;color:#fff;cursor:pointer;text-align:left;padding:11px;margin:4px 0;font:bold 13px Arial;';
+      el.style.cssText =
+        'min-height:44px;padding:10px 9px;border:1px solid #176b8e;' +
+        'border-radius:8px;background:#176b8e;color:#fff;cursor:pointer;' +
+        'font:700 12px/1.2 Arial,sans-serif;text-align:center;' +
+        'box-shadow:0 1px 2px rgba(15,43,62,.08);';
       el.onclick = () => kind === 'ropes' ? beginRopes() : begin(kind);
       return el;
     };
-    header.append(label);
     const update = document.createElement('a');
     update.href = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js';
-    update.textContent = 'Check for Update · v0.1.6';
+    update.textContent = 'Check for Update';
+    update.setAttribute('aria-label', 'Check for Rebel IQ update');
     update.target = '_blank';
     update.rel = 'noopener noreferrer';
-    update.style.cssText = 'display:block;text-align:center;padding:9px;margin-top:8px;' +
-      'border:1px solid #9ebdcc;border-radius:7px;background:#edf4f8;color:#163c58;' +
-      'font:bold 12px Arial;text-decoration:none;cursor:pointer;';
-    menu.append(header, help, button('Daily Tour: Save In Process', 'daily'),
-      button('Weekly: Save In Process', 'weekly'),
-      button('Thursday Rope Checks (3): Save In Process', 'ropes'),
-      update, detail, rcStatusEl);
+    update.style.cssText =
+      'display:flex;align-items:center;justify-content:center;' +
+      'box-sizing:border-box;min-height:44px;padding:10px 9px;' +
+      'border:1px solid #b8c8d6;border-radius:8px;' +
+      'background:#fff;color:#153e5c;cursor:pointer;text-align:center;' +
+      'font:700 12px/1.2 Arial,sans-serif;text-decoration:none;' +
+      'box-shadow:0 1px 2px rgba(15,43,62,.08);';
+    actions.append(
+      button('Daily Tour', 'daily'),
+      button('Weekly Check', 'weekly'),
+      button('Rope Checks ×3', 'ropes'),
+      update
+    );
+
+    const statusWrap = document.createElement('div');
+    statusWrap.style.cssText = 'margin-top:10px;';
+    detail = document.createElement('div');
+    detail.setAttribute('role', 'status');
+    detail.style.cssText =
+      'padding:8px 9px;background:#f7f9fa;border-left:3px solid #176b8e;' +
+      'font-size:11px;line-height:1.4;color:#607483;border-radius:6px;' +
+      'overflow-wrap:anywhere;';
+    detail.textContent = t504Visible() ? 'Ready. Choose a check.' :
+      'Open T504 Unit Inspection first.';
+    rcStatusEl = document.createElement('div');
+    rcStatusEl.style.cssText =
+      'font-size:10px;line-height:1.4;color:#607483;' +
+      'margin-top:7px;padding:0 1px;';
+    setRcStatus(readIqErrors().length ?
+      readIqErrors().length + ' error(s) pending delivery' : 'no errors queued');
+    statusWrap.append(detail, rcStatusEl);
+    body.append(help, actions, statusWrap);
+    menu.append(header, body);
+
     const setExpanded = (expanded) => {
       opened = expanded;
       menu.style.display = expanded ? 'block' : 'none';
+      toggle.style.cssText = expanded ? headerStyle : floatingStyle;
       toggle.setAttribute('aria-label', expanded ? 'Minimize Rebel IQ' : 'Open Rebel IQ');
-      toggle.title = expanded ? 'Minimize Rebel IQ' : 'Rebel IQ - Truck 504';
+      toggle.title = expanded ? 'Minimize Rebel IQ' : 'Rebel IQ - T504';
       if (expanded) {
-        header.append(toggle); // One Rebel icon, now in panel header as minimize control.
+        header.append(toggle);
       } else {
-        root.append(toggle); // Same Rebel icon, bottom-right 54 px circle.
+        root.append(toggle);
       }
     };
     toggle.onclick = () => setExpanded(!opened);
     root.append(menu, toggle);
     document.body.appendChild(root);
+
     const runningRopes = readRopes();
     const ropeResult = sessionStorage.getItem(ROPE_RESULT);
     const prior = sessionStorage.getItem(RESULT);
