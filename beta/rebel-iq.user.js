@@ -543,6 +543,90 @@
   }
 
 
+  const iqLabelKey = value => clean(value).toLowerCase()
+    .replace(/[\u2019\u2018]/g,"'").replace(/\s+/g, ' ');
+  function checkboxLabel(node) {
+    const candidates = [
+      node.getAttribute?.('aria-label'),
+      ...(node.labels ? [...node.labels].map(el=>el.innerText||el.textContent) : []),
+      node.closest?.('mat-checkbox,.mat-mdc-checkbox,.mdc-form-field')?.innerText,
+      node.closest?.('mat-checkbox,.mat-mdc-checkbox,.mdc-form-field')?.textContent,
+      node.parentElement?.innerText,
+      node.parentElement?.textContent
+    ];
+    return candidates.map(clean).find(Boolean) || '';
+  }
+  function readRopeCheckboxes() {
+    const all = [...document.querySelectorAll('input[type="checkbox"]')]
+      .filter(node => !node.closest('#' + PANEL));
+    const groups = new Map();
+    for (const node of all) {
+      const group = findIqQuestion(node);
+      const number = questionNumber(group);
+      if (!number) continue;
+      const prior = groups.get(number);
+      if (prior && prior.group !== group) {
+        throw Error('Conflicting checkbox cards at question '+number+'. No answers changed.');
+      }
+      if (!prior) groups.set(number,{group,boxes:[]});
+      groups.get(number).boxes.push({node, label:checkboxLabel(node)});
+    }
+    return {groups,total:all.length};
+  }
+
+  function validateRopeForm(task) {
+    if (!task || inspectionId() !== ROPE_UNIT_ID ||
+      formId() !== task.id || !t504Visible() ||
+      !clean(document.body.innerText).includes(task.name)) {
+      throw Error('Wrong T504 Thursday rope questionnaire. No answers changed.');
+    }
+    const {radioMap,textMap,radioCount,textareaCount} = readIqForm();
+    const {groups:checkMap,total:checkboxCount} = readRopeCheckboxes();
+    if (task.type === 'radio') {
+      if (radioMap.size !== task.questions.length || textMap.size ||
+        checkMap.size || checkboxCount) {
+        throw Error('Rope radio form incomplete: '+radioMap.size+'/'+task.questions.length+
+          ' questions, '+radioCount+' radios, '+textareaCount+' text fields, '+
+          checkboxCount+' checkboxes. No answers changed.');
+      }
+      for (let i = 1; i <= task.questions.length; i++) {
+        const current = radioMap.get(i);
+        const choices = current?.choices || [];
+        if (!current ||
+          iqLabelKey(questionName(current.group)) !== iqLabelKey(task.questions[i-1]) ||
+          choices.length !== 2 ||
+          !choices.some(x => x.value === 'Present') ||
+          !choices.some(x => x.value === 'Missing')) {
+          throw Error('Unexpected rope question/answer at '+i+'. No answers changed.');
+        }
+      }
+    } else if (task.type === 'checkbox') {
+      const expectedCount = task.questions.reduce((sum,q)=>sum+q.options.length,0);
+      if (radioMap.size || textMap.size || checkMap.size !== task.questions.length ||
+        checkboxCount !== expectedCount) {
+        throw Error('Rope Gear form incomplete: '+checkMap.size+'/4 groups, '+
+          checkboxCount+'/'+expectedCount+' checkboxes. No answers changed.');
+      }
+      for (let i = 1; i <= task.questions.length; i++) {
+        const actual = checkMap.get(i), expected = task.questions[i-1];
+        if (!actual || iqLabelKey(questionName(actual.group)) !== iqLabelKey(expected.name) ||
+          actual.boxes.length !== expected.options.length ||
+          actual.boxes.some((box,j) => iqLabelKey(box.label) !== iqLabelKey(expected.options[j]) ||
+            box.node.disabled)) {
+          throw Error('Unexpected rope gear or checkbox at group '+i+'. No answers changed.');
+        }
+      }
+    } else {
+      throw Error('Unknown rope draft questionnaire type. No answers changed.');
+    }
+    const saves = [...document.querySelectorAll('button')]
+      .filter(node=>visible(node) && clean(node.textContent)==='Save In Process');
+    if (saves.length !== 1 || saves[0].disabled) {
+      throw Error('Rope questionnaire Save In Process button was not uniquely available.');
+    }
+    return {radioMap, checkMap, save:saves[0]};
+  }
+
   // Operative IQ's Angular route/title renders BEFORE its radio choices and
   // text controls. Do not treat that transient empty DOM as a changed form.
   // Check the complete questionnaire repeatedly, then require a stable,
