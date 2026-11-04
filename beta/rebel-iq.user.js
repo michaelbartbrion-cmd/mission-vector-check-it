@@ -230,6 +230,19 @@
   };
   const writePending = data => sessionStorage.setItem(KEY, JSON.stringify(data));
   const clearPending = () => sessionStorage.removeItem(KEY);
+  const readRopes = () => {
+    try {
+      const run = JSON.parse(sessionStorage.getItem(ROPE_KEY) || 'null');
+      if (run && run.unitId === ROPE_UNIT_ID &&
+        Number.isInteger(run.index) && run.index >= 0 &&
+        run.index < ROPE_TASKS.length &&
+        Date.now() - run.startedAt < 5 * 60 * 1000) return run;
+    } catch {}
+    return null;
+  };
+  const writeRopes = run => sessionStorage.setItem(ROPE_KEY, JSON.stringify(run));
+  const clearRopes = () => sessionStorage.removeItem(ROPE_KEY);
+  let ropeBusy = false;
   let busy = false, lastRoute = location.pathname, attempts = 0, opened = false;
   let label, detail, menu, root;
 
