@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.4
+// @version      0.1.5
 // @description  Prepare T504 daily and weekly Operative IQ inspection drafts, save in process, never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.4' };
+  window.__rebelIqT504 = { version: '0.1.5' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.4';
+  const IQ_VERSION = '0.1.5';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -239,7 +239,7 @@
     header.append(label);
     const update = document.createElement('a');
     update.href = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js';
-    update.textContent = 'Check for Update · v0.1.4';
+    update.textContent = 'Check for Update · v0.1.5';
     update.target = '_blank';
     update.rel = 'noopener noreferrer';
     update.style.cssText = 'display:block;text-align:center;padding:9px;margin-top:8px;' +
@@ -441,6 +441,34 @@
     return { radioMap, textMap, save: saveButtons[0] };
   }
 
+
+  // Operative IQ's Angular route/title renders BEFORE its radio choices and
+  // text controls. Do not treat that transient empty DOM as a changed form.
+  // Check the complete questionnaire repeatedly, then require a stable,
+  // fully-validated rendering before modifying even one draft answer.
+  async function waitForIqForm(kind, isStillCurrent = () => true,
+      timeoutMs = 15000, pollMs = 180) {
+    const deadline = Date.now() + timeoutMs;
+    let stable = 0, lastFailure = null;
+    while (Date.now() < deadline) {
+      if (!isStillCurrent()) {
+        throw Error('The T504 questionnaire changed while loading. No answers were modified.');
+      }
+      try {
+        validateForm(kind); // Read-only. Includes every required card and Save In Process.
+        stable += 1;
+        if (stable >= 3) return; // At least two polling intervals of stable readiness.
+      } catch (error) {
+        stable = 0;
+        lastFailure = error;
+      }
+      await new Promise(resolve => setTimeout(resolve, pollMs));
+    }
+    throw Error('T504 questionnaire did not become ready after loading. ' +
+      (lastFailure?.message || 'Form controls were incomplete.') +
+      ' No answers were modified or saved.');
+  }
+
   function applyTextarea(field, value) {
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
     if (!setter) throw Error('Textarea controls unavailable.');
@@ -491,7 +519,13 @@
       }
       busy = true;
       try {
-        notify('Checking all fields before preparing draft...');
+        notify('Waiting for the complete T504 questionnaire to load...');
+        const originalPath = location.pathname;
+        await waitForIqForm(pending.kind, () =>
+          location.pathname === originalPath &&
+          inspectionId() === pending.unitId &&
+          readPending()?.kind === pending.kind);
+        notify('Form loaded and verified. Preparing draft...');
         const result = await prepare(pending.kind);
         sessionStorage.setItem(RESULT, result);
         notify(result);
