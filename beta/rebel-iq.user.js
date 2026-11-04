@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.7
+// @version      0.1.8
 // @description  Prepare T504 daily, weekly, and Thursday rope drafts. Save In Process only; never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.7' };
+  window.__rebelIqT504 = { version: '0.1.8' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.7';
+  const IQ_VERSION = '0.1.8';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -308,14 +308,6 @@
 
     const body = document.createElement('div');
     body.style.cssText = 'padding:12px 13px 13px;background:#fff;';
-    const help = document.createElement('div');
-    help.textContent =
-      'Drafts only. Physically verify every item before submitting.';
-    help.style.cssText =
-      'font-size:11px;margin:0 0 10px;padding:9px 10px;line-height:1.45;' +
-      'background:#f3f7f9;border:1px solid #e0e8ed;' +
-      'border-radius:8px;color:#4f6878;';
-
     const actions = document.createElement('div');
     actions.setAttribute('data-rebel-iq-actions', '1');
     actions.style.cssText =
@@ -369,7 +361,7 @@
     setRcStatus(readIqErrors().length ?
       readIqErrors().length + ' error(s) pending delivery' : 'no errors queued');
     statusWrap.append(detail, rcStatusEl);
-    body.append(help, actions, statusWrap);
+    body.append(actions, statusWrap);
     menu.append(header, body);
 
     const setExpanded = (expanded) => {

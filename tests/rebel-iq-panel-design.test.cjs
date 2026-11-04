@@ -41,7 +41,7 @@ function harness(){
     'readIqErrors','setRcStatus','t504Visible','readRopes','sessionStorage',
     'ROPE_RESULT','RESULT','ROPE_TASKS','begin','beginRopes',code);
   const data=factory(
-    document,'0.1.7','rebel-iq-t504-panel','<img alt="" src="data:image/png;base64,FAKE" />',
+    document,'0.1.8','rebel-iq-t504-panel','<img alt="" src="data:image/png;base64,FAKE" />',
     ()=>[],()=>{},()=>true,()=>null,{getItem:()=>null},
     'ropeResult','normalResult',[],
     kind=>{invoked[kind]++},()=>{invoked.ropes++}
@@ -60,7 +60,7 @@ test('Rebel IQ uses Vector Rebel navy header, white 430px card, and two-column a
   assert.ok(actions.style.cssText.includes('grid-template-columns:1fr 1fr'));
   assert.ok(vector.includes('background:#153e5c;color:#fff'));
   assert.ok(vector.includes('grid-template-columns:1fr 1fr'));
-  const title=nodes.find(el=>el.textContent==='Rebel IQ v0.1.7');
+  const title=nodes.find(el=>el.textContent==='Rebel IQ v0.1.8');
   const subtitle=nodes.find(el=>el.textContent==='T504  ·  This is the way.');
   assert.ok(title&&subtitle,'same title/subtitle hierarchy as Vector Rebel');
 });
@@ -98,10 +98,11 @@ test('One original Starbird toggles between 54px floating corner and 43px header
   buttons=walk(h.body).filter(el=>el.tagName==='BUTTON'&&el.innerHTML.includes('data:image/png'));
   assert.equal(buttons.length,1,'never duplicates the fleet icon');
 });
-test('Compact footer retains safety notice, error status and Rebel Command reporting text',()=>{
+test('Compact footer retains error status and Rebel Command reporting, without the draft banner',()=>{
   const h=harness();
   const nodes=walk(h.body);
-  assert.ok(nodes.some(el=>el.textContent==='Drafts only. Physically verify every item before submitting.'));
+  assert.ok(!nodes.some(el=>el.textContent==='Drafts only. Physically verify every item before submitting.'));
+  assert.ok(!source.includes("body.append(help, actions, statusWrap)"));
   assert.equal(h.detail.getAttribute('role'),'status');
   assert.equal(h.detail.textContent,'Ready. Choose a check.');
   assert.ok(h.rcStatusEl.style.cssText.includes('font-size:10px'));
