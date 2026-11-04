@@ -734,7 +734,7 @@
     ropeBusy = true;
     try {
       const task = ROPE_TASKS[run.index];
-      if (!task || inspectionId() !== ROPE_UNIT_ID || !t504Visible()) {
+      if (!task || inspectionId() !== ROPE_UNIT_ID) {
         throw Error('Truck 504 inspection identity was not verified.');
       }
       if (run.stage === 'form') {
@@ -889,7 +889,14 @@
       lastRoute = location.pathname;
       attempts = 0;
     }
-    if (readPending()) void runPending().catch(error => {
+    const ropeRun = readRopes();
+    if (ropeRun) {
+      void runRopes().catch(error => finishRopesWithError(error, readRopes()));
+    } else if (sessionStorage.getItem(ROPE_KEY)) {
+      clearRopes();
+      notify('Thursday rope draft run expired before completion. Confirm existing saved drafts before retrying.', true);
+    }
+    if (!ropeRun && readPending()) void runPending().catch(error => {
       clearPending();
       captureIqError(error, 'navigation');
       notify('Stopped safely: ' + scrubError(error?.message || error), true);
