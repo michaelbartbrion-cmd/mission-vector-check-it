@@ -83,7 +83,7 @@ test('One original Starbird toggles between 54px floating corner and 43px header
   let buttons=walk(h.body).filter(el=>el.tagName==='BUTTON'&&el.innerHTML.includes('data:image/png'));
   assert.equal(buttons.length,1);
   const toggle=buttons[0];
-  assert.equal(h.menu.style.display,'none');
+  assert.ok(h.menu.style.cssText.includes('display:none'), 'initially collapsed from CSS text');
   assert.ok(toggle.style.cssText.includes('width:54px;height:54px'));
   assert.equal(toggle.getAttribute('aria-label'),'Open Rebel IQ');
   toggle.click();
