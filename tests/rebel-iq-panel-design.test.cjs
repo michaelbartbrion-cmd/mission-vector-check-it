@@ -41,7 +41,7 @@ function harness(){
     'readIqErrors','setRcStatus','t504Visible','readRopes','sessionStorage',
     'ROPE_RESULT','RESULT','ROPE_TASKS','begin','beginRopes',code);
   const data=factory(
-    document,'0.1.7','rebel-iq-t504-panel','<img alt="" src="data:image/png;base64,FAKE" />',
+    document,'0.1.8','rebel-iq-t504-panel','<img alt="" src="data:image/png;base64,FAKE" />',
     ()=>[],()=>{},()=>true,()=>null,{getItem:()=>null},
     'ropeResult','normalResult',[],
     kind=>{invoked[kind]++},()=>{invoked.ropes++}
