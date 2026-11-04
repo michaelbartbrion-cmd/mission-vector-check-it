@@ -291,7 +291,7 @@
       el.type = 'button';
       el.textContent = text;
       el.style.cssText = 'width:100%;border:0;border-radius:7px;background:#176b8e;color:#fff;cursor:pointer;text-align:left;padding:11px;margin:4px 0;font:bold 13px Arial;';
-      el.onclick = () => begin(kind);
+      el.onclick = () => kind === 'ropes' ? beginRopes() : begin(kind);
       return el;
     };
     header.append(label);
@@ -304,7 +304,9 @@
       'border:1px solid #9ebdcc;border-radius:7px;background:#edf4f8;color:#163c58;' +
       'font:bold 12px Arial;text-decoration:none;cursor:pointer;';
     menu.append(header, help, button('Daily Tour: Save In Process', 'daily'),
-      button('Weekly: Save In Process', 'weekly'), update, detail, rcStatusEl);
+      button('Weekly: Save In Process', 'weekly'),
+      button('Thursday Rope Checks (3): Save In Process', 'ropes'),
+      update, detail, rcStatusEl);
     const setExpanded = (expanded) => {
       opened = expanded;
       menu.style.display = expanded ? 'block' : 'none';
@@ -319,11 +321,23 @@
     toggle.onclick = () => setExpanded(!opened);
     root.append(menu, toggle);
     document.body.appendChild(root);
+    const runningRopes = readRopes();
+    const ropeResult = sessionStorage.getItem(ROPE_RESULT);
     const prior = sessionStorage.getItem(RESULT);
-    if (prior) notify(prior);
+    if (runningRopes) {
+      setExpanded(true);
+      notify('Preparing Thursday rope checks ' +
+        (runningRopes.index + 1) + '/3: ' +
+        ROPE_TASKS[runningRopes.index].name);
+    } else if (ropeResult) notify(ropeResult);
+    else if (prior) notify(prior);
   }
 
   function begin(kind) {
+    if (readRopes()) {
+      notify('Three-rope draft run is already active. Do not start another check.', true);
+      return;
+    }
     const id = inspectionId();
     if (!id || !t504Visible()) {
       notify('Open the T504 Unit Inspection page first. No form was changed.', true);
@@ -346,6 +360,35 @@
     } else {
       location.assign(listUrl(id));
     }
+  }
+
+
+  function beginRopes() {
+    if (inspectionId() !== ROPE_UNIT_ID || !t504Visible()) {
+      notify('Open Truck 504 Unit Inspection to prepare Thursday rope checks. Nothing changed.', true);
+      return;
+    }
+    if (readRopes() || readPending()) {
+      notify('Another Rebel IQ draft run is already active. Nothing changed.', true);
+      return;
+    }
+    // Exactly one button click starts all three *draft* forms, sequentially.
+    // No form is submitted, and every positive answer needs physical verification.
+    sessionStorage.removeItem(ROPE_RESULT);
+    sessionStorage.removeItem(RESULT);
+    const run = {
+      unitId: ROPE_UNIT_ID,
+      startedAt: Date.now(),
+      index: 0,
+      stage: 'form',
+      confirmed: [],
+      savedClickAt: null
+    };
+    writeRopes(run);
+    notify('Three-rope draft run 1/3: ' + ROPE_TASKS[0].name +
+      '. Defaults are UNVERIFIED. No submission.');
+    location.assign('/inspections/' + ROPE_UNIT_ID +
+      '/questionaries/' + ROPE_TASKS[0].id);
   }
 
   const questionNumber = container => {
