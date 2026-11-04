@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.5
+// @version      0.1.6
 // @description  Prepare T504 daily and weekly Operative IQ inspection drafts, save in process, never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.5' };
+  window.__rebelIqT504 = { version: '0.1.6' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.5';
+  const IQ_VERSION = '0.1.6';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -169,6 +169,51 @@
     daily: { name: '63000-13 Tour Check', count: 41 },
     weekly: { name: 'Weekly 63000-13 Check', count: 12 }
   };
+  // Exact verified T504 Thursday questionnaire IDs and labels.
+  // These are unverified draft defaults only; no rope inspection is submitted.
+  const ROPE_UNIT_ID = '60421';
+  const ROPE_KEY = 'rebelIqT504ThreeRopesV1';
+  const ROPE_RESULT = 'rebelIqT504ThreeRopesResultV1';
+  const ROPE_TASKS = [
+    {
+      id: '91548', name: 'Weekly Rope Rescue Equipment (Low Angle Kit 1)',
+      type: 'radio', questions: [
+        'Anchor Strap','Anchor Plate','MPD','Double Pulley w/ Swivel (x2)',
+        'Single Pulley w/ Swivel (x2)','Locking Carabiner "G" (x6)',
+        'Rescucender (x2)','Large Prusik (x2)','Small Prusik (x2)',
+        "20' Webbing","12' Webbing"
+      ]
+    },
+    {
+      id: '91549', name: 'Weekly Rope Rescue Equipment (SAR 2)',
+      type: 'radio', questions: [
+        'Anchor Strap','Anchor Plate','MPD (x2)','Clutch (x2)','AZTEK (x3)',
+        'Delta Quick Link (x2)','Kootenay Pulley','Double Pulley w/ Swivel (x2)',
+        'Single Pulley w/ Swivel (x3)','Locking Carabiner "G" (x9)',
+        'DNA Carabiner x2','Locking Carabiner "T" (x2)','Rescucender (x2)',
+        'Rescue 8 (x4)','Small Prusik (x13)','Large Prusik (x7)',
+        "40' Webbing","20' Webbing","12' Webbing",
+        'Multi-Loop Straps (x4)','Bull Ring','Pick Off Strap',
+        'Patient Seat Harness','Canvas Pad (x2)','Plastic Edge Protection',
+        'CMC Squid x1','Texora TX/L Sling'
+      ]
+    },
+    {
+      id: '91550', name: 'Weekly Rope Gear',
+      type: 'checkbox', questions: [
+        {name:'Personal Kits (x4)',options:[
+          'Helmet w/ Headlamp (x4)','Goggles (x4)','Gloves (x4)',
+          'Harness (x4)','Locking Carabiner "T" (x4)','CMC Field Guide (x4)']},
+        {name:'Sked',options:[
+          'Rope','Yellow Straps (x2)','Black Strap w/ Clips',
+          'Yellow Handles (x4)','Steel Carabiner']},
+        {name:'Stokes Basket Kit',options:[
+          'Litter Harness','Etrier','Pelvic Harness','Litter Straps (x4)']},
+        {name:'Vortex',options:['Spare Pins','Spare Pully']}
+      ]
+    }
+  ];
+
   const now = () => Date.now();
   const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
   const visible = node => !!node && !!(node.getClientRects().length);
@@ -185,6 +230,19 @@
   };
   const writePending = data => sessionStorage.setItem(KEY, JSON.stringify(data));
   const clearPending = () => sessionStorage.removeItem(KEY);
+  const readRopes = () => {
+    try {
+      const run = JSON.parse(sessionStorage.getItem(ROPE_KEY) || 'null');
+      if (run && run.unitId === ROPE_UNIT_ID &&
+        Number.isInteger(run.index) && run.index >= 0 &&
+        run.index < ROPE_TASKS.length &&
+        Date.now() - run.startedAt < 5 * 60 * 1000) return run;
+    } catch {}
+    return null;
+  };
+  const writeRopes = run => sessionStorage.setItem(ROPE_KEY, JSON.stringify(run));
+  const clearRopes = () => sessionStorage.removeItem(ROPE_KEY);
+  let ropeBusy = false;
   let busy = false, lastRoute = location.pathname, attempts = 0, opened = false;
   let label, detail, menu, root;
 
@@ -233,20 +291,22 @@
       el.type = 'button';
       el.textContent = text;
       el.style.cssText = 'width:100%;border:0;border-radius:7px;background:#176b8e;color:#fff;cursor:pointer;text-align:left;padding:11px;margin:4px 0;font:bold 13px Arial;';
-      el.onclick = () => begin(kind);
+      el.onclick = () => kind === 'ropes' ? beginRopes() : begin(kind);
       return el;
     };
     header.append(label);
     const update = document.createElement('a');
     update.href = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js';
-    update.textContent = 'Check for Update · v0.1.5';
+    update.textContent = 'Check for Update · v0.1.6';
     update.target = '_blank';
     update.rel = 'noopener noreferrer';
     update.style.cssText = 'display:block;text-align:center;padding:9px;margin-top:8px;' +
       'border:1px solid #9ebdcc;border-radius:7px;background:#edf4f8;color:#163c58;' +
       'font:bold 12px Arial;text-decoration:none;cursor:pointer;';
     menu.append(header, help, button('Daily Tour: Save In Process', 'daily'),
-      button('Weekly: Save In Process', 'weekly'), update, detail, rcStatusEl);
+      button('Weekly: Save In Process', 'weekly'),
+      button('Thursday Rope Checks (3): Save In Process', 'ropes'),
+      update, detail, rcStatusEl);
     const setExpanded = (expanded) => {
       opened = expanded;
       menu.style.display = expanded ? 'block' : 'none';
@@ -261,11 +321,23 @@
     toggle.onclick = () => setExpanded(!opened);
     root.append(menu, toggle);
     document.body.appendChild(root);
+    const runningRopes = readRopes();
+    const ropeResult = sessionStorage.getItem(ROPE_RESULT);
     const prior = sessionStorage.getItem(RESULT);
-    if (prior) notify(prior);
+    if (runningRopes) {
+      setExpanded(true);
+      notify('Preparing Thursday rope checks ' +
+        (runningRopes.index + 1) + '/3: ' +
+        ROPE_TASKS[runningRopes.index].name);
+    } else if (ropeResult) notify(ropeResult);
+    else if (prior) notify(prior);
   }
 
   function begin(kind) {
+    if (readRopes()) {
+      notify('Three-rope draft run is already active. Do not start another check.', true);
+      return;
+    }
     const id = inspectionId();
     if (!id || !t504Visible()) {
       notify('Open the T504 Unit Inspection page first. No form was changed.', true);
@@ -288,6 +360,35 @@
     } else {
       location.assign(listUrl(id));
     }
+  }
+
+
+  function beginRopes() {
+    if (inspectionId() !== ROPE_UNIT_ID || !t504Visible()) {
+      notify('Open Truck 504 Unit Inspection to prepare Thursday rope checks. Nothing changed.', true);
+      return;
+    }
+    if (readRopes() || readPending()) {
+      notify('Another Rebel IQ draft run is already active. Nothing changed.', true);
+      return;
+    }
+    // Exactly one button click starts all three *draft* forms, sequentially.
+    // No form is submitted, and every positive answer needs physical verification.
+    sessionStorage.removeItem(ROPE_RESULT);
+    sessionStorage.removeItem(RESULT);
+    const run = {
+      unitId: ROPE_UNIT_ID,
+      startedAt: Date.now(),
+      index: 0,
+      stage: 'form',
+      confirmed: [],
+      savedClickAt: null
+    };
+    writeRopes(run);
+    notify('Three-rope draft run 1/3: ' + ROPE_TASKS[0].name +
+      '. Defaults are UNVERIFIED. No submission.');
+    location.assign('/inspections/' + ROPE_UNIT_ID +
+      '/questionaries/' + ROPE_TASKS[0].id);
   }
 
   const questionNumber = container => {
@@ -313,7 +414,7 @@
       const raw = String(el.innerText || el.textContent || '');
       const number = questionNumber(el);
       if (!number || number > 80) continue;
-      const headings = [...raw.matchAll(/(?:^|\n)\s*(\d{1,2})\s*\.\s*[A-Za-z]/g)]
+      const headings = [...raw.matchAll(/(?:^|\n)\s*(\d{1,2})\s*\.\s*(?=[A-Za-z0-9])/g)]
         .map(match => Number(match[1]));
       if (headings.length === 1 && headings[0] === number) return el;
     }
@@ -442,6 +543,90 @@
   }
 
 
+  const iqLabelKey = value => clean(value).toLowerCase()
+    .replace(/[\u2019\u2018]/g,"'").replace(/\s+/g, ' ');
+  function checkboxLabel(node) {
+    const candidates = [
+      node.getAttribute?.('aria-label'),
+      ...(node.labels ? [...node.labels].map(el=>el.innerText||el.textContent) : []),
+      node.closest?.('mat-checkbox,.mat-mdc-checkbox,.mdc-form-field')?.innerText,
+      node.closest?.('mat-checkbox,.mat-mdc-checkbox,.mdc-form-field')?.textContent,
+      node.parentElement?.innerText,
+      node.parentElement?.textContent
+    ];
+    return candidates.map(clean).find(Boolean) || '';
+  }
+  function readRopeCheckboxes() {
+    const all = [...document.querySelectorAll('input[type="checkbox"]')]
+      .filter(node => !node.closest('#' + PANEL));
+    const groups = new Map();
+    for (const node of all) {
+      const group = findIqQuestion(node);
+      const number = questionNumber(group);
+      if (!number) continue;
+      const prior = groups.get(number);
+      if (prior && prior.group !== group) {
+        throw Error('Conflicting checkbox cards at question '+number+'. No answers changed.');
+      }
+      if (!prior) groups.set(number,{group,boxes:[]});
+      groups.get(number).boxes.push({node, label:checkboxLabel(node)});
+    }
+    return {groups,total:all.length};
+  }
+
+  function validateRopeForm(task) {
+    if (!task || inspectionId() !== ROPE_UNIT_ID ||
+      formId() !== task.id || !t504Visible() ||
+      !clean(document.body.innerText).includes(task.name)) {
+      throw Error('Wrong T504 Thursday rope questionnaire. No answers changed.');
+    }
+    const {radioMap,textMap,radioCount,textareaCount} = readIqForm();
+    const {groups:checkMap,total:checkboxCount} = readRopeCheckboxes();
+    if (task.type === 'radio') {
+      if (radioMap.size !== task.questions.length || textMap.size ||
+        checkMap.size || checkboxCount) {
+        throw Error('Rope radio form incomplete: '+radioMap.size+'/'+task.questions.length+
+          ' questions, '+radioCount+' radios, '+textareaCount+' text fields, '+
+          checkboxCount+' checkboxes. No answers changed.');
+      }
+      for (let i = 1; i <= task.questions.length; i++) {
+        const current = radioMap.get(i);
+        const choices = current?.choices || [];
+        if (!current ||
+          iqLabelKey(questionName(current.group)) !== iqLabelKey(task.questions[i-1]) ||
+          choices.length !== 2 ||
+          !choices.some(x => x.value === 'Present') ||
+          !choices.some(x => x.value === 'Missing')) {
+          throw Error('Unexpected rope question/answer at '+i+'. No answers changed.');
+        }
+      }
+    } else if (task.type === 'checkbox') {
+      const expectedCount = task.questions.reduce((sum,q)=>sum+q.options.length,0);
+      if (radioMap.size || textMap.size || checkMap.size !== task.questions.length ||
+        checkboxCount !== expectedCount) {
+        throw Error('Rope Gear form incomplete: '+checkMap.size+'/4 groups, '+
+          checkboxCount+'/'+expectedCount+' checkboxes. No answers changed.');
+      }
+      for (let i = 1; i <= task.questions.length; i++) {
+        const actual = checkMap.get(i), expected = task.questions[i-1];
+        if (!actual || iqLabelKey(questionName(actual.group)) !== iqLabelKey(expected.name) ||
+          actual.boxes.length !== expected.options.length ||
+          actual.boxes.some((box,j) => iqLabelKey(box.label) !== iqLabelKey(expected.options[j]) ||
+            box.node.disabled)) {
+          throw Error('Unexpected rope gear or checkbox at group '+i+'. No answers changed.');
+        }
+      }
+    } else {
+      throw Error('Unknown rope draft questionnaire type. No answers changed.');
+    }
+    const saves = [...document.querySelectorAll('button')]
+      .filter(node=>visible(node) && clean(node.textContent)==='Save In Process');
+    if (saves.length !== 1 || saves[0].disabled) {
+      throw Error('Rope questionnaire Save In Process button was not uniquely available.');
+    }
+    return {radioMap, checkMap, save:saves[0]};
+  }
+
   // Operative IQ's Angular route/title renders BEFORE its radio choices and
   // text controls. Do not treat that transient empty DOM as a changed form.
   // Check the complete questionnaire repeatedly, then require a stable,
@@ -467,6 +652,141 @@
     throw Error('T504 questionnaire did not become ready after loading. ' +
       (lastFailure?.message || 'Form controls were incomplete.') +
       ' No answers were modified or saved.');
+  }
+
+
+  async function waitForRopeForm(task, currentRun, timeoutMs = 16000, pollMs = 180) {
+    const deadline = Date.now() + timeoutMs;
+    let stable = 0, lastFailure = null;
+    while (Date.now() < deadline) {
+      if (!currentRun()) throw Error('Thursday rope run or form changed while loading.');
+      try {
+        validateRopeForm(task); // read-only until all 11/27 radios or 17 boxes are verified
+        if (++stable >= 3) return;
+      } catch (error) {
+        stable = 0;
+        lastFailure = error;
+      }
+      await new Promise(resolve => setTimeout(resolve, pollMs));
+    }
+    throw Error('Thursday rope questionnaire did not finish loading: ' +
+      (lastFailure?.message || 'Unknown incomplete form'));
+  }
+
+  function prepareRopeDraft(task, currentRun) {
+    const form = validateRopeForm(task);
+    if (task.type === 'radio') {
+      for (let i = 1; i <= task.questions.length; i++) {
+        const answer = form.radioMap.get(i).choices.find(c => c.value === 'Present');
+        if (!answer) throw Error('Present option missing at rope question ' + i);
+        if (!answer.checked) answer.click();
+        if (!answer.checked) throw Error('Rope question ' + i + ' rejected draft selection.');
+      }
+    } else {
+      for (let i = 1; i <= task.questions.length; i++) {
+        for (const {node, label} of form.checkMap.get(i).boxes) {
+          if (!node.checked) node.click();
+          if (!node.checked) throw Error('Rope Gear ' + label + ' rejected draft checkbox.');
+        }
+      }
+    }
+    if (!currentRun() || location.pathname !==
+        '/inspections/' + ROPE_UNIT_ID + '/questionaries/' + task.id) {
+      throw Error('Thursday rope form changed before Save In Process.');
+    }
+    const current = readRopes();
+    if (!current || current.stage !== 'form') {
+      throw Error('Thursday rope transaction is not ready to save.');
+    }
+    // Persist BEFORE the only save click so page reloads cannot repeat it.
+    writeRopes({...current, stage:'receipt', savedClickAt:Date.now()});
+    // Physical inspection remains the firefighter's responsibility.
+    form.save.click();
+  }
+
+  function finishRopesWithError(error, run = readRopes()) {
+    const confirmed = Array.isArray(run?.confirmed) ? run.confirmed.length : 0;
+    clearRopes();
+    const message = 'Thursday rope drafts stopped at '+confirmed+'/3 confirmed: ' +
+      clean(error?.message || error || 'Unknown error') +
+      ' Check the other forms before retrying. No automatic resubmission.';
+    sessionStorage.setItem(ROPE_RESULT, message);
+    notify(message, true);
+    captureIqError(error, 'thursday-ropes:'+String(run?.stage||'unknown'));
+  }
+
+  function ropeSavedOnGroup(task) {
+    // A save click is not success. Require a visible, exact questionnaire card
+    // with Saved in Process on the returned unit group listing.
+    const links = [...document.querySelectorAll('a,[role="link"]')]
+      .filter(node => visible(node) && !node.closest('#' + PANEL));
+    return links.some(node => {
+      const label = clean(node.innerText || node.textContent);
+      return label.startsWith(task.name) && /saved in process/i.test(label) &&
+        (label.length === task.name.length ||
+          /\s/.test(label.charAt(task.name.length)));
+    });
+  }
+
+  async function runRopes() {
+    if (ropeBusy) return;
+    const run = readRopes();
+    if (!run) return;
+    ropeBusy = true;
+    try {
+      const task = ROPE_TASKS[run.index];
+      if (!task || inspectionId() !== ROPE_UNIT_ID) {
+        throw Error('Truck 504 inspection identity was not verified.');
+      }
+      if (run.stage === 'form') {
+        if (formId() !== task.id) {
+          if (Date.now() - (run.navigateAt || run.startedAt) > 12000) {
+            throw Error('Could not navigate to '+task.name+'. Nothing was saved for this item.');
+          }
+          return; // The requested route is still navigating.
+        }
+        const currentRun = () => {
+          const live = readRopes();
+          return live?.stage === 'form' && live?.index === run.index &&
+            inspectionId() === ROPE_UNIT_ID && formId() === task.id;
+        };
+        notify('Loading Thursday rope draft '+(run.index+1)+'/3: '+task.name);
+        await waitForRopeForm(task,currentRun);
+        if (!currentRun()) throw Error('Rope form changed during verification.');
+        prepareRopeDraft(task,currentRun);
+        notify('Save In Process clicked for '+task.name+
+          '. Waiting for unit-list confirmation, not submitting.');
+        return;
+      }
+      if (run.stage !== 'receipt' || !run.savedClickAt) {
+        throw Error('Unexpected Thursday rope draft transaction stage.');
+      }
+      if (isGroupPage() && ropeSavedOnGroup(task)) {
+        const confirmed = [...(run.confirmed || []),task.id];
+        if (run.index + 1 >= ROPE_TASKS.length) {
+          clearRopes();
+          const message = 'All 3 Thursday rope drafts: Saved in Process confirmed on unit list. ' +
+            'Physically inspect every item and submit manually only after verification.';
+          sessionStorage.setItem(ROPE_RESULT,message);
+          notify(message);
+          return;
+        }
+        const next = ROPE_TASKS[run.index+1];
+        writeRopes({...run,index:run.index+1,confirmed,
+          stage:'form',navigateAt:Date.now(),savedClickAt:null});
+        notify('Saved '+confirmed.length+'/3 rope drafts. Opening '+next.name+'...');
+        location.assign('/inspections/'+ROPE_UNIT_ID+'/questionaries/'+next.id);
+        return;
+      }
+      if (Date.now()-run.savedClickAt > 22000) {
+        throw Error('Save In Process was clicked for '+task.name+
+          ', but the unit-list receipt was not verified.');
+      }
+    } catch (error) {
+      finishRopesWithError(error,readRopes() || run);
+    } finally {
+      ropeBusy = false;
+    }
   }
 
   function applyTextarea(field, value) {
@@ -570,7 +890,14 @@
       lastRoute = location.pathname;
       attempts = 0;
     }
-    if (readPending()) void runPending().catch(error => {
+    const ropeRun = readRopes();
+    if (ropeRun) {
+      void runRopes().catch(error => finishRopesWithError(error, readRopes()));
+    } else if (sessionStorage.getItem(ROPE_KEY)) {
+      clearRopes();
+      notify('Thursday rope draft run expired before completion. Confirm existing saved drafts before retrying.', true);
+    }
+    if (!ropeRun && readPending()) void runPending().catch(error => {
       clearPending();
       captureIqError(error, 'navigation');
       notify('Stopped safely: ' + scrubError(error?.message || error), true);
