@@ -162,7 +162,7 @@ test('Rebel IQ exposes a direct Check for Update button and preserves Tampermonk
  assert.match(src,/Check for Update/);
  assert.match(src,/update\.href = 'https:\/\/raw\.githubusercontent\.com\/michaelbartbrion-cmd\/mission-vector-check-it\/main\/beta\/rebel-iq\.user\.js'/);
  assert.match(src,/@updateURL\s+https:\/\/raw\.githubusercontent\.com/);
- assert.match(src,/const IQ_VERSION = '0\.1\.7'/);
+ assert.match(src,/const IQ_VERSION = '0\.1\.8'/);
 });
 test('Rebel IQ automatically collects failures and keeps them queued until confirmed delivery',()=>{
  assert.match(src,/@grant\s+GM_getValue/);
