@@ -414,7 +414,7 @@
       const raw = String(el.innerText || el.textContent || '');
       const number = questionNumber(el);
       if (!number || number > 80) continue;
-      const headings = [...raw.matchAll(/(?:^|\n)\s*(\d{1,2})\s*\.\s*[A-Za-z]/g)]
+      const headings = [...raw.matchAll(/(?:^|\n)\s*(\d{1,2})\s*\.\s*(?=[A-Za-z0-9])/g)]
         .map(match => Number(match[1]));
       if (headings.length === 1 && headings[0] === number) return el;
     }
@@ -700,7 +700,8 @@
     }
     // Persist BEFORE the only save click so page reloads cannot repeat it.
     writeRopes({...current, stage:'receipt', savedClickAt:Date.now()});
-    form.save.click(); // Not Submit. Physical inspection remains the firefighter's responsibility.
+    // Physical inspection remains the firefighter's responsibility.
+    form.save.click();
   }
 
   function finishRopesWithError(error, run = readRopes()) {
