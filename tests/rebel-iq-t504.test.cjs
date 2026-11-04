@@ -162,7 +162,7 @@ test('Rebel IQ exposes a direct Check for Update button and preserves Tampermonk
  assert.match(src,/Check for Update/);
  assert.match(src,/update\.href = 'https:\/\/raw\.githubusercontent\.com\/michaelbartbrion-cmd\/mission-vector-check-it\/main\/beta\/rebel-iq\.user\.js'/);
  assert.match(src,/@updateURL\s+https:\/\/raw\.githubusercontent\.com/);
- assert.match(src,/v0\.1\.4/);
+ assert.match(src,/v0\.1\.5/);
 });
 test('Rebel IQ automatically collects failures and keeps them queued until confirmed delivery',()=>{
  assert.match(src,/@grant\s+GM_getValue/);
@@ -210,4 +210,64 @@ test('Weekly prepares the twelve verified radio defaults and eight tire-pressure
   assert.equal(h.inputs.filter(x=>x.checked).length,12);
   assert.equal(h.textareas.filter(x=>x.value==='').length,3);
   assert.equal(h.textareas.filter(x=>x.value==='110').length,8);
+});
+
+
+function fakeReadinessHarness(validator) {
+  const begin=src.indexOf('  async function waitForIqForm(');
+  const end=src.indexOf('  function applyTextarea(',begin);
+  assert.ok(begin>0&&end>begin,'render readiness function present');
+  let t=0;
+  class Clock extends Date {static now(){return t;}}
+  const pause=(fn,ms)=>{t+=ms;fn();};
+  const wait=new Function('validateForm','Date','setTimeout',
+    src.slice(begin,end)+'\nreturn waitForIqForm;')(validator,Clock,pause);
+  return {wait,now:()=>t};
+}
+test('Angular route loads before controls; wait for three complete validations, never edit early',async()=>{
+  let calls=0,edits=0;
+  const h=fakeReadinessHarness(()=>{
+    calls++;
+    if(calls<5)throw Error('Unexpected questionnaire layout: found 0 choices, expected 12.');
+    return {valid:true};
+  });
+  await h.wait('weekly',()=>true,3000,100);
+  edits++;
+  assert.equal(calls,7,'four loading samples, then three complete form samples');
+  assert.equal(edits,1);
+  assert.equal(h.now(),600);
+});
+test('Temporary partial forms reset readiness and are never treated as complete',async()=>{
+  let calls=0;
+  const h=fakeReadinessHarness(()=>{
+    calls++;
+    if(calls===1||calls===4)throw Error('Form still loading');
+  });
+  await h.wait('daily',()=>true,3000,100);
+  assert.equal(calls,7,'partial form resets required stable validations');
+});
+test('If the user navigates away while loading, fail closed without waiting to save',async()=>{
+  let checks=0;
+  const h=fakeReadinessHarness(()=>{checks++;throw Error('found 0 choices');});
+  await assert.rejects(
+    h.wait('daily',()=>checks<2,1500,100),/questionnaire changed while loading/
+  );
+  assert.ok(h.now()<1500);
+});
+test('Timed-out form reports incomplete evidence rather than proceeding with Save',async()=>{
+  let edits=0;
+  const h=fakeReadinessHarness(()=>{throw Error('found 0 choices, expected 41');});
+  await assert.rejects(h.wait('daily',()=>true,500,100),/did not become ready.*0 choices/);
+  assert.equal(edits,0);
+});
+test('The navigation handler waits for complete form readiness before preparing and saving',()=>{
+  const start=src.indexOf('  async function runPending() {');
+  const end=src.indexOf('  function tick() {',start);
+  const body=src.slice(start,end);
+  assert.match(body,/await waitForIqForm\(pending\.kind/);
+  assert.ok(body.indexOf('await waitForIqForm(pending.kind') <
+    body.indexOf('const result = await prepare(pending.kind)'), 'readiness before any draft edits');
+  assert.match(body,/location\.pathname === originalPath/);
+  assert.match(body,/inspectionId\(\) === pending\.unitId/);
+  assert.match(body,/readPending\(\)\?\.kind === pending\.kind/);
 });
