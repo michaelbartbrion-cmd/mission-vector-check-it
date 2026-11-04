@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.5
+// @version      0.1.6
 // @description  Prepare T504 daily and weekly Operative IQ inspection drafts, save in process, never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.5' };
+  window.__rebelIqT504 = { version: '0.1.6' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.5';
+  const IQ_VERSION = '0.1.6';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -169,6 +169,51 @@
     daily: { name: '63000-13 Tour Check', count: 41 },
     weekly: { name: 'Weekly 63000-13 Check', count: 12 }
   };
+  // Exact verified T504 Thursday questionnaire IDs and labels.
+  // These are unverified draft defaults only; no rope inspection is submitted.
+  const ROPE_UNIT_ID = '60421';
+  const ROPE_KEY = 'rebelIqT504ThreeRopesV1';
+  const ROPE_RESULT = 'rebelIqT504ThreeRopesResultV1';
+  const ROPE_TASKS = [
+    {
+      id: '91548', name: 'Weekly Rope Rescue Equipment (Low Angle Kit 1)',
+      type: 'radio', questions: [
+        'Anchor Strap','Anchor Plate','MPD','Double Pulley w/ Swivel (x2)',
+        'Single Pulley w/ Swivel (x2)','Locking Carabiner "G" (x6)',
+        'Rescucender (x2)','Large Prusik (x2)','Small Prusik (x2)',
+        "20' Webbing","12' Webbing"
+      ]
+    },
+    {
+      id: '91549', name: 'Weekly Rope Rescue Equipment (SAR 2)',
+      type: 'radio', questions: [
+        'Anchor Strap','Anchor Plate','MPD (x2)','Clutch (x2)','AZTEK (x3)',
+        'Delta Quick Link (x2)','Kootenay Pulley','Double Pulley w/ Swivel (x2)',
+        'Single Pulley w/ Swivel (x3)','Locking Carabiner "G" (x9)',
+        'DNA Carabiner x2','Locking Carabiner "T" (x2)','Rescucender (x2)',
+        'Rescue 8 (x4)','Small Prusik (x13)','Large Prusik (x7)',
+        "40' Webbing","20' Webbing","12' Webbing",
+        'Multi-Loop Straps (x4)','Bull Ring','Pick Off Strap',
+        'Patient Seat Harness','Canvas Pad (x2)','Plastic Edge Protection',
+        'CMC Squid x1','Texora TX/L Sling'
+      ]
+    },
+    {
+      id: '91550', name: 'Weekly Rope Gear',
+      type: 'checkbox', questions: [
+        {name:'Personal Kits (x4)',options:[
+          'Helmet w/ Headlamp (x4)','Goggles (x4)','Gloves (x4)',
+          'Harness (x4)','Locking Carabiner "T" (x4)','CMC Field Guide (x4)']},
+        {name:'Sked',options:[
+          'Rope','Yellow Straps (x2)','Black Strap w/ Clips',
+          'Yellow Handles (x4)','Steel Carabiner']},
+        {name:'Stokes Basket Kit',options:[
+          'Litter Harness','Etrier','Pelvic Harness','Litter Straps (x4)']},
+        {name:'Vortex',options:['Spare Pins','Spare Pully']}
+      ]
+    }
+  ];
+
   const now = () => Date.now();
   const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
   const visible = node => !!node && !!(node.getClientRects().length);
@@ -239,7 +284,7 @@
     header.append(label);
     const update = document.createElement('a');
     update.href = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js';
-    update.textContent = 'Check for Update · v0.1.5';
+    update.textContent = 'Check for Update · v0.1.6';
     update.target = '_blank';
     update.rel = 'noopener noreferrer';
     update.style.cssText = 'display:block;text-align:center;padding:9px;margin-top:8px;' +
