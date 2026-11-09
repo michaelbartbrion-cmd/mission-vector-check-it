@@ -11857,7 +11857,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     function isScbaAirpackStandardItem(item) {
         // SCBA location text on its own is not proof of an airpack.
         const type = clean(item.name + ' ' + item.pool).toLowerCase();
-        if (/\b(face\s*mask|mask|cylinder|bottle|spare\s*air|battery|charger|hose|regulator\s*only)\b/i.test(type))
+        if (/\b(face\s*(?:mask|piece)|mask|cylinder|bottle|spare\s*air|battery|charger|hose|regulator)\b/i.test(type))
             return false;
         return /\b(?:air\s?packs?|scba(?:\s*(?:air\s?pack|pack|frame|harness|backpack))?|self[-\s]*contained\s+breathing\s+apparatus)\b/i.test(type);
     }
@@ -11924,6 +11924,35 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return null;
     }
 
+    async function scbaAirpackWaitForCompletePage(range,timeoutMs=14000) {
+        const expected=range.last-range.first+1;
+        const started=Date.now();
+        let unchangedSince=0, signature='';
+        while(Date.now()-started<timeoutMs) {
+            const t=scbaAirpackStandardTable();
+            const current=scbaAirpackRange();
+            const rows=t ? [...t.table.querySelectorAll(
+                'tbody tr,[role="rowgroup"] [role="row"]')] : [];
+            const complete=!!t && !!current && current.first===range.first &&
+                current.last===range.last && current.total===range.total &&
+                rows.length===expected && rows.every(row=>{
+                    const cells=[...row.querySelectorAll(':scope > td,:scope > [role="cell"]')];
+                    return cells.length>=t.labels.length && [
+                        'name','pool','location','item status'
+                    ].every(label=>clean(cells[t.labels.indexOf(label)]?.textContent || '').length>0);
+                });
+            if(complete) {
+                const currentSignature=scbaAirpackNativeSignature();
+                if(currentSignature && currentSignature===signature) {
+                    if(Date.now()-unchangedSince>=500)return true;
+                } else {signature=currentSignature;unchangedSince=Date.now();}
+            } else {signature='';unchangedSince=0;}
+            await sleep(140);
+        }
+        throw new Error('Standard equipment page '+range.first+'-'+range.last+
+            ' did not finish loading. No official SCBA inspection was changed.');
+    }
+
     function scbaAirpackNativeSignature() {
         const target=scbaAirpackStandardTable();
         if(!target)return '';
@@ -11976,13 +12005,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const current=scbaAirpackRange();
                 if(!current||current.total!==original.total||current.first!==range.first)
                     throw new Error('Standard equipment totals or active page changed during scan.');
+                await scbaAirpackWaitForCompletePage(current);
                 const entries=scbaAirpackVisibleRows();
                 for(const item of entries){
                     const key=item.href || [item.scope,item.pool,item.name].join('|');
                     if(seen.has(key)){
                         const other=seen.get(key);
-                        if(other.location!==item.location||other.pool!==item.pool)
-                            throw new Error('Conflicting SCBA inventory identity. Stop and inspect in Vector.');
+                        // Two same-name/same-pool assets with no unique native
+                        // detail link cannot be silently merged into one pack.
+                        if(!item.href || !other.href ||
+                            other.location!==item.location || other.pool!==item.pool)
+                            throw new Error('Ambiguous SCBA asset identity. Resolve the duplicate in Vector before recording.');
                     }else seen.set(key,item);
                 }
                 pages++;
