@@ -124,7 +124,7 @@ test('asset review is inline inside expanded Rebel IQ, never a second popup',()=
   assert.equal(section.style.cssText.includes('display:none'),true,
     'review is hidden off the asset route');
   assert.ok(walk(section).some(el=>el.tagName==='BUTTON'&&
-    el.textContent==='Preview Inspected Assets'));
+    el.textContent==='Load Unverified Assets'));
   assert.equal(walk(section).some(el=>el.textContent==='Hide'),false,
     'remove redundant Hide control: original Starbird collapses panel');
   assert.equal(full.filter(el=>el.tagName==='ASIDE').length,0,

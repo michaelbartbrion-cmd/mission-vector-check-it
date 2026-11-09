@@ -1,183 +1,200 @@
 'use strict';
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const src = fs.readFileSync(path.join(__dirname,'../beta/rebel-iq.user.js'),'utf8');
-const start=src.indexOf('  function buildAssetBatchPlan(rawExceptions) {');
-const end=src.indexOf('  function beginAssets() {',start);
-assert.ok(start>0&&end>start,'guarded asset batch implementation is present');
-const block=src.slice(start,end);
-const clean=v=>String(v??'').replace(/\s+/g,' ').trim();
-
+const test=require('node:test'),assert=require('node:assert/strict');
+const fs=require('node:fs'),path=require('node:path');
+const src=fs.readFileSync(path.join(__dirname,'../beta/rebel-iq.user.js'),'utf8');
+const begin=src.indexOf('  function buildReviewedAssetChecklist() {');
+const end=src.indexOf('  function beginAssets() {',begin);
+assert.ok(begin>0&&end>begin,'Vector-style reviewed asset checklist present');
+const logic=src.slice(begin,end);
+const clean=x=>String(x??'').replace(/\s+/g,' ').trim();
 class FakeInput {
   constructor(){this._value='';this.isConnected=true;this.disabled=false;this.readOnly=false;}
   get value(){return this._value;}
-  set value(value){this._value=String(value);}
+  set value(v){this._value=String(v);}
   focus(){}
   dispatchEvent(){return true;}
 }
-function scenario(config={}) {
-  const rows=(config.rows||[
-    ['Thermal Imager','213','not verified',false],
-    ['SCBA Frame','EFS-2001','not verified',true],
-    ['Cardiac Monitor','CM2328','not verified',false],
-    ['Duplicate 1','DUP','not verified',false],
-    ['Duplicate 2','DUP','not verified',false],
-    ['Saw','','not verified',false],
-    ['Thermal Imager','394','verified',false],
-    ['Safety Line','555','not verified',false]
-  ]).map(([title,assetTag,status,maintenanceBlocked])=>
-    ({title,assetTag,status,maintenanceBlocked}));
-  const nodes=new Map(),set=(key,node)=>{nodes.set(key,node);return node;};
-  const input=new FakeInput();
-  const status={textContent:''},progress={textContent:''};
-  const raw={value:config.exceptions||'CM2328'};
-  const attest={checked:false,disabled:true};
-  const action={disabled:true,textContent:''};
-  const stop={disabled:true};
-  const atttext={textContent:''},plan={textContent:'',
-    append(node){this.node=node;}};
-  const doc={
-    createElement(tag){
-      return {tag,style:{cssText:''},textContent:'',
-        setAttribute(){},append(...n){this.children=n;},disabled:false};
-    },
-    getElementById(){return section}
+class MockElement {
+  constructor(tag='div'){
+    this.tagName=tag.toUpperCase();this.children=[];this.style={cssText:''};
+    this.checked=false;this.disabled=false;this.textContent='';this.value='';
+  }
+  append(...children){this.children.push(...children);}
+  replaceChildren(...children){this.children=[...children];}
+  setAttribute(k,v){this[k]=v;}
+  querySelectorAll(selector){
+    const matches=[];const tag=selector.toUpperCase();
+    const visit=node=>{if(node.tagName===tag)matches.push(node);
+      for(const child of node.children||[])visit(child);};
+    for(const child of this.children)visit(child);
+    return matches;
+  }
+}
+function scenario(options={}){
+  const defaults=[
+    ['Thermal Imager','213','not verified'],
+    ['SCBA Frame','EFS-2001','not verified'],
+    ['Cardiac Monitor','CM2328','not verified'],
+    ['Saw','','not verified'],
+    ['Line A','DUP','not verified'],
+    ['Line B','DUP','not verified'],
+    ['Thermal Imager','394','verified'],
+    ['Safety Line','555','not verified']
+  ];
+  const rows=(options.rows||defaults).map(([title,assetTag,status])=>({title,assetTag,status}));
+  const sections=new Map(),node=(key,tag='div')=>{
+    const element=new MockElement(tag);sections.set(key,element);return element;};
+  const list=node('[data-asset-check-list]');
+  const progress=node('[data-asset-check-progress]');
+  const summary=node('[data-asset-check-counts]');
+  const attest=node('[data-asset-check-attest]','input');
+  attest.disabled=true;
+  const record=node('[data-asset-check-record]','button');record.disabled=true;
+  const stop=node('[data-asset-check-stop]','button');
+  const load=node('[data-asset-check-load]','button');
+  const wrap=node('[data-asset-check-attest-wrap]');
+  const section={querySelector:key=>sections.get(key)||null};
+  const document={
+    createElement:tag=>new MockElement(tag),
+    getElementById:()=>section
   };
-  set('[data-asset-batch-exceptions]',raw);
-  set('[data-asset-batch-attest]',attest);
-  set('[data-asset-batch-run]',action);
-  set('[data-asset-batch-stop]',stop);
-  set('[data-asset-batch-progress]',progress);
-  set('[data-asset-batch-plan]',plan);
-  set('[data-asset-batch-attest-text]',atttext);
-  set('[data-asset-guide-status]',status);
-  const section={querySelector:key=>nodes.get(key)||null};
+  const input=new FakeInput();
   let clicks=0;
-  const nativeButton={
-    isConnected:true,
-    click(){
-      clicks++;
-      if(config.update===false)return;
-      const matching=rows.filter(row=>row.assetTag.toUpperCase()===input.value);
-      if(matching.length===1)matching[0].status='verified';
+  const native=()=>options.nativeMissing?null:{
+    input,button:{
+      isConnected:true,
+      click(){
+        clicks++;
+        if(options.neverConfirm)return;
+        const targets=rows.filter(row=>row.assetTag.toUpperCase()===input.value);
+        if(targets.length===1)targets[0].status='verified';
+      }
     }
   };
-  const native=()=>config.nativeUnavailable?null:{input,button:nativeButton};
-  const counters=()=>config.nativeNull?null:({
-    total:config.total||90,required:76,completed:14,maintenance:16
-  });
-  const js='let assetBatchPreview=null,assetBatchRunning=false,'+
-    'assetRecordBusy=false,assetBatchCancel=false,'+
-    'assetBatchPilotConfirmed=false,assetGuideLastScan=0;'+
-    'const attemptedAssetRecords=new Set();\n'+block+'\n'+
-    'return {buildAssetBatchPlan,prepareAssetBatchPreview,'+
-    'runInspectedAssetBatch,invalidateAssetBatchPreview,'+
-    'getPreview:()=>assetBatchPreview,'+
-    'isPilotConfirmed:()=>assetBatchPilotConfirmed,'+
+  const code='let assetGuideLastScan=0,assetBatchPreview=null,'+
+    'assetBatchRunning=false,assetBatchCancel=false,'+
+    'assetBatchPilotConfirmed=false;const attemptedAssetRecords=new Set();\n'+
+    logic+'\nreturn {loadAssetChecklist,buildReviewedAssetChecklist,'+
+    'recordReviewedAssetChecklist,countReviewedAssetChoices,'+
+    'getPreview:()=>assetBatchPreview,getPilot:()=>assetBatchPilotConfirmed,'+
     'getAttempts:()=>attemptedAssetRecords};';
-  const create=new Function('document','isAssetPage','inspectionId','ASSET_UNIT_ID',
-    't504Visible','readPending','readRopes','readNativeAssetTotals',
-    'readAssetReviewRows','clean','location','findNativeAssetTagEntry',
-    'HTMLInputElement','Event','setTimeout','refreshAssetReviewGuide',
-    'ASSET_GUIDE_ID',js);
-  const fakeEvent=class {constructor(type){this.type=type;}};
-  const app=create(doc,()=>config.wrongRoute!==true,
-    ()=>config.wrongUnit?'9999':'60443','60443',
-    ()=>true,()=>config.activeDraft?{}:null,()=>null,counters,()=>rows,clean,
-    {pathname:'/inspections/60443/assets/group/-1'},native,FakeInput,
-    fakeEvent,callback=>callback(),()=>{},'rebel-iq-t504-asset-guide');
-  return {app,rows,raw,input,attest,action,plan,progress,
-    clicks:()=>clicks};
+  const create=new Function('document','isAssetPage','inspectionId',
+    'ASSET_UNIT_ID','t504Visible','readPending','readRopes',
+    'readNativeAssetTotals','readAssetReviewRows','clean',
+    'location','findNativeAssetTagEntry','HTMLInputElement',
+    'Event','setTimeout','refreshAssetReviewGuide','ASSET_GUIDE_ID',code);
+  const app=create(document,()=>options.wrongRoute!==true,
+    ()=>options.wrongUnit?'9999':'60443','60443',()=>true,
+    ()=>options.activeDraft?{}:null,()=>null,
+    ()=>options.nativeNull?null:{total:90,required:76,completed:14,maintenance:16},
+    ()=>rows,clean,{pathname:'/inspections/60443/assets/group/-1'},
+    native,FakeInput,class Event{constructor(t){this.type=t;}},
+    fn=>fn(),()=>{},'rebel-iq-t504-asset-guide');
+  return {app,rows,list,attest,record,summary,progress,load,stop,input,
+    clicks:()=>clicks,
+    choice:(index,value)=>{
+      const control=list.children[index].children[1];
+      control.value=value;control.onchange();
+    }
+  };
 }
-
-test('batch excludes exceptions, no tags and duplicates but NOT maintenance due',()=>{
-  const {app}=scenario();
-  const p=app.buildAssetBatchPlan('CM2328');
-  assert.deepEqual(p.items.map(x=>x.assetTag),['213','EFS-2001','555']);
-  assert.equal(p.blocked.exception,1);
-  assert.equal(p.blocked.untagged,1);
-  assert.equal(p.blocked.duplicate,2);
-  assert.equal(p.blocked.otherStatus,1);
+test('Load finds every Not Verified row and defaults answers to Verified without writing',()=>{
+  const h=scenario();
+  h.app.loadAssetChecklist();
+  const p=h.app.getPreview();
+  assert.equal(p.items.length,7);
+  assert.ok(p.items.every(item=>item.choice==='verified'));
+  assert.equal(h.list.children.length,7);
+  assert.equal(h.clicks(),0);
+  assert.equal(h.attest.checked,false);
+  assert.equal(h.record.disabled,true);
+  assert.match(h.summary.textContent,/7 Not Verified/);
+  assert.equal(p.items.filter(item=>item.recordable).length,4);
   assert.equal(p.unmapped,82);
-  assert.equal(p.native.total,90);
 });
-test('mistyped exception, unavailable native totals, wrong unit and other draft stop all planning',()=>{
-  assert.match(scenario().app.buildAssetBatchPlan('BADTAG').error,/not found/);
-  assert.match(scenario({nativeNull:true}).app.buildAssetBatchPlan('').error,/Cannot reconcile/);
-  assert.match(scenario({wrongUnit:true}).app.buildAssetBatchPlan('').error,/Open T504/);
-  assert.match(scenario({activeDraft:true}).app.buildAssetBatchPlan('').error,/Finish existing/);
-});
-test('preview prepares a disclosed batch but cannot certify until physical attestation',async()=>{
-  const h=scenario();
-  h.app.prepareAssetBatchPreview();
-  assert.equal(h.app.getPreview().items.length,3);
-  assert.match(h.plan.textContent,/Safety pilot/);
-  assert.match(h.plan.textContent,/not mapped/);
-  assert.match(h.action.textContent,/Pilot/);
-  assert.equal(h.attest.checked,false);
-  assert.equal(h.action.disabled,true);
-  await h.app.runInspectedAssetBatch();
+test('the inspector can change individual defaults to Missing, Not Working, Damaged and Skip',()=>{
+  const h=scenario();h.app.loadAssetChecklist();
+  h.attest.checked=true;
+  h.choice(0,'missing');h.choice(1,'not_working');
+  h.choice(2,'damaged');h.choice(3,'skip');
+  const p=h.app.getPreview();
+  assert.deepEqual(p.items.slice(0,4).map(x=>x.choice),
+    ['missing','not_working','damaged','skip']);
+  assert.equal(h.attest.checked,false,'edits require fresh human confirmation');
+  assert.match(h.summary.textContent,/3 exceptions/);
+  assert.match(h.summary.textContent,/1 skipped/);
   assert.equal(h.clicks(),0);
 });
-test('single-item field pilot verifies only one and requires another preview for remaining',async()=>{
+test('no native actions occur before review and explicit inspected/present/working attestation',async()=>{
   const h=scenario();
-  h.app.prepareAssetBatchPreview();
-  h.attest.checked=true;
-  await h.app.runInspectedAssetBatch();
-  assert.equal(h.clicks(),1);
-  assert.equal(h.rows.find(row=>row.assetTag==='213').status,'verified');
-  assert.equal(h.rows.find(row=>row.assetTag==='555').status,'not verified');
-  assert.equal(h.app.isPilotConfirmed(),true);
-  assert.match(h.progress.textContent,/Pilot confirmed/);
-  h.app.prepareAssetBatchPreview();
-  assert.equal(h.app.getPreview().items.length,2);
-  assert.match(h.action.textContent,/Verify Inspected Assets \(2\)/);
-  h.attest.checked=true;
-  await h.app.runInspectedAssetBatch();
-  assert.equal(h.clicks(),3);
-  assert.equal(h.rows.find(row=>row.assetTag==='EFS-2001').status,'verified');
-  assert.equal(h.rows.find(row=>row.assetTag==='555').status,'verified');
-  assert.match(h.progress.textContent,/Verified 2\/2/);
+  h.app.loadAssetChecklist();
+  await h.app.recordReviewedAssetChecklist();
+  assert.equal(h.clicks(),0);
+  assert.match(h.progress.textContent,/Not ready/);
+  assert.equal(h.rows[0].status,'not verified');
 });
-test('native verification uncertainty stops after one click and does not unlock bulk',async()=>{
-  const h=scenario({update:false});
-  h.app.prepareAssetBatchPreview();
+test('first field test is one asset; second action preserves exception edits and records the rest',async()=>{
+  const h=scenario();h.app.loadAssetChecklist();
+  h.choice(2,'missing');h.choice(3,'skip');
   h.attest.checked=true;
-  await h.app.runInspectedAssetBatch();
+  await h.app.recordReviewedAssetChecklist();
   assert.equal(h.clicks(),1);
-  assert.equal(h.app.isPilotConfirmed(),false);
+  assert.equal(h.app.getPilot(),true);
+  assert.equal(h.rows[0].status,'verified');
+  assert.equal(h.rows[1].status,'not verified');
+  assert.equal(h.app.getPreview().items.find(x=>x.assetTag==='CM2328').choice,'missing');
+  assert.equal(h.attest.checked,false);
+  assert.match(h.progress.textContent,/Test asset confirmed VERIFIED/);
+  h.attest.checked=true;
+  await h.app.recordReviewedAssetChecklist();
+  assert.equal(h.clicks(),3,'only EFS-2001 and 555 followed confirmed pilot');
+  assert.equal(h.rows.find(x=>x.assetTag==='EFS-2001').status,'verified');
+  assert.equal(h.rows.find(x=>x.assetTag==='555').status,'verified');
+  assert.equal(h.rows.find(x=>x.assetTag==='CM2328').status,'not verified');
+  assert.equal(h.rows.find(x=>x.assetTag==='DUP').status,'not verified');
+  assert.equal(h.app.getPreview(),null);
+});
+test('nonconfirming native attempt stops and never claims Verified, even after retry',async()=>{
+  const h=scenario({neverConfirm:true});h.app.loadAssetChecklist();
+  h.attest.checked=true;
+  await h.app.recordReviewedAssetChecklist();
+  assert.equal(h.clicks(),1);
   assert.match(h.progress.textContent,/Official Verified status not confirmed/);
-  assert.equal(h.rows.find(row=>row.assetTag==='213').status,'not verified');
+  assert.equal(h.app.getPilot(),false);
   assert.equal(h.app.getAttempts().size,1);
+  h.app.loadAssetChecklist();h.attest.checked=true;
+  await h.app.recordReviewedAssetChecklist();
+  assert.equal(h.clicks(),1,'already attempted tag is not retried automatically');
 });
-test('exception change invalidates attestation and prevents mutation',async()=>{
-  const h=scenario();
-  h.app.prepareAssetBatchPreview();h.attest.checked=true;
-  h.raw.value='213';h.app.invalidateAssetBatchPreview();
-  assert.equal(h.attest.checked,false);
-  await h.app.runInspectedAssetBatch();
+test('unreadable/duplicate tags are displayed in the review but not silently certified',()=>{
+  const h=scenario();h.app.loadAssetChecklist();
+  const p=h.app.getPreview();
+  assert.equal(p.items.filter(x=>!x.recordable).length,3);
+  assert.match(h.summary.textContent,/3 manual \(no unique tag\)/);
+  assert.match(h.progress.textContent,/without unique tags must use Operative IQ manually/);
+});
+test('wrong T504 unit, wrong route or unavailable native totals never allow recording',async()=>{
+  for(const options of [{wrongUnit:true},{wrongRoute:true},{nativeNull:true},{activeDraft:true}]){
+    const h=scenario(options);h.app.loadAssetChecklist();
+    assert.equal(h.app.getPreview(),null,JSON.stringify(options));
+    h.attest.checked=true;
+    await h.app.recordReviewedAssetChecklist();
+    assert.equal(h.clicks(),0,JSON.stringify(options));
+  }
+});
+test('native button missing or unavailable stops before any asset is recorded',async()=>{
+  const h=scenario({nativeMissing:true});h.app.loadAssetChecklist();
+  h.attest.checked=true;
+  await h.app.recordReviewedAssetChecklist();
   assert.equal(h.clicks(),0);
+  assert.match(h.progress.textContent,/Native Operative IQ tag control unavailable/);
 });
-test('all asset writes are sequential native UI with exact receipt and abort on mismatch',()=>{
-  assert.match(block,/native\.button\.click\(\)/);
-  assert.match(block,/again\.length === 1 && again\[0\]\.title === item.title/);
-  assert.match(block,/attemptedAssetRecords\.add\(key\)/);
-  assert.match(block,/assetBatchPilotConfirmed \? plan\.items\.length : 1/);
-  assert.match(block,/assetBatchCancel/);
-  assert.match(block,/Date\.now\(\) - plan\.preparedAt > 10\*60\*1000/);
-  assert.doesNotMatch(block,/\bfetch\(|GM_xmlhttpRequest\(|\.submit\(/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.15/m);
-});
-
-test('separate Maintenance Due flag does not block presence-and-working checks',()=>{
-  const h=scenario();
-  const p=h.app.buildAssetBatchPlan('CM2328');
-  const due=p.items.find(x=>x.assetTag==='EFS-2001');
-  assert.ok(due,'maintenance-due asset is included when not excepted');
-  assert.equal(h.rows.find(x=>x.assetTag==='EFS-2001').maintenanceBlocked,true);
-  assert.doesNotMatch(block,/row\\.maintenanceBlocked|blocked\\.maintenance/);
-  assert.match(src,/PRESENT and WORKING/);
-  assert.doesNotMatch(src,/No maintenance-due or exception assets are included/);
+test('no direct API writes, no unchecked bulk PASS, no modal and no extra popup',()=>{
+  assert.match(logic,/attest\.checked/);
+  assert.match(logic,/attemptedAssetRecords\.add\(key\)/);
+  assert.match(logic,/native\.button\.click\(\)/);
+  assert.match(logic,/actual.length===1 && actual\[0\].title===item.title/);
+  assert.match(logic,/assetBatchPilotConfirmed\?chosen.length:1/);
+  assert.doesNotMatch(logic,/\bfetch\(|GM_xmlhttpRequest\(|\.submit\(|window\.confirm\(/);
+  assert.match(src,/^\/\/ @version\s+0\.1\.16/m);
 });

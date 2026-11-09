@@ -3,7 +3,7 @@ const test=require('node:test'), assert=require('node:assert/strict');
 const fs=require('node:fs'), path=require('node:path');
 const src=fs.readFileSync(path.join(__dirname,'../beta/rebel-iq.user.js'),'utf8');
 const start=src.indexOf('  function readAssetReviewRows() {');
-const end=src.indexOf('  function showNextAssetToReview() {',start);
+const end=src.indexOf('  function findNativeAssetTagEntry() {',start);
 assert.ok(start>0&&end>start,'read-only asset status parser found');
 const source=src.slice(start,end)+'\nreturn readAssetReviewRows;';
 const clean=v=>String(v??'').replace(/\s+/g,' ').trim();
@@ -45,10 +45,10 @@ test('other units or non-asset pages never expose an asset review',()=>{
   assert.deepEqual(harness([['Some Gear','Not Verified']],{onAssetPage:false})(),[]);
 });
 test('asset guide reads native statuses; inspection batch requires attended action',()=>{
-  const block=src.slice(start,src.indexOf('  // An attended, one-item-only native Operative IQ operation.',start));
-  assert.match(block,/Preview Inspected Assets/);
-  assert.match(block,/Exceptions \/ asset tags/);
-  assert.match(block,/data-asset-batch-attest/);
+  const block=src.slice(start,src.indexOf('  function findNativeAssetTagEntry() {',start));
+  assert.match(block,/Load Unverified Assets/);
+  assert.match(block,/Record Verified Assets/);
+  assert.match(block,/data-asset-check-attest/);
   assert.doesNotMatch(block,/\.click\(|\.dispatchEvent\(|fetch\(|GM_xmlhttpRequest\(|Submit Inspection/);
 });
 test('asset review remains a separate phase after confirmed saved Tour draft',()=>{
@@ -56,8 +56,8 @@ test('asset review remains a separate phase after confirmed saved Tour draft',()
   assert.match(src,/Asset Checks/);
   assert.match(src,/const assetFollowup = readAssetFollowup\(\)/);
   assert.match(src,/location\.assign\(assetUrl\(followup\.unitId\)\)/);
-  assert.match(src,/const IQ_VERSION = '0\.1\.15'/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.15/m);
+  assert.match(src,/const IQ_VERSION = '0\.1\.16'/);
+  assert.match(src,/^\/\/ @version\s+0\.1\.16/m);
 });
 
 test('full 90-item T504 list includes 24 cards lacking location and tag metadata',()=>{
@@ -98,31 +98,30 @@ test('native T504 badges reconcile exactly to 90 total, 76 action, 14 complete, 
 });
 test('unmatched asset coverage is visibly disclosed and native counts are authoritative',()=>{
   const block=src.slice(src.indexOf('  function refreshAssetReviewGuide() {'),
-    src.indexOf('  // An attended, one-item-only native Operative IQ operation.'));
+    src.indexOf('  function findNativeAssetTagEntry() {'));
   assert.match(block,/readNativeAssetTotals\(\)/);
-  assert.match(block,/not mapped: use the native list for these/);
-  assert.match(block,/guide detects|Guide detects/);
+  assert.match(block,/Unmapped equipment must be verified in Operative IQ/);
+  assert.match(block,/Rebel IQ can identify/);
   assert.doesNotMatch(block,/Maintenance Due/);
   assert.doesNotMatch(block,/\.click\(|Submit Inspection/);
 });
 
-test('single-item UI replaced by exception-first inspected batch preview',()=>{
+test('asset checklist defaults to verified draft and permits exceptions before a human record action',()=>{
   const section=src.slice(src.indexOf('  function makeAssetReviewSection() {'),
     src.indexOf('  function beginAssets() {'));
-  assert.match(section,/Preview Inspected Assets/);
-  assert.match(section,/Exceptions \/ asset tags/);
-  assert.match(section,/Verify Inspected Assets/);
-  assert.match(section,/data-asset-batch-attest/);
-  assert.match(section,/action.disabled = true/);
-  assert.match(section,/attest.type = 'checkbox'/);
-  assert.match(section,/data-asset-batch-exceptions/);
-  assert.doesNotMatch(section,/window\.confirm\(/);
-  assert.match(section,/assetBatchRunning/);
-  assert.match(section,/buildAssetBatchPlan/);
-  assert.match(section,/attemptedAssetRecords\.add\(key\)/);
+  assert.match(section,/Load Unverified Assets/);
+  assert.match(section,/Record Verified Assets/);
+  assert.match(section,/\['verified','Verified'\]/);
+  assert.match(section,/\['missing','Missing'\]/);
+  assert.match(section,/\['not_working','Not Working'\]/);
+  assert.match(section,/\['damaged','Damaged'\]/);
+  assert.match(section,/\['skip','Skip'\]/);
+  assert.match(section,/data-asset-check-attest/);
+  assert.match(section,/attest\.checked/);
   assert.match(section,/native\.button\.click\(\)/);
-  assert.match(section,/again.length === 1 && again\[0\].title === item.title/);
-  assert.doesNotMatch(section,/fetch\(|GM_xmlhttpRequest\(|Submit Inspection/);
+  assert.match(section,/actual\[0\]\.status==='verified'/);
+  assert.doesNotMatch(section,/window\.confirm\(/);
+  assert.doesNotMatch(section,/GM_xmlhttpRequest\(|\bfetch\(|\.submit\(/);
 });
 
 test('maintenance-due dates do not change asset inspection eligibility',()=>{
