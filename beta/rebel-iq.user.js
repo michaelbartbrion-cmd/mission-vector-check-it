@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.17
+// @version      0.1.18
 // @description  T504 Daily Tour, weekly, rope drafts, and inspector-confirmed Assets review.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.17' };
+  window.__rebelIqT504 = { version: '0.1.18' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.17';
+  const IQ_VERSION = '0.1.18';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -447,9 +447,13 @@
     if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible()) return [];
     const statusPattern = /^(Not Verified|Verified|Needs Attention|Requires Attention)$/i;
     const statusNodes = [...document.querySelectorAll('span,div,small,p,label,strong')]
-      .filter(node => visible(node) && node.children.length === 0 &&
+      .filter(node => visible(node) &&
         !node.closest('#' + PANEL + ', #' + ASSET_GUIDE_ID) &&
-        statusPattern.test(clean(node.textContent || '')));
+        statusPattern.test(clean(node.textContent || '')) &&
+        // Some native status labels wrap an icon. Select the deepest
+        // readable status rather than rejecting all non-leaf nodes.
+        ![...node.children].some(child =>
+          statusPattern.test(clean(child.textContent || ''))));
     const used = new Set(), rows = [];
     for (const label of statusNodes) {
       const status = clean(label.textContent).toLowerCase();
@@ -457,7 +461,7 @@
       for (let depth = 0; depth < 8 && card; depth++, card = card.parentElement) {
         const text = String(card.innerText || card.textContent || '');
         const bounds = card.getBoundingClientRect();
-        if (text.length > 850 || bounds.height > 260) break;
+        if (text.length > 1100 || bounds.height > 320) break;
         if (bounds.height < 28 || used.has(card)) continue;
         // Exclude wrappers containing other statuses and overview badges.
         const statusesInCard = statusNodes.filter(node => card.contains(node));
@@ -504,12 +508,11 @@
   // Native Operative IQ can render the long 90-asset list incrementally.
   // Read the ENTIRE scrollable page (without changing verification states)
   // rather than only the first visible rows, which yielded 52 of 76 pending.
+  // Read-only search of BOTH the document and native scrollable asset
+  // containers. Operative IQ does not necessarily use document.scrollingElement;
+  // the original root-only scan continued to find 52 of 76 pending items.
   async function scanAllNativeAssetRows() {
     if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible()) return [];
-    const root = document.scrollingElement || document.documentElement;
-    if (!root || !Number.isFinite(root.scrollHeight) || !Number.isFinite(root.clientHeight))
-      return readAssetReviewRows();
-    const saved = root.scrollTop;
     const collected = new Map();
     const addRows = () => {
       const unnamedCounts = new Map();
@@ -518,35 +521,57 @@
         if (tag) {
           collected.set('tag:' + tag + ':' + row.title,row);
         } else {
-          // Preserve visible duplicates with the same description. There
-          // is no durable ID for untagged rows, so count only the greatest
-          // observed number on one native screen slice (no invented rows).
           const fingerprint = row.title + ':' + row.status;
           const occurrence = (unnamedCounts.get(fingerprint) || 0) + 1;
           unnamedCounts.set(fingerprint,occurrence);
-          const key='untagged:' + fingerprint + ':' + occurrence;
+          const key = 'untagged:' + fingerprint + ':' + occurrence;
           if (!collected.has(key)) collected.set(key,row);
         }
       }
     };
-    try {
-      const limit = Math.max(0,root.scrollHeight-root.clientHeight);
-      const step = Math.max(250,Math.floor(root.clientHeight*0.72));
-      addRows();
-      for(let i=0,pos=0; pos<=limit && i<55; i++,pos+=step) {
-        if(!isAssetPage() || inspectionId()!==ASSET_UNIT_ID)break;
-        root.scrollTop=Math.min(pos,limit);
-        await new Promise(resolve=>setTimeout(resolve,90));
+    const canScan = element => element &&
+      Number.isFinite(element.scrollHeight) &&
+      Number.isFinite(element.clientHeight) &&
+      element.scrollHeight - element.clientHeight > 125 &&
+      !element.closest?.('#' + PANEL + ', #' + ASSET_GUIDE_ID);
+    const roots = [];
+    const root = document.scrollingElement || document.documentElement;
+    if (canScan(root)) roots.push(root);
+    const candidates = [...document.querySelectorAll('body *')]
+      .filter(el => canScan(el) &&
+        el.clientWidth >= 280 && el.clientHeight >= 130 &&
+        !roots.includes(el) && visible(el))
+      .filter(el => /^(?:auto|scroll|overlay)$/i.test(
+        getComputedStyle(el).overflowY || ''));
+    // Largest visible native scroll areas first. A bounded scan avoids
+    // unrelated sidebar scrollers and never touches the Rebel IQ checklist.
+    candidates.sort((a,b) => b.clientHeight - a.clientHeight);
+    roots.push(...candidates.slice(0,6));
+
+    addRows();
+    const totals = readNativeAssetTotals();
+    for (const container of roots) {
+      if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID) break;
+      const saved = container.scrollTop;
+      const limit = Math.max(0,container.scrollHeight-container.clientHeight);
+      const step = Math.max(220,Math.floor(container.clientHeight * 0.75));
+      try {
+        for(let n=0,pos=0; pos<=limit && n<80; n++,pos+=step) {
+          if (!isAssetPage() || inspectionId()!==ASSET_UNIT_ID) break;
+          container.scrollTop=Math.min(pos,limit);
+          await new Promise(resolve=>setTimeout(resolve,95));
+          addRows();
+        }
+        container.scrollTop=limit;
+        await new Promise(resolve=>setTimeout(resolve,180));
         addRows();
+      }finally{
+        container.scrollTop=saved;
       }
-      root.scrollTop=limit;
-      await new Promise(resolve=>setTimeout(resolve,160));
-      addRows();
-    } finally {
-      root.scrollTop=saved;
+      if(totals &&
+         [...collected.values()].filter(row=>row.status==='not verified').length >= totals.required &&
+         collected.size >= totals.total) break;
     }
-    // Uniquely tagged assets can be safely reunited across scroll slices.
-    // Untagged duplicates require native manual verification: do not invent IDs.
     return [...collected.values()];
   }
 
