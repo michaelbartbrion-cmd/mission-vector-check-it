@@ -6813,9 +6813,21 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             return;
         }
 
-        // Restore clipped PPE Name only from an exact detail heading and serial.
-        // The existing identity verification still runs BEFORE any inspection.
-        const restoredName = resolveClippedPpeNameFromVerifiedDetail(item);
+        // Vector can hydrate its PPE heading and Serial Number after navigation.
+        // For clipped list labels, briefly wait for BOTH exact fields on the
+        // already-verified pool/item route; never infer a missing suffix.
+        // The existing identity gate still runs BEFORE any inspection.
+        let restoredName = resolveClippedPpeNameFromVerifiedDetail(item);
+        if (!restoredName && /(?:\.{3}|\u2026)$/.test(clean(item.assetId))) {
+            try {
+                restoredName = await waitFor(
+                    () => resolveClippedPpeNameFromVerifiedDetail(item), 6000, 180
+                );
+            } catch {
+                // No exact proof arrived; keep the original name so the
+                // normal asset identity verification fails closed.
+            }
+        }
         const verifiedItem = restoredName ? { ...item, assetId: restoredName } : item;
         const identityVerified = await verifyExpectedAssetPage(verifiedItem);
         if (!identityVerified) {
