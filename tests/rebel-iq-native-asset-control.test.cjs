@@ -56,7 +56,7 @@ test('no unsafe generic report-problem control is mistaken for Verified',()=>{
   assert.match(src,/Official Verified status not confirmed/);
   assert.match(src,/native\.button\.click\(\)/);
   assert.match(src,/const rowAction=findNativeRowVerifyControl\(same\[0\]\)/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.19/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.20/m);
 });
 
 test('actual authenticated Front Line markup selects correct grey check icon, not warning',()=>{
