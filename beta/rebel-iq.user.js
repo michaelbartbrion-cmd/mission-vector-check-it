@@ -896,9 +896,10 @@
   }
 
   function invalidateAssetBatchPreview() {
+    if (assetBatchRunning) return;
     assetBatchPreview = null;
     const section = document.getElementById(ASSET_GUIDE_ID);
-    if (!section || assetBatchRunning) return;
+    if (!section) return;
     const attestation = section.querySelector('[data-asset-batch-attest]');
     const action = section.querySelector('[data-asset-batch-run]');
     if (attestation) {attestation.checked = false; attestation.disabled = true;}
@@ -986,6 +987,10 @@
     assetBatchCancel = false;
     if (action) action.disabled = true;
     if (stop) stop.disabled = false;
+    const exceptionEntry = section.querySelector('[data-asset-batch-exceptions]');
+    const previewAction = section.querySelector('[data-asset-batch-preview]');
+    if (exceptionEntry) exceptionEntry.disabled = true;
+    if (previewAction) previewAction.disabled = true;
     attestation.checked = false;
     attestation.disabled = true;
     const maximum = assetBatchPilotConfirmed ? plan.items.length : 1;
@@ -1062,6 +1067,8 @@
     assetBatchCancel = false;
     if (stop) stop.disabled = true;
     if (action) action.disabled = true;
+    if (exceptionEntry) exceptionEntry.disabled = false;
+    if (previewAction) previewAction.disabled = false;
     assetGuideLastScan = 0;
     refreshAssetReviewGuide();
     if (failed) output('Confirmed ' + confirmed + ' of ' + attempted +
