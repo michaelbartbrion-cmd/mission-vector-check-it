@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.20
+// @version      0.1.21
 // @description  T504 Daily Tour, weekly, rope drafts, and inspector-confirmed Assets review.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.20' };
+  window.__rebelIqT504 = { version: '0.1.21' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.20';
+  const IQ_VERSION = '0.1.21';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -591,57 +591,61 @@
   function makeAssetReviewScreen() {
     const screen = document.createElement('section');
     screen.id = ASSET_GUIDE_ID;
-    screen.setAttribute('role', 'dialog');
-    screen.setAttribute('aria-modal', 'true');
-    screen.setAttribute('aria-label', 'Truck 504 asset verification');
+    screen.setAttribute('role', 'complementary');
+    screen.setAttribute('aria-label', 'Truck 504 asset verification checklist');
     screen.setAttribute('aria-hidden', 'true');
     screen.style.cssText =
-      'position:fixed;inset:0;z-index:2147483640;display:none;' +
-      'box-sizing:border-box;width:100vw;height:100vh;' +
-      'height:100dvh;background:#f3f7fa;color:#173448;' +
-      'font:13px/1.4 Arial,sans-serif;overflow:hidden;';
+      // Compact inspector drawer on the existing Operative IQ asset page.
+      // Do not cover the page or turn Assets into its own full-screen view.
+      'position:fixed;top:188px;left:16px;right:auto;bottom:auto;' +
+      'z-index:2147483640;display:none;box-sizing:border-box;' +
+      'width:min(460px,calc(100vw - 32px));' +
+      'height:min(650px,calc(100dvh - 204px));min-height:260px;' +
+      'border:1px solid #c1d4e0;border-radius:10px;' +
+      'box-shadow:0 9px 28px rgba(7,31,48,.2);' +
+      'background:#f3f7fa;color:#173448;' +
+      'font:12px/1.35 Arial,sans-serif;overflow:hidden;';
 
     const header = document.createElement('header');
     header.style.cssText =
-      'background:#153e5c;color:#fff;padding:12px 20px;' +
-      'min-height:62px;box-sizing:border-box;display:flex;' +
+      'background:#153e5c;color:#fff;padding:8px 10px;' +
+      'min-height:48px;box-sizing:border-box;display:flex;' +
       'justify-content:space-between;align-items:center;gap:12px;';
     const title = document.createElement('div');
     const top = document.createElement('strong');
     top.textContent = 'Truck 504 • Assets';
-    top.style.cssText = 'font-size:20px;display:block;letter-spacing:.2px;';
+    top.style.cssText = 'font-size:15px;display:block;letter-spacing:.1px;';
     const subtitle = document.createElement('span');
     subtitle.textContent = 'Review unverified equipment';
     subtitle.style.cssText = 'font-size:11px;opacity:.85;';
     title.append(top,subtitle);
     const close = document.createElement('button');
     close.type = 'button';
-    close.textContent = '← Back to Operative IQ';
+    close.textContent = 'Close';
     close.setAttribute('data-asset-check-close','');
     close.style.cssText = 'background:white;color:#153e5c;border:0;' +
-      'border-radius:7px;padding:10px 12px;font-weight:bold;cursor:pointer;';
+      'border-radius:5px;padding:7px 10px;font-weight:bold;cursor:pointer;';
     close.onclick = closeAssetReviewScreen;
     header.append(title,close);
 
     const content = document.createElement('div');
     content.style.cssText =
-      'box-sizing:border-box;margin:0 auto;max-width:1150px;' +
-      'height:calc(100% - 62px);display:flex;flex-direction:column;' +
-      'padding:14px 18px 12px;gap:10px;';
+      'box-sizing:border-box;height:calc(100% - 48px);' +
+      'display:flex;flex-direction:column;padding:8px;gap:7px;';
     const summaryLine = document.createElement('div');
     summaryLine.style.cssText =
       'display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;' +
       'align-items:center;';
     const summary = document.createElement('div');
     summary.setAttribute('data-asset-guide-summary','');
-    summary.style.cssText = 'font-weight:700;font-size:15px;';
+    summary.style.cssText = 'font-weight:700;font-size:12px;';
     summary.textContent = 'Reading Operative IQ assets...';
     const load = document.createElement('button');
     load.type = 'button';
-    load.textContent = 'Refresh Unverified List';
+    load.textContent = 'Refresh';
     load.setAttribute('data-asset-check-load','');
     load.style.cssText = 'background:#176b8e;color:white;border:0;' +
-      'border-radius:7px;padding:10px 12px;font-weight:bold;cursor:pointer;';
+      'border-radius:6px;padding:7px 9px;font-weight:bold;cursor:pointer;';
     load.onclick = () => { void loadAssetChecklist(); };
     summaryLine.append(summary,load);
     const coverage = document.createElement('div');
@@ -649,7 +653,7 @@
     coverage.style.cssText = 'color:#90430d;font-size:12px;min-height:18px;';
     const counts = document.createElement('div');
     counts.setAttribute('data-asset-check-counts','');
-    counts.style.cssText = 'font-weight:600;font-size:13px;';
+    counts.style.cssText = 'font-weight:600;font-size:11px;';
     counts.textContent = 'No list loaded.';
     const list = document.createElement('div');
     list.setAttribute('data-asset-check-list','');
@@ -659,7 +663,7 @@
 
     const footer = document.createElement('div');
     footer.style.cssText = 'flex:none;background:white;border:1px solid #d5e0e7;' +
-      'border-radius:9px;padding:11px 14px;box-shadow:0 2px 8px rgba(10,35,51,.05);';
+      'border-radius:7px;padding:7px;box-shadow:0 2px 8px rgba(10,35,51,.05);';
     const attestLabel = document.createElement('label');
     attestLabel.style.cssText =
       'display:none;gap:9px;margin-bottom:8px;cursor:pointer;font-weight:600;';
@@ -671,17 +675,17 @@
     attest.onchange = updateAssetChecklistActions;
     const attestText = document.createElement('span');
     attestText.textContent =
-      'I physically checked the assets left as Verified and confirm they are present and working.';
+      'I physically checked each selected asset; all marked Verified are present and working.';
     attestLabel.append(attest,attestText);
     const bottom = document.createElement('div');
-    bottom.style.cssText = 'display:flex;align-items:center;gap:9px;flex-wrap:wrap;';
+    bottom.style.cssText = 'display:flex;align-items:center;gap:7px;flex-wrap:wrap;';
     const record = document.createElement('button');
     record.type = 'button';
     record.textContent = 'Record Verified Assets';
     record.disabled = true;
     record.setAttribute('data-asset-check-record','');
     record.style.cssText = 'background:#176b8e;color:#fff;border:0;' +
-      'border-radius:7px;padding:11px 14px;font-weight:700;cursor:pointer;';
+      'border-radius:6px;padding:8px 10px;font-weight:700;cursor:pointer;';
     record.onclick = () => { void recordReviewedAssetChecklist(); };
     const stop = document.createElement('button');
     stop.type = 'button';
@@ -689,12 +693,13 @@
     stop.disabled = true;
     stop.setAttribute('data-asset-check-stop','');
     stop.style.cssText = 'background:white;border:1px solid #b8c8d6;' +
-      'border-radius:7px;padding:11px;cursor:pointer;';
+      'border-radius:6px;padding:8px;cursor:pointer;';
     stop.onclick = () => { assetBatchCancel = true; };
     const progress = document.createElement('div');
     progress.setAttribute('data-asset-check-progress','');
     progress.setAttribute('role','status');
-    progress.style.cssText = 'font-size:12px;color:#526b7a;flex:1;';
+    progress.style.cssText = 'font-size:11px;color:#526b7a;flex:1;' +
+      'min-width:160px;max-height:60px;overflow-y:auto;';
     progress.textContent = 'Draft answers are not yet recorded in Operative IQ.';
     bottom.append(record,stop,progress);
     footer.append(attestLabel,bottom);
