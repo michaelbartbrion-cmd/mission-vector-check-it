@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.55
+// @version      3.2.56
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.55',
+        version: '3.2.56',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.55';
+    const VERSION = '3.2.56';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -11876,6 +11876,127 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         };
     }
 
+
+    // Native filter actions only. Never click an inspection, Verify, Save or
+    // submit control. The operator's location selection is the sole target.
+    function scbaAirpackNativeOptionState(node) {
+        const checkbox=node.matches?.('input[type="checkbox"]') ? node :
+            node.querySelector?.('input[type="checkbox"]');
+        if(checkbox && typeof checkbox.checked==='boolean') {
+            const label=checkbox.closest?.('label');
+            return {checked:checkbox.checked,control:label || checkbox};
+        }
+        const native=node.matches?.('[role="checkbox"],[role="option"],mat-checkbox,mat-list-option') ?
+            node : node.querySelector?.('[role="checkbox"],[role="option"],mat-checkbox,mat-list-option');
+        if(!native)return null;
+        const attr=native.getAttribute('aria-checked') ??
+            native.getAttribute('aria-selected');
+        if(attr==='true' || attr==='false')
+            return {checked:attr==='true',control:native};
+        // Do not infer checked state from color, position, or an icon.
+        return null;
+    }
+
+    function scbaAirpackFindNativeFilterOption(loc) {
+        // Look for an exact visible LOCATION choice outside Rebel. Never
+        // treat an existing "Filtered To:" chip as a selectable checkbox.
+        const leaves=[...document.querySelectorAll('body *')].filter(el=>
+            !el.closest('#'+PANEL_ID+',#'+OVERLAY_ID) &&
+            visible(el) &&
+            loc.exact.test(clean(el.innerText || el.textContent || '')) &&
+            ![...el.children].some(child=>
+                loc.exact.test(clean(child.innerText || child.textContent || ''))));
+        const options=[];
+        for(const leaf of leaves) {
+            let parent=leaf,steps=0;
+            while(parent && steps++<5 && parent!==document.body) {
+                const state=scbaAirpackNativeOptionState(parent);
+                if(state && state.control && !state.control.closest(
+                    '#'+PANEL_ID+',#'+OVERLAY_ID)) {
+                    options.push(state);
+                    break;
+                }
+                parent=parent.parentElement;
+            }
+        }
+        const controls=[...new Set(options.map(x=>x.control))];
+        if(controls.length!==1)return null; // no guess among duplicates
+        return options.find(x=>x.control===controls[0]) || null;
+    }
+
+    async function scbaAirpackEnsureNativeFilters(selectedIds,report) {
+        if(getRun())throw new Error('Finish the active PPE check before searching SCBA airpacks.');
+        if(!selectedIds.length)throw new Error('Choose at least one SCBA location.');
+        if(!scbaAirpackStandardTable())
+            throw new Error('Open Vector Equipment > Standard before finding airpacks.');
+        if(scbaAirpackFilterScope(selectedIds).ready)return;
+        const filters=findVectorNavigationTarget('Filters');
+        if(!filters || !visible(filters))
+            throw new Error('Native Vector Filters button was not found.');
+        if(report)report('Applying the selected locations in Vector automatically...');
+        filters.click();
+        await sleep(350);
+        // Some native filter panels need their Location selector expanded.
+        const expandLocation=()=>{
+            const expand=[...document.querySelectorAll(
+                'button,[role="button"],[role="combobox"],[aria-expanded]')]
+                .filter(el=>!el.closest('#'+PANEL_ID+',#'+OVERLAY_ID) &&
+                    visible(el) && /^Location(?:s)?$/i.test(clean(
+                        el.innerText || el.textContent || el.getAttribute('aria-label') || '')) &&
+                    el.getAttribute('aria-expanded')==='false');
+            if(expand.length===1){expand[0].click();return true;}
+            return false;
+        };
+        if(!SCBA_AIRPACK_LOCATIONS.some(loc=>scbaAirpackFindNativeFilterOption(loc))) {
+            if(expandLocation())await sleep(300);
+        }
+        for(const loc of SCBA_AIRPACK_LOCATIONS) {
+            const wanted=selectedIds.includes(loc.id);
+            // A missing option can be ignored only if that location is
+            // neither requested nor currently applied.
+            let option=scbaAirpackFindNativeFilterOption(loc);
+            if(!option && wanted) {
+                if(expandLocation())await sleep(300);
+                option=scbaAirpackFindNativeFilterOption(loc);
+            }
+            if(!option) {
+                if(wanted || scbaAirpackFilterScope(selectedIds).selected.includes(loc.id))
+                    throw new Error('Cannot identify the native checkbox for '+loc.location+
+                        '. No inspection was submitted.');
+                continue;
+            }
+            if(option.checked!==wanted) {
+                option.control.click();
+                await sleep(300);
+                // Native Angular/React may rerender after every toggle.
+                const after=scbaAirpackFindNativeFilterOption(loc);
+                if(after && after.checked!==wanted)
+                    throw new Error('Vector did not accept the '+loc.label+' location choice.');
+            }
+        }
+        // Apply is a filter-only UI action. Do not click generic Save/Submit.
+        const apply=[...document.querySelectorAll('button,[role="button"]')]
+            .filter(el=>!el.closest('#'+PANEL_ID+',#'+OVERLAY_ID) &&
+                visible(el) && /^(?:Apply|Apply Filters|Show Results|Filter Results)$/i
+                .test(clean(el.innerText || el.textContent || '')));
+        if(apply.length===1)apply[0].click();
+        // Native filter chips, not checkbox clicks, are the proof that the
+        // equipment table is actually scoped to the operator's choices.
+        for(let attempt=0;attempt<45;attempt++){
+            if(scbaAirpackStandardTable() &&
+                scbaAirpackFilterScope(selectedIds).ready) {
+                if(report)report('Vector locations applied. Finding selected SCBA airpacks...');
+                return;
+            }
+            await sleep(220);
+        }
+        const scope=scbaAirpackFilterScope(selectedIds);
+        throw new Error('Vector did not confirm these location filters. '+
+            (scope.missing.length?'Missing: '+scope.missing.join('; ')+'. ':'')+
+            (scope.extra.length?'Extra: '+scope.extra.join('; ')+'. ':'')+
+            'No equipment check was submitted.');
+    }
+
     function isScbaAirpackStandardItem(item) {
         // SCBA location text on its own is not proof of an airpack.
         const type = clean(item.name + ' ' + item.pool).toLowerCase();
@@ -12011,7 +12132,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             'Vector filters do not match the selected SCBA locations. '+
             (scope.missing.length?'Add: '+scope.missing.join('; ')+'. ':'')+
             (scope.extra.length?'Remove: '+scope.extra.join('; ')+'. ':'')+
-            'Click Set Vector Filters, make these changes, then reopen SCBA Airpacks.'
+            'Automatic location filter selection did not take effect. No SCBA check was submitted.'
         );
         if(!scbaAirpackStandardTable())throw new Error('Equipment > Standard inventory is not ready.');
         const seen=new Map();
@@ -12088,10 +12209,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         body.style.cssText='padding:14px 18px 18px;';
         const instructions=document.createElement('p');
         instructions.style.cssText='font-size:12px;line-height:1.5;margin:0 0 9px;';
-        instructions.textContent='Choose which locations you need today. The same '+
-            'locations must be selected in Vector Equipment > Standard > Filters. '+
-            'SCBA masks and loose cylinders are not airpacks. This is a draft '+
-            'until the official Vector airpack inspection form is verified.';
+        instructions.textContent='Choose the locations to check. Find SCBA Airpacks automatically applies '+
+            'those Vector filters and collects matching equipment. SCBA masks '+
+            'and loose cylinders are excluded. Official inspections are not yet submitted.';
         const chooser=document.createElement('fieldset');
         chooser.style.cssText='border:1px solid #c7d9e5;border-radius:8px;' +
             'padding:8px 12px 10px;margin:0 0 10px;';
@@ -12127,38 +12247,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const controls=document.createElement('div');
         controls.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
         const find=makeButton('Find SCBA Airpacks');
-        const native=makeButton('Set Vector Filters');
-        native.onclick=()=>{
-            const chosen=selectedIds();
-            if(!chosen.length){
-                status.textContent='Choose at least one location to check above.';
-                return;
-            }
-            if(getRun()){
-                status.textContent='Finish the active PPE run before changing Vector filters.';
-                return;
-            }
-            sessionStorage.setItem(SCBA_AIRPACK_PENDING_SELECTION_KEY,
-                JSON.stringify({ids:chosen,savedAt:Date.now()}));
-            if(!scbaAirpackStandardTable()){
-                overlay.remove();
-                location.assign('/main/asset-manager');
-                return;
-            }
-            const filters=findVectorNavigationTarget('Filters');
-            if(!filters){
-                status.textContent='Vector Filters control not found. '+
-                    'Open Equipment > Standard > Filters manually.';
-                return;
-            }
-            overlay.remove();
-            // Only open the native filters. Inspector applies precise
-            // options there; never guess at hidden location selection IDs.
-            filters.click();
-        };
         const save=makeButton('Save Local Draft');
         save.disabled=true;
-        controls.append(find,native,save);
+        controls.append(find,save);
         const coverage=document.createElement('div');
         coverage.style.cssText='font-size:12px;font-weight:700;margin:10px 0 6px;';
         const list=document.createElement('div');
@@ -12177,6 +12268,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             status.textContent='Checking selected Standard equipment locations...';
             try {
                 if(!chosen.length)throw new Error('Choose at least one location to check.');
+                await scbaAirpackEnsureNativeFilters(chosen,message=>{status.textContent=message;});
                 scan=await scbaAirpackReadInventory(message=>{status.textContent=message;},chosen);
                 sessionStorage.removeItem(SCBA_AIRPACK_PENDING_SELECTION_KEY);
                 const groups=SCBA_AIRPACK_LOCATIONS.filter(loc=>chosen.includes(loc.id))
