@@ -64,11 +64,11 @@ test('Rebel IQ uses Vector Rebel navy header, white 430px card, and two-column a
   const subtitle=nodes.find(el=>el.textContent==='T504  ·  This is the way.');
   assert.ok(title&&subtitle,'same title/subtitle hierarchy as Vector Rebel');
 });
-test('Five concise actions include daily asset verification and the independent asset shortcut',()=>{
+test('Five concise actions keep Daily Tour and Assets separate',()=>{
   const h=harness();
   const actions=walk(h.body).find(el=>el.getAttribute('data-rebel-iq-actions')==='1');
   assert.deepEqual(actions.children.map(x=>x.textContent),
-    ['Daily Tour + Assets','Weekly Check','Asset Checks','Rope Checks ×3','Check for Update']);
+    ['Daily Tour','Weekly Check','Assets','Rope Checks ×3','Check for Update']);
   for(let i=0;i<4;i++)actions.children[i].click();
   assert.deepEqual(h.invoked,{daily:1,weekly:1,ropes:1,assets:1});
   const update=actions.children[4];
@@ -118,16 +118,17 @@ test('asset review is inline inside expanded Rebel IQ, never a second popup',()=
   assert.equal(guides.length,1,'one asset review section');
   const section=guides[0];
   assert.equal(section.tagName,'SECTION','inline semantic section, not an aside');
-  assert.ok(walk(h.menu).includes(section),'review is a descendant of main menu');
-  assert.equal(section.style.cssText.includes('position:fixed'),false,
-    'never creates independently positioned floating overlay');
+  assert.ok(!walk(h.menu).includes(section),'main menu stays compact');
+  assert.equal(section.parentElement,h.body,'dedicated screen sits outside main panel');
+  assert.equal(section.style.cssText.includes('position:fixed;inset:0'),true,
+    'screen fills the entire viewport, not a floating mini popup');
   assert.equal(section.style.cssText.includes('display:none'),true,
-    'review is hidden off the asset route');
+    'review screen starts closed');
   assert.ok(walk(section).some(el=>el.tagName==='BUTTON'&&
-    el.textContent==='Load Unverified Assets'));
-  assert.equal(walk(section).some(el=>el.textContent==='Hide'),false,
-    'remove redundant Hide control: original Starbird collapses panel');
+    el.textContent==='Refresh Unverified List'));
+  assert.ok(walk(section).some(el=>el.tagName==='BUTTON'&&
+    el.textContent==='← Back to Operative IQ'));
   assert.equal(full.filter(el=>el.tagName==='ASIDE').length,0,
-    'no separate asset popup');
+    'no separate mini popup');
   assert.equal(full.filter(el=>el.id==='rebel-iq-t504-panel').length,1);
 });
