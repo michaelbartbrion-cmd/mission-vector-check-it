@@ -168,8 +168,8 @@ test('unreadable/duplicate tags are displayed in the review but not silently cer
   const h=scenario();await h.app.loadAssetChecklist();
   const p=h.app.getPreview();
   assert.equal(p.items.filter(x=>!x.recordable).length,3);
-  assert.match(h.summary.textContent,/3 manual catalog\/ambiguous/);
-  assert.match(h.summary.textContent,/manual catalog\/ambiguous/);
+  assert.match(h.summary.textContent,/3 manual\/ambiguous/);
+  assert.match(h.summary.textContent,/manual\/ambiguous/);
 });
 test('wrong T504 unit, wrong route or unavailable native totals never allow recording',async()=>{
   for(const options of [{wrongUnit:true},{wrongRoute:true},{nativeNull:true},{activeDraft:true}]){
