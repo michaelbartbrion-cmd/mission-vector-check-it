@@ -99,8 +99,8 @@ test('unmatched asset coverage is visibly disclosed and native counts are author
   const block=src.slice(src.indexOf('  function refreshAssetReviewGuide() {'),
     src.indexOf('  function findNativeAssetTagEntry() {'));
   assert.match(block,/readNativeAssetTotals\(\)/);
-  assert.match(block,/Unmapped equipment must be verified in Operative IQ/);
-  assert.match(block,/Rebel IQ can identify/);
+  assert.match(block,/not loaded or not identifiable/);
+  assert.match(block,/Found /);
   assert.doesNotMatch(block,/Maintenance Due/);
   assert.doesNotMatch(block,/\.click\(|Submit Inspection/);
 });
