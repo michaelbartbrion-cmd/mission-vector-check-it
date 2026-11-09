@@ -112,7 +112,8 @@ test('read-only scanner cannot record any item without a unique asset tag and ph
   assert.match(section,/Record Present \(1 asset\)/);
   assert.match(section,/record\.disabled = true/);
   assert.match(section,/assetTag \+ '\\n\\n'/);
-  assert.match(section,/window\.confirm\(/);
+  assert.match(section,/data-asset-guide-confirm/);
+  assert.doesNotMatch(section,/window\.confirm\(/);
   assert.match(section,/readPending\(\) \|\| readRopes\(\)/);
   assert.match(section,/selectOnePendingAssetByTag\(assetTag,title\)/);
   assert.match(section,/attemptedAssetRecords\.add\(key\)/);
