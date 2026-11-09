@@ -470,7 +470,7 @@
         if (statusesInCard.length !== 1) continue;
         const lines = text.split(/\r?\n/).map(clean).filter(Boolean);
         const titleLine = lines.find(line =>
-          line.length >= 4 && line.length <= 160 &&
+          line.length >= 3 && line.length <= 160 &&
           !statusPattern.test(line) &&
           !/^(?:Location|Asset Tag|Asset Type|Asset Class|Part|Qty|Quantity|P\/N|S\/N)\s*:/i.test(line) &&
           /[A-Za-z]{2,}/.test(line));
