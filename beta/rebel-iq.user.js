@@ -417,6 +417,7 @@
   // Never infer that an asset was inspected from its appearance on the page.
   const ASSET_GUIDE_ID = 'rebel-iq-t504-asset-guide';
   let assetGuideRows = [], assetGuideLastScan = 0;
+  let lastAssetChecklistAutoloadRoute = '';
   let assetBatchPreview = null, assetBatchRunning = false;
   let assetBatchCancel = false, assetBatchPilotConfirmed = false;
   const attemptedAssetRecords = new Set();
@@ -598,6 +599,7 @@
       assetBatchPreview = null;
       assetGuideRows = [];
       assetGuideLastScan = 0;
+      lastAssetChecklistAutoloadRoute = '';
       const record = section.querySelector('[data-asset-check-record]');
       if (record) record.disabled = true;
       return;
@@ -619,6 +621,13 @@
         ' asset rows. Unmapped equipment must be verified in Operative IQ.'
       : native ? 'All ' + native.total + ' native rows detected.' :
         'Native totals unavailable. Review asset coverage in Operative IQ.';
+    // Draft only: prefill the checklist once when the asset page is ready.
+    // Loading proposed Verified choices NEVER changes Operative IQ.
+    if (native && assetGuideRows.length && !assetBatchPreview &&
+        !assetBatchRunning && lastAssetChecklistAutoloadRoute !== location.pathname) {
+      lastAssetChecklistAutoloadRoute = location.pathname;
+      loadAssetChecklist();
+    }
   }
 
   function findNativeAssetTagEntry() {
@@ -923,8 +932,8 @@
       notify('A questionnaire draft is running. Finish it before opening Asset Checks.', true);
       return;
     }
-    notify('Opening T504 Asset Requirements. Inspect equipment first, list exceptions, and preview the inspected-asset batch. No asset is verified without your explicit confirmation.');
-    if (isAssetPage()) return;
+    notify('Opening T504 Asset Requirements. Review the unverified list, change exceptions, then record only physically inspected equipment.');
+    if (isAssetPage()) { loadAssetChecklist(); return; }
     location.assign(assetUrl(id));
   }
 
