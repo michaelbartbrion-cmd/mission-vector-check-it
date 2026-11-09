@@ -195,7 +195,7 @@ test('no direct API writes, no unchecked bulk PASS, no modal and no extra popup'
   assert.match(logic,/const maximum=chosen.length/);
   assert.doesNotMatch(logic,/assetBatchPilotConfirmed/);
   assert.doesNotMatch(logic,/\bfetch\(|GM_xmlhttpRequest\(|\.submit\(|window\.confirm\(/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.20/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.21/m);
 });
 
 test('native row check control records present even when tag scanner cannot be found',async()=>{
