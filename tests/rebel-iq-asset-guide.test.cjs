@@ -9,9 +9,9 @@ const source=src.slice(start,end)+'\nreturn readAssetReviewRows;';
 const clean=v=>String(v??'').replace(/\s+/g,' ').trim();
 function harness(statuses,{onT504=true,onAssetPage=true}={}){
   const labels=[];
-  for(const [name,status,hasLocation=true] of statuses){
+  for(const [name,status,hasLocation=true,maintenanceText=''] of statuses){
     const card={
-      innerText:name+(hasLocation?'\nLocation: T504\nAsset Tag: 1234':'\nRequirements: Physically inspect')+'\n'+status,
+      innerText:name+(hasLocation?'\nLocation: T504\nAsset Tag: 1234':'\nRequirements: Physically inspect')+ (maintenanceText ? '\nMaintenance Due: '+maintenanceText : '')+'\n'+status,
       getBoundingClientRect:()=>({height:58}),
       contains:node=>node===label,
       parentElement:null
@@ -123,4 +123,18 @@ test('single-item UI replaced by exception-first inspected batch preview',()=>{
   assert.match(section,/native\.button\.click\(\)/);
   assert.match(section,/again.length === 1 && again\[0\].title === item.title/);
   assert.doesNotMatch(section,/fetch\(|GM_xmlhttpRequest\(|Submit Inspection/);
+});
+
+test('maintenance-due past and unknown dates are not eligible for the present batch',()=>{
+  const at = date => [date.getMonth()+1,date.getDate(),date.getFullYear()]
+    .map((value,i)=>i<2?String(value).padStart(2,'0'):String(value))
+    .join('/');
+  const earlier = new Date(); earlier.setDate(earlier.getDate()-2);
+  const later = new Date(); later.setDate(later.getDate()+40);
+  const rows=harness([
+    ['Due Maintenance','Not Verified',true,at(earlier)],
+    ['Not Yet Due','Not Verified',true,at(later)],
+    ['No Date','Not Verified',true,'unparseable']
+  ])();
+  assert.deepEqual(rows.map(row=>row.maintenanceBlocked),[true,false,true]);
 });
