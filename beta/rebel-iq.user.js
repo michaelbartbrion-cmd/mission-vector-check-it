@@ -1092,7 +1092,7 @@
       notify('A questionnaire draft is running. Finish it before opening Asset Checks.', true);
       return;
     }
-    notify('Opening T504 Asset Requirements. Verify each required asset at the apparatus; Rebel IQ will not mark anything checked.');
+    notify('Opening T504 Asset Requirements. Inspect equipment first, list exceptions, and preview the inspected-asset batch. No asset is verified without your explicit confirmation.');
     if (isAssetPage()) return;
     location.assign(assetUrl(id));
   }
