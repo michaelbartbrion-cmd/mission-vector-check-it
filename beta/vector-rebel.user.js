@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.56
+// @version      3.2.57
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.56',
+        version: '3.2.57',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.56';
+    const VERSION = '3.2.57';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -11877,124 +11877,171 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
 
-    // Native filter actions only. Never click an inspection, Verify, Save or
-    // submit control. The operator's location selection is the sole target.
-    function scbaAirpackNativeOptionState(node) {
-        const checkbox=node.matches?.('input[type="checkbox"]') ? node :
-            node.querySelector?.('input[type="checkbox"]');
-        if(checkbox && typeof checkbox.checked==='boolean') {
-            const label=checkbox.closest?.('label');
-            return {checked:checkbox.checked,control:label || checkbox};
+    // Vector Equipment > Standard uses the same React-select Filters widget
+    // as the live-proven PPE Responsible Party lookup. It is NOT a checkbox list.
+    // This code only operates on the native filter controls, never inspections.
+    function scbaAirpackLocationPicker() {
+        return [...document.querySelectorAll('input[role="combobox"]')]
+            .find(el => visible(el) &&
+                /filter-equip-.*-locations?$/i.test(el.id || '')) || null;
+    }
+
+    function scbaAirpackSelectedLocationLabels(input) {
+        // Read actual React-select multi-value chips, not the text currently
+        // being typed into the combobox. Nested labels must count only once.
+        const box=input?.parentElement?.parentElement;
+        if(!box)return [];
+        const chips=[...box.querySelectorAll('[class*="multiValue"],[class*="singleValue"]')]
+            .filter(el=>visible(el) && !el.parentElement?.closest(
+                '[class*="multiValue"],[class*="singleValue"]'));
+        return chips.map(chip=>{
+            const label=chip.querySelector?.('[class*="multiValueLabel"],[class*="multi-value__label"],[class*="singleValue"]');
+            return clean((label || chip).innerText || (label || chip).textContent || '')
+                .replace(/\s*[×✕]\s*$/,'');
+        }).filter(Boolean);
+    }
+
+    async function scbaAirpackWaitLocationPicker(ms=5500) {
+        const started=Date.now();
+        while(Date.now()-started<ms){
+            const input=scbaAirpackLocationPicker();
+            if(input)return input;
+            await sleep(125);
         }
-        const native=node.matches?.('[role="checkbox"],[role="option"],mat-checkbox,mat-list-option') ?
-            node : node.querySelector?.('[role="checkbox"],[role="option"],mat-checkbox,mat-list-option');
-        if(!native)return null;
-        const attr=native.getAttribute('aria-checked') ??
-            native.getAttribute('aria-selected');
-        if(attr==='true' || attr==='false')
-            return {checked:attr==='true',control:native};
-        // Do not infer checked state from color, position, or an icon.
         return null;
     }
 
-    function scbaAirpackFindNativeFilterOption(loc) {
-        // Look for an exact visible LOCATION choice outside Rebel. Never
-        // treat an existing "Filtered To:" chip as a selectable checkbox.
-        const leaves=[...document.querySelectorAll('body *')].filter(el=>
-            !el.closest('#'+PANEL_ID+',#'+OVERLAY_ID) &&
-            visible(el) &&
-            loc.exact.test(clean(el.innerText || el.textContent || '')) &&
-            ![...el.children].some(child=>
-                loc.exact.test(clean(child.innerText || child.textContent || ''))));
-        const options=[];
-        for(const leaf of leaves) {
-            let parent=leaf,steps=0;
-            while(parent && steps++<5 && parent!==document.body) {
-                const state=scbaAirpackNativeOptionState(parent);
-                if(state && state.control && !state.control.closest(
-                    '#'+PANEL_ID+',#'+OVERLAY_ID)) {
-                    options.push(state);
-                    break;
+    async function scbaAirpackChooseNativeLocation(loc, selectedIds,report) {
+        const expected=SCBA_AIRPACK_LOCATIONS
+            .filter(item=>selectedIds.includes(item.id)).map(item=>item.location);
+        const probes=[loc.location,loc.label,
+            loc.location.split(':')[0]].filter((value,index,all)=>
+                value && all.indexOf(value)===index);
+        for(const term of probes) {
+            const input=await scbaAirpackWaitLocationPicker(1400);
+            if(!input)throw new Error('Vector location picker closed before '+loc.label+'.');
+            input.focus();
+            input.click();
+            nativeSetInput(input,term);
+            const started=Date.now();
+            while(Date.now()-started<3500){
+                await sleep(130);
+                const current=scbaAirpackLocationPicker();
+                if(!current)continue;
+                const listId=current.getAttribute('aria-controls');
+                const list=listId?document.getElementById(listId):null;
+                const options=[...(list || document).querySelectorAll(
+                    '[role="option"],[id*="-option-"]')].filter(el=>
+                    visible(el) && loc.exact.test(clean(el.innerText || el.textContent || '')));
+                if(!options.length)continue;
+                if(options.length!==1)
+                    throw new Error('Multiple native Vector options match '+loc.location+'.');
+                const target=options[0];
+                // Same known React-select selection gesture as Vector PPE.
+                target.dispatchEvent(new MouseEvent('mousedown',
+                    {bubbles:true,cancelable:true}));
+                await sleep(220);
+                let chosen=scbaAirpackSelectedLocationLabels(
+                    scbaAirpackLocationPicker());
+                if(!chosen.includes(loc.location) && visible(target)){
+                    target.click(); // React-select variant with click handler.
+                    await sleep(220);
+                    chosen=scbaAirpackSelectedLocationLabels(
+                        scbaAirpackLocationPicker());
                 }
-                parent=parent.parentElement;
+                if(chosen.some(value=>!expected.includes(value)) ||
+                    new Set(chosen).size!==chosen.length)
+                    throw new Error('Vector selected an unexpected or duplicate location. Filters were not applied.');
+                if(chosen.includes(loc.location)) {
+                    if(report)report('Vector location selected: '+loc.label);
+                    return;
+                }
+                throw new Error('Vector did not confirm '+loc.location+' as a selected location chip.');
             }
         }
-        const controls=[...new Set(options.map(x=>x.control))];
-        if(controls.length!==1)return null; // no guess among duplicates
-        return options.find(x=>x.control===controls[0]) || null;
+        throw new Error('Vector did not offer the exact location '+loc.location+
+            '. No equipment inspection was submitted.');
     }
 
     async function scbaAirpackEnsureNativeFilters(selectedIds,report) {
         if(getRun())throw new Error('Finish the active PPE check before searching SCBA airpacks.');
-        if(!selectedIds.length)throw new Error('Choose at least one SCBA location.');
+        const requested=SCBA_AIRPACK_LOCATIONS.filter(loc=>selectedIds.includes(loc.id));
+        if(!requested.length)throw new Error('Choose at least one SCBA location.');
         if(!scbaAirpackStandardTable())
             throw new Error('Open Vector Equipment > Standard before finding airpacks.');
-        if(scbaAirpackFilterScope(selectedIds).ready)return;
-        const filters=findVectorNavigationTarget('Filters');
-        if(!filters || !visible(filters))
-            throw new Error('Native Vector Filters button was not found.');
-        if(report)report('Applying the selected locations in Vector automatically...');
-        filters.click();
-        await sleep(350);
-        // Some native filter panels need their Location selector expanded.
-        const expandLocation=()=>{
-            const expand=[...document.querySelectorAll(
-                'button,[role="button"],[role="combobox"],[aria-expanded]')]
-                .filter(el=>!el.closest('#'+PANEL_ID+',#'+OVERLAY_ID) &&
-                    visible(el) && /^Location(?:s)?$/i.test(clean(
-                        el.innerText || el.textContent || el.getAttribute('aria-label') || '')) &&
-                    el.getAttribute('aria-expanded')==='false');
-            if(expand.length===1){expand[0].click();return true;}
-            return false;
-        };
-        if(!SCBA_AIRPACK_LOCATIONS.some(loc=>scbaAirpackFindNativeFilterOption(loc))) {
-            if(expandLocation())await sleep(300);
+        // The native name search is independent from the location filter.
+        const search=getSearchInput();
+        if(search && clean(search.value)){
+            nativeSetInput(search,'');
+            await sleep(320);
         }
-        for(const loc of SCBA_AIRPACK_LOCATIONS) {
-            const wanted=selectedIds.includes(loc.id);
-            // A missing option can be ignored only if that location is
-            // neither requested nor currently applied.
-            let option=scbaAirpackFindNativeFilterOption(loc);
-            if(!option && wanted) {
-                if(expandLocation())await sleep(300);
-                option=scbaAirpackFindNativeFilterOption(loc);
-            }
-            if(!option) {
-                if(wanted || scbaAirpackFilterScope(selectedIds).selected.includes(loc.id))
-                    throw new Error('Cannot identify the native checkbox for '+loc.location+
-                        '. No inspection was submitted.');
-                continue;
-            }
-            if(option.checked!==wanted) {
-                option.control.click();
-                await sleep(300);
-                // Native Angular/React may rerender after every toggle.
-                const after=scbaAirpackFindNativeFilterOption(loc);
-                if(after && after.checked!==wanted)
-                    throw new Error('Vector did not accept the '+loc.label+' location choice.');
-            }
+        // Always clear inherited Pool / Responsible Party / other filters,
+        // even when the visible location chips already match. Otherwise a
+        // hidden extra filter could silently omit airpacks from the scan.
+        if(report)report('Selecting locations in Vector Equipment > Standard...');
+        const findButton=label=>[...document.querySelectorAll('button,[role="button"]')]
+            .find(btn=>visible(btn) &&
+                (uiEquals(btn.getAttribute('aria-label') || '',label) ||
+                 uiEquals(btn.innerText || btn.textContent || '',label)));
+        let input=scbaAirpackLocationPicker();
+        if(!input){
+            // Same "Open filter options" control used by PPE.
+            const open=findButton('Open filter options') ||
+                findButton('Filters') || findVectorNavigationTarget('Filters');
+            if(!open)throw new Error('Vector Equipment Filters button was not found.');
+            open.click();
+            input=await scbaAirpackWaitLocationPicker();
         }
-        // Apply is a filter-only UI action. Do not click generic Save/Submit.
-        const apply=[...document.querySelectorAll('button,[role="button"]')]
-            .filter(el=>!el.closest('#'+PANEL_ID+',#'+OVERLAY_ID) &&
-                visible(el) && /^(?:Apply|Apply Filters|Show Results|Filter Results)$/i
-                .test(clean(el.innerText || el.textContent || '')));
-        if(apply.length===1)apply[0].click();
-        // Native filter chips, not checkbox clicks, are the proof that the
-        // equipment table is actually scoped to the operator's choices.
-        for(let attempt=0;attempt<45;attempt++){
+        if(!input)throw new Error('Vector Standard Location React-select filter was not found.');
+        // Clear the previous draft filters so another Location / Pool /
+        // Responsible Party condition cannot silently suppress airpacks.
+        const clear=findButton('Clear Filters');
+        if(!clear)throw new Error('Vector did not show Clear Filters.');
+        clear.click();
+        await sleep(220);
+        input=await scbaAirpackWaitLocationPicker(700);
+        if(!input){
+            const reopen=findButton('Open filter options') ||
+                findButton('Filters') || findVectorNavigationTarget('Filters');
+            reopen?.click();
+            input=await scbaAirpackWaitLocationPicker();
+        }
+        if(!input)throw new Error('Vector location picker closed after Clear Filters.');
+        const clearedAt=Date.now();
+        while(Date.now()-clearedAt<1600 &&
+              scbaAirpackSelectedLocationLabels(input).length){
+            await sleep(125);
+            input=scbaAirpackLocationPicker() || input;
+        }
+        if(scbaAirpackSelectedLocationLabels(input).length)
+            throw new Error('Vector retained old location chips after Clear Filters.');
+        for(const loc of requested){
+            await scbaAirpackChooseNativeLocation(loc,selectedIds,report);
+        }
+        const selected=scbaAirpackSelectedLocationLabels(
+            scbaAirpackLocationPicker());
+        if(selected.length!==requested.length ||
+            requested.some(loc=>!selected.includes(loc.location)) ||
+            selected.some(label=>!requested.some(loc=>loc.location===label)))
+            throw new Error('Vector selected locations changed before Apply Filters. No scan started.');
+        const apply=findButton('Apply Filters');
+        if(!apply)throw new Error('Vector did not show Apply Filters.');
+        apply.click();
+        // The applied chips are the receipt; a successful button click alone
+        // is NOT enough. This cannot accept the unfiltered 2,069-row inventory.
+        for(let attempt=0;attempt<100;attempt++){
             if(scbaAirpackStandardTable() &&
-                scbaAirpackFilterScope(selectedIds).ready) {
-                if(report)report('Vector locations applied. Finding selected SCBA airpacks...');
+                scbaAirpackFilterScope(selectedIds).ready){
+                if(report)report('Selected Vector locations confirmed. Finding SCBA airpacks...');
                 return;
             }
             await sleep(220);
         }
         const scope=scbaAirpackFilterScope(selectedIds);
-        throw new Error('Vector did not confirm these location filters. '+
+        throw new Error('Vector did not confirm requested Standard location filters. '+
             (scope.missing.length?'Missing: '+scope.missing.join('; ')+'. ':'')+
             (scope.extra.length?'Extra: '+scope.extra.join('; ')+'. ':'')+
-            'No equipment check was submitted.');
+            'No inspection was submitted.');
     }
 
     function isScbaAirpackStandardItem(item) {

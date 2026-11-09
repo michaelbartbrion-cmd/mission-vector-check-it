@@ -18,7 +18,7 @@ const locations=[
 test('airpack check is independently available in existing Vector Rebel panel',()=>{
     assert.match(src,/mainAction\('SCBA Airpacks', showStation4ScbaAirpackCheck, false\)/);
     assert.match(src,/mainAction\('My Tour PPE',/);
-    assert.match(src,/^\/\/ @version\s+3\.2\.56/m);
+    assert.match(src,/^\/\/ @version\s+3\.2\.57/m);
     assert.match(src,/const SCBA_AIRPACK_DRAFT_KEY = 'vector-rebel-station4-airpack-draft-v1'/);
     const check=cut('function showStation4ScbaAirpackCheck() {','function installPanel() {');
     assert.match(check,/makeOverlayBox\('830px'\)/);
@@ -220,80 +220,153 @@ test('page-readiness guard requires every native Standard row, not only matched 
     await assert.rejects(fn({first:1,last:2,total:2},1),/did not finish loading/);
 });
 
-test('native filter control uses explicit checkbox or accessibility state, never guessed visual styling',()=>{
-    const code=cut('function scbaAirpackNativeOptionState(node) {',
-        'function scbaAirpackFindNativeFilterOption(loc) {')+
-        '\nreturn scbaAirpackNativeOptionState;';
-    const state=new Function(code)();
-    const label={};
-    const input={checked:false,closest:()=>label};
-    const standard={matches:()=>false,querySelector:()=>input};
-    assert.deepEqual(state(standard),{checked:false,control:label});
-    input.checked=true;
-    assert.deepEqual(state(standard),{checked:true,control:label});
-    const role={getAttribute:name=>name==='aria-checked'?'false':null};
-    const wrapper={matches:()=>false,querySelector:()=>role};
-    assert.deepEqual(state(wrapper),{checked:false,control:role});
-    const unknown={matches:()=>false,querySelector:()=>({getAttribute:()=>null})};
-    assert.equal(state(unknown),null);
-});
-test('Find SCBA automatically opens native Filters, corrects selected locations and confirms native chips',async()=>{
-    const source=cut('async function scbaAirpackEnsureNativeFilters(selectedIds,report) {',
-        'function isScbaAirpackStandardItem(item) {')+
-        '\nreturn scbaAirpackEnsureNativeFilters;';
-    const active=new Set(['station4']);
-    const applied=new Set(['station4']);
-    const actions=[];
-    let popup=false;
+
+const filterCode=cut('function scbaAirpackLocationPicker() {',
+    'function isScbaAirpackStandardItem(item) {')+
+    '\nreturn {choose:scbaAirpackChooseNativeLocation,ensure:scbaAirpackEnsureNativeFilters,'+
+    'selected:scbaAirpackSelectedLocationLabels,picker:scbaAirpackLocationPicker};';
+function scbaNativeReactHarness({
+    selectedOn='mousedown',wrongOption=false,noPicker=false,missingOption=false,
+    initialApplied=[]
+}={}){
+    let open=false, now=1000,clearCount=0,applyCount=0,locationClicks=0;
+    const selected=[];
+    let applied=new Set(initialApplied);
+    const changes=[];
+    class FakeDate extends Date {static now(){return now;}}
+    const chipBox={
+        querySelectorAll(){return selected.map(label=>({
+            innerText:label+' ×',
+            textContent:label+' ×',
+            parentElement:{closest:()=>null},
+            querySelector:()=>({innerText:label,textContent:label})
+        }));}
+    };
+    const input={
+        id:'filter-equip-std-location',value:'',
+        parentElement:{parentElement:chipBox},
+        getAttribute:key=>key==='aria-controls'?'location-list':null,
+        focus(){},click(){}
+    };
+    const getOption=loc=>{
+        const actual=wrongOption && loc.id==='truck504' ? locations[1] : loc;
+        const label=actual.location;
+        const choose=()=>{
+            locationClicks++;
+            if(!selected.includes(label))selected.push(label);
+            else if(selectedOn==='double_toggle')selected.splice(selected.indexOf(label),1);
+            input.value='';
+        };
+        return {
+            innerText:label,textContent:label,
+            dispatchEvent:ev=>{
+                if(ev.type==='mousedown'&&['mousedown','double_toggle'].includes(selectedOn)) choose();
+            },click:()=>{if(selectedOn==='click'||selectedOn==='double_toggle') choose();}
+        };
+    };
+    const listbox={
+        querySelectorAll(){
+            if(missingOption)return [];
+            return locations.filter(loc=>
+                input.value && loc.location.toLowerCase().includes(input.value.toLowerCase())
+            ).map(getOption);
+        }
+    };
+    const openButton={
+        innerText:'',getAttribute:key=>key==='aria-label'?'Open filter options':'',
+        click(){open=true}
+    };
+    const clearButton={
+        innerText:'Clear Filters',getAttribute:()=>'',click(){clearCount++;selected.length=0;}
+    };
+    const applyButton={
+        innerText:'Apply Filters',getAttribute:()=>'',click(){
+            applyCount++;open=false;
+            applied=new Set(locations.filter(loc=>selected.includes(loc.location)).map(loc=>loc.id));
+        }
+    };
+    const document={
+        querySelectorAll(query){
+            if(query==='button,[role="button"]')return open?
+                [openButton,clearButton,applyButton]:[openButton];
+            if(query==='input[role="combobox"]')return open&&!noPicker?[input]:[];
+            return [];
+        },
+        getElementById:key=>key==='location-list'&&open?listbox:null
+    };
     const scope=ids=>({
-        ready:ids.length>0 &&
-            ids.every(x=>applied.has(x)) &&
-            [...applied].every(x=>ids.includes(x)),
-        selected:[...applied],requested:ids,missing:[],extra:[]
+        ready:ids.length>0 && ids.every(id=>applied.has(id)) &&
+            [...applied].every(id=>ids.includes(id)),
+        requested:ids,selected:[...applied],
+        missing:ids.filter(id=>!applied.has(id)),
+        extra:[...applied].filter(id=>!ids.includes(id))
     });
-    const option=loc=>popup ? {
-        checked:active.has(loc.id),
-        control:{click(){
-            actions.push('toggle:'+loc.id);
-            if(active.has(loc.id))active.delete(loc.id);else active.add(loc.id);
-        }}
-    }:null;
-    const apply={innerText:'Apply Filters',closest:()=>null,
-        click(){actions.push('apply');applied.clear();for(const x of active)applied.add(x);}};
-    const document={querySelectorAll:selector=>
-        selector==='button,[role="button"]'?[apply]:[]};
-    const open={click(){actions.push('open');popup=true;}};
-    const fn=new Function('getRun','scbaAirpackStandardTable',
-        'scbaAirpackFilterScope','findVectorNavigationTarget','visible','sleep',
-        'SCBA_AIRPACK_LOCATIONS','scbaAirpackFindNativeFilterOption','document',
-        'clean','PANEL_ID','OVERLAY_ID',source)(
-            ()=>null,()=>({table:{}}),scope,()=>open,()=>true,async()=>{},
-            locations,option,document,clean,'rebel-panel','rebel-overlay');
-    const messages=[];
-    await fn(['truck504','medic504'],message=>messages.push(message));
-    assert.deepEqual(actions,[
-        'open','toggle:truck504','toggle:medic504','toggle:station4','apply'
-    ]);
-    assert.deepEqual([...applied].sort(),['medic504','truck504']);
-    assert.equal(scope(['truck504','medic504']).ready,true);
-    const before=actions.length;
-    await fn(['truck504','medic504']);
-    assert.equal(actions.length,before,'no repeated filter clicks when already selected');
+    const factory=new Function('document','visible','clean','sleep','getRun',
+        'scbaAirpackStandardTable','scbaAirpackFilterScope',
+        'findVectorNavigationTarget','getSearchInput','nativeSetInput',
+        'SCBA_AIRPACK_LOCATIONS','uiEquals','MouseEvent','Date',filterCode);
+    const instance=factory(document,()=>true,clean,
+        async ms=>{now+=ms;},()=>null,()=>({table:{}}),scope,
+        ()=>openButton,()=>({value:''}), (el,value)=>{changes.push(value);el.value=value;},
+        locations,(a,b)=>clean(a).toLowerCase()===clean(b).toLowerCase(),
+        class MockMouseEvent {
+            constructor(type,opts){
+                assert.equal(type,'mousedown');
+                assert.equal(opts.bubbles,true);
+                assert.equal(opts.cancelable,true);
+                this.type=type;
+            }
+        },FakeDate);
+    return {
+        ...instance,
+        state:()=>({open,selected:[...selected],applied:[...applied],
+            clearCount,applyCount,locationClicks,changes,now})
+    };
+}
+test('SCBA Standard picker uses the same React-select location field model as PPE',()=>{
+    const h=scbaNativeReactHarness();
+    assert.equal(h.picker(),null);
+    assert.match(filterCode,/filter-equip-.*-locations\?\$/i);
+    assert.match(filterCode,/Open filter options/);
+    assert.match(filterCode,/Clear Filters/);
+    assert.match(filterCode,/Apply Filters/);
+    assert.match(filterCode,/new MouseEvent\('mousedown'/);
+    assert.doesNotMatch(filterCode,/input\[type="checkbox"\]/);
 });
-test('SCBA auto-filter refuses unknown native controls rather than guessing or scanning all inventory',async()=>{
-    const source=cut('async function scbaAirpackEnsureNativeFilters(selectedIds,report) {',
-        'function isScbaAirpackStandardItem(item) {')+
-        '\nreturn scbaAirpackEnsureNativeFilters;';
-    let scans=0,opens=0;
-    const fn=new Function('getRun','scbaAirpackStandardTable',
-        'scbaAirpackFilterScope','findVectorNavigationTarget','visible','sleep',
-        'SCBA_AIRPACK_LOCATIONS','scbaAirpackFindNativeFilterOption','document',
-        'clean','PANEL_ID','OVERLAY_ID',source)(
-            ()=>null,()=>{scans++;return {table:{}};},
-            ids=>({ready:false,selected:[],missing:ids,extra:[],requested:ids}),
-            ()=>({click(){opens++;}}),()=>true,async()=>{},
-            locations,()=>null,{querySelectorAll:()=>[]},clean,'rebel-panel','rebel-overlay');
-    await assert.rejects(fn(['truck504']),/Cannot identify the native checkbox/);
-    assert.equal(opens,1);
-    assert.equal(scans,1,'only the read-only table preflight was done');
+test('React-select SCBA locations auto-filter all three, and use applied chips before scanning',async()=>{
+    const h=scbaNativeReactHarness({initialApplied:['medic504']});
+    await h.ensure(['truck504','medic504','station4']);
+    assert.deepEqual(h.state().applied.sort(),['medic504','station4','truck504']);
+    assert.equal(h.state().clearCount,1);
+    assert.equal(h.state().applyCount,1);
+    assert.equal(h.state().locationClicks,3);
+    assert.deepEqual(h.state().selected.sort(),locations.map(x=>x.location).sort());
+    assert.ok(h.state().changes.some(v=>v===locations[0].location));
+});
+test('Only the chosen one or two SCBA locations appear in native filters',async()=>{
+    for(const ids of [['truck504'],['medic504','station4']]){
+        const h=scbaNativeReactHarness({initialApplied:['truck504','medic504','station4']});
+        await h.ensure(ids);
+        assert.deepEqual(h.state().applied.sort(),ids.slice().sort());
+        const before=h.state().applyCount;
+        await h.ensure(ids);
+        assert.equal(h.state().applyCount,before+1,
+            'each scan clears potentially hidden Pool / Responsible Party filters');
+    }
+});
+test('Wrong SCBA location option never applies an unsafe filter',async()=>{
+    const h=scbaNativeReactHarness({wrongOption:true});
+    await assert.rejects(h.ensure(['truck504']),/did not offer the exact location/);
+    assert.equal(h.state().applyCount,0);
+});
+test('If the Standard Location combobox is unavailable, refuse rather than guess checkboxes',async()=>{
+    const h=scbaNativeReactHarness({noPicker:true});
+    await assert.rejects(h.ensure(['truck504']),/Location React-select filter was not found/);
+    assert.equal(h.state().applyCount,0);
+});
+test('SCBA React-select click-only variant is supported without double-toggle',async()=>{
+    const h=scbaNativeReactHarness({selectedOn:'click'});
+    await h.ensure(['medic504']);
+    assert.deepEqual(h.state().applied,['medic504']);
+    assert.equal(h.state().applyCount,1);
 });
