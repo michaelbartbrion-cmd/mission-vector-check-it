@@ -222,22 +222,11 @@
   const formId = () => location.pathname.match(/\/questionaries\/(\d+)\/?$/)?.[1] || '';
   const isGroupPage = () => /\/questionaries\/group\/\d+\/?$/.test(location.pathname);
   const listUrl = id => '/inspections/' + id + '/questionaries/group/0';
-  // Operative IQ separates questionnaire and asset verification. The daily
-  // action opens the assigned asset list only AFTER a verified Tour draft save.
-  const ASSET_FOLLOWUP_KEY = 'rebelIqT504DailyAssetFollowupV1';
+  // Daily Tour and Assets are independent workflows.
   const ASSET_UNIT_ID = '60443';
+  const ASSET_OPEN_KEY = 'rebelIqT504AssetsOpenOnceV1';
   const assetUrl = id => '/inspections/' + id + '/assets/group/-1';
   const isAssetPage = () => /\/inspections\/\d+\/assets\/group\/-1\/?$/.test(location.pathname);
-  const readAssetFollowup = () => {
-    try {
-      const run = JSON.parse(sessionStorage.getItem(ASSET_FOLLOWUP_KEY) || 'null');
-      return run && run.unitId === ASSET_UNIT_ID &&
-        ['await_daily_save','assets_opening'].includes(run.stage) &&
-        Date.now() - run.startedAt < 5 * 60 * 1000 ? run : null;
-    } catch { return null; }
-  };
-  const writeAssetFollowup = run => sessionStorage.setItem(ASSET_FOLLOWUP_KEY, JSON.stringify(run));
-  const clearAssetFollowup = () => sessionStorage.removeItem(ASSET_FOLLOWUP_KEY);
 
   const readPending = () => {
     try {
@@ -417,7 +406,6 @@
   // Never infer that an asset was inspected from its appearance on the page.
   const ASSET_GUIDE_ID = 'rebel-iq-t504-asset-guide';
   let assetGuideRows = [], assetGuideLastScan = 0;
-  let assetReviewOpenRequested = false;
   let assetBatchPreview = null, assetBatchRunning = false;
   let assetBatchCancel = false, assetBatchPilotConfirmed = false;
   const attemptedAssetRecords = new Set();
@@ -987,8 +975,9 @@
       notify('A questionnaire draft is running. Finish it before opening Asset Checks.', true);
       return;
     }
-    notify('Opening T504 Asset Requirements. Review the unverified list, change exceptions, then record only physically inspected equipment.');
-    if (isAssetPage()) { loadAssetChecklist(); return; }
+    if (isAssetPage()) { openAssetReviewScreen(); return; }
+    sessionStorage.setItem(ASSET_OPEN_KEY, String(now()));
+    notify('Opening the separate T504 Assets review screen.');
     location.assign(assetUrl(id));
   }
 
@@ -1009,11 +998,6 @@
       'Rebel IQ will use Save In Process, NEVER Submit.'
     )) return;
     sessionStorage.removeItem(RESULT);
-    if (kind === 'daily') {
-      writeAssetFollowup({unitId: id, startedAt: now(), stage: 'await_daily_save'});
-    } else {
-      clearAssetFollowup();
-    }
     attempts = 0;
     writePending({ kind, unitId: id, startedAt: now(), stage: 'list' });
     notify('Opening ' + TASKS[kind].name + '...');
@@ -1555,19 +1539,14 @@
       attempts = 0;
     }
     refreshAssetReviewGuide();
-    const assetFollowup = readAssetFollowup();
-    if (assetFollowup?.stage === 'assets_opening' && isAssetPage() &&
-        t504Visible() && /Asset Requirements/i.test(document.body.innerText || '')) {
-      clearAssetFollowup();
-      const message = 'Daily Tour draft saved. T504 Asset Requirements is ready for physical verification. No asset has been marked checked by Rebel IQ.';
-      sessionStorage.setItem(RESULT, message);
-      notify(message);
-    } else if (assetFollowup?.stage === 'assets_opening' &&
-        now() - (assetFollowup.requestedAt || assetFollowup.startedAt) > 25000) {
-      clearAssetFollowup();
-      notify('Daily Tour draft saved, but Asset Requirements did not open. Use Asset Checks to open it manually.', true);
-    } else if (!assetFollowup && sessionStorage.getItem(ASSET_FOLLOWUP_KEY)) {
-      clearAssetFollowup();
+    const assetOpenAt = Number(sessionStorage.getItem(ASSET_OPEN_KEY) || 0);
+    if (assetOpenAt && now() - assetOpenAt > 20000) {
+      sessionStorage.removeItem(ASSET_OPEN_KEY);
+      notify('Assets screen did not open. Try Assets again.', true);
+    } else if (assetOpenAt && isAssetPage() && t504Visible() &&
+        /Asset Requirements/i.test(document.body.innerText || '')) {
+      sessionStorage.removeItem(ASSET_OPEN_KEY);
+      openAssetReviewScreen();
     }
     const ropeRun = readRopes();
     if (ropeRun) {
@@ -1591,15 +1570,6 @@
           clean(el.textContent).includes('Saved in Process'))
         .sort((a, b) => clean(a.textContent).length - clean(b.textContent).length)[0];
       if (card) {
-        const followup = readAssetFollowup();
-        if (task === TASKS.daily && followup?.stage === 'await_daily_save' &&
-            followup.unitId === inspectionId()) {
-          writeAssetFollowup({...followup, stage: 'assets_opening', requestedAt: now()});
-          sessionStorage.setItem(RESULT, task.name + ': Saved in Process confirmed. Opening Asset Requirements for physical verification.');
-          notify('Daily Tour saved in process. Opening the separate asset-verification step, without marking any assets checked.');
-          location.assign(assetUrl(followup.unitId));
-          return;
-        }
         sessionStorage.setItem(RESULT, task.name + ': Saved in Process confirmed. Verify on phone before submission.');
         notify(task.name + ': Saved in Process confirmed. Verify at truck.');
       }
