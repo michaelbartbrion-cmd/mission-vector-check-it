@@ -46,16 +46,26 @@ test('does not infer omitted PPE Name without its serial and full item heading',
  assert.equal(create({title:'Serial Number: 10948322'})(target),'');
  assert.equal(create({title:'Bunker Coat: BALDREE-10948322-F...'})(target),'');
 });
-test('inspection flow checks restored full name before persisting, never bypasses identity check',()=>{
- const block=src.slice(src.indexOf('    async function openInspectionForCurrentAsset(run) {'),
-   src.indexOf('    async function ',src.indexOf('    async function openInspectionForCurrentAsset(run) {')+15));
- assert.ok(block.includes('resolveClippedPpeNameFromVerifiedDetail(item)'));
- assert.ok(block.indexOf('verifyExpectedAssetPage(verifiedItem)') <
-   block.indexOf('item.assetId = restoredName'));
- assert.ok(block.indexOf('if (!identityVerified)') <
-   block.indexOf('item.assetId = restoredName'));
- assert.match(block,/item\.assetId = restoredName;\s*saveRun\(run\)/);
- assert.match(block,/stopRun\(/);
+test('Tour and read-only Captain share exact delayed identity proof before any effect',()=>{
+ const start=src.indexOf('    async function verifyPpeDetailIdentity(item) {');
+ const end=src.indexOf('    function isCompletedInspectionView',start);
+ const identity=src.slice(start,end);
+ assert.ok(start>=0&&end>start,'one shared identity verifier is available');
+ assert.match(identity,/resolveClippedPpeNameFromVerifiedDetail\(item\)/);
+ assert.match(identity,/findAssetIdentityElement\(verifiedItem\)/);
+ assert.match(identity,/\}, 18000, 180\)/);
+ assert.match(identity,/return null/);
+ const tour=src.slice(src.indexOf('    async function openInspectionForCurrentAsset(run) {'),
+   src.indexOf('        const itemKey =',src.indexOf('    async function openInspectionForCurrentAsset(run) {')));
+ assert.match(tour,/await verifyPpeDetailIdentity\(item\)/);
+ assert.ok(tour.indexOf('if (!proof)')<tour.indexOf('item.assetId = restoredName'));
+ assert.match(tour,/item\.assetId = restoredName;\s*saveRun\(run\)/);
+ assert.match(tour,/stopRun\(/);
+ const captain=src.slice(src.indexOf('    async function readCaptainComplianceHistory(item) {'),
+   src.indexOf('    function buildCaptainDailyReport',src.indexOf('    async function readCaptainComplianceHistory(item) {')));
+ assert.match(captain,/await verifyPpeDetailIdentity\(item\)/);
+ assert.ok(captain.indexOf('if (!proof)')<captain.indexOf('revealAssetHistory'));
+ assert.doesNotMatch(captain,/saveRun\(|Submit Inspection|Submit/);
 });
 
 test('Baldree hood has a complete PPE Name before display ellipsis; restore exact heading',()=>{
@@ -86,4 +96,12 @@ test('Baldree Structural Boot name clipping recovers exact singular heading',()=
 });
 test('both exact-name and serial identity validators recognize singular Structural Boot',()=>{
  assert.equal((src.match(/Structural \(\?:Gloves\|Helmet\|Boots\?\)/g)||[]).length,2);
+});
+
+test('Baldree recurring Structural Gloves clipped name matches exact heading, serial, and type',()=>{
+ const gloves={assetId:'BALDREE-3290824-BU...',pool:'299879',itemId:'4598134',type:'Structural Gloves'};
+ const exact='Structural Gloves: BALDREE-3290824-BU';
+ assert.equal(create({serial:'3290824',title:exact})(gloves),'BALDREE-3290824-BU');
+ assert.equal(create({serial:'1231231',title:exact})(gloves),'');
+ assert.equal(create({serial:'3290824',title:'Bunker Coat: BALDREE-3290824-BU'})(gloves),'');
 });

@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "project": "Mission Vector Check It",
   "channel": "beta",
-  "latestVersion": "3.2.51",
+  "latestVersion": "3.2.52",
   "minimumSupportedVersion": "2.3.1",
   "status": "current",
-  "message": "Vector Rebel 3.2.51 handles singular Structural Boot PPE titles and keeps one-owner selection correction.",
-  "releaseNotes": "Rebel Command evidence identified a Structural Boot listed as BALDREE-5633595-BB... but displayed as Structural Boot: BALDREE-5633595-BB with matching serial. Read-only PPE identity recovery now accepts the official singular Structural Boot heading as well as Boots, while requiring the exact item route, serial, type, and full-name identity verification. Includes 3.2.50 strict one-Responsible-Party selection.",
+  "message": "Vector Rebel 3.2.52 beta: repeated clipped PPE labels are verified against full item details in Tour and Daily Captain.",
+  "releaseNotes": "Beta release for supervised field verification. Corrects a recurrent failure when Vector lists an abbreviated PPE Name but later shows its full heading and labeled serial. Tour PPE and read-only Daily Captain use one 18-second exact pool/item, full name, type, and serial proof loop before proceeding. Wrong or ambiguous equipment still stops; only physically inspected and authorized gear may be submitted. Tested with the four documented Baldree cases and fail-closed scenarios; live operator acceptance remains pending.",
   "installUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js",
   "legacyUpdateUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
   "repoUrl": "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
-  "publishedAt": "2026-11-03"
+  "publishedAt": "2026-11-09"
 }
