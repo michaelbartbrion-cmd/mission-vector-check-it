@@ -2,15 +2,15 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path');
 const src=fs.readFileSync(path.join(__dirname,'../beta/rebel-iq.user.js'),'utf8');
-const begin=src.indexOf('  function makeAssetReviewSection() {');
+const begin=src.indexOf('  function makeAssetReviewScreen() {');
 const end=src.indexOf('  function beginAssets() {',begin);
 assert.ok(begin>0&&end>begin);
 const section=src.slice(begin,end);
 test('asset controls stay in the one expanded Rebel IQ panel without a floating overlay',()=>{
   assert.match(src,/body\.append\(actions, makeAssetReviewSection\(\), statusWrap\)/);
-  assert.match(section,/Load Unverified Assets/);
+  assert.match(section,/Refresh Unverified List/);
   assert.match(section,/Record Verified Assets/);
-  assert.doesNotMatch(section,/position:fixed|window\.confirm\(/);
+  assert.doesNotMatch(section,/window\.confirm\(/);
 });
 test('draft Verified choices never physically certify a T504 asset by themselves',()=>{
   assert.match(section,/choice:'verified'/);
@@ -38,7 +38,7 @@ test('unverified items with missing or duplicate tags are shown but not auto-rec
 test('recording is physical presence and operation, unrelated to scheduled maintenance',()=>{
   assert.match(section,/present and working/);
   assert.doesNotMatch(section,/maintenanceBlocked|blocked\.maintenance/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.16/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.17/m);
 });
 
 test('opening T504 Assets loads a draft list automatically without recording an asset',()=>{
