@@ -33,7 +33,7 @@ test('each asset gets its own native receipt and stops on uncertain result',()=>
 });
 test('unverified items with missing or duplicate tags are shown but not auto-recorded',()=>{
   assert.match(section,/tagCounts\.get\(assetTag\) === 1/);
-  assert.match(section,/tag unavailable/);
+  assert.match(section,/\[UNASSIGNED\]/);
   assert.match(section,/manual catalog\/ambiguous/);
   assert.match(section,/unmapped/);
 });
