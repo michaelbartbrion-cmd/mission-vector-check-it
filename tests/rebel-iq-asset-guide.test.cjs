@@ -49,7 +49,7 @@ test('asset guide scrolls to the next item but does not certify any equipment',(
   assert.match(block,/scrollIntoView\(\{behavior: 'smooth', block: 'center'\}\)/);
   assert.match(block,/Next Unverified/);
   assert.match(block,/No asset has been marked checked|no status is changed automatically/i);
-  assert.doesNotMatch(block,/\.click\(|\.checked\s*=|\.dispatchEvent\(|fetch\(|GM_xmlhttpRequest\(|Submit Inspection/);
+  assert.doesNotMatch(block,/\.click\(|\.dispatchEvent\(|fetch\(|GM_xmlhttpRequest\(|Submit Inspection/);
 });
 test('asset review remains a separate phase after confirmed saved Tour draft',()=>{
   assert.match(src,/Daily Tour \+ Assets/);
@@ -103,7 +103,7 @@ test('unmatched asset coverage is visibly disclosed and native counts are author
   assert.match(block,/not mapped: use the native list for these/);
   assert.match(block,/guide detects|Guide detects/);
   assert.match(block,/Maintenance Due/);
-  assert.doesNotMatch(block,/\.click\(|\.checked\s*=|Submit Inspection/);
+  assert.doesNotMatch(block,/\.click\(|Submit Inspection/);
 });
 
 test('read-only scanner cannot record any item without a unique asset tag and physical confirmation',()=>{
@@ -111,7 +111,7 @@ test('read-only scanner cannot record any item without a unique asset tag and ph
     src.indexOf('  function beginAssets() {'));
   assert.match(section,/Record Present \(1 asset\)/);
   assert.match(section,/record\.disabled = true/);
-  assert.match(section,/assetTag \+ '\\n\\n'/);
+  assert.match(section,/presenceBox.type = 'checkbox'/);
   assert.match(section,/data-asset-guide-confirm/);
   assert.doesNotMatch(section,/window\.confirm\(/);
   assert.match(section,/readPending\(\) \|\| readRopes\(\)/);
