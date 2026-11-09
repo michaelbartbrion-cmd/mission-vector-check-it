@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.9
+// @version      0.1.10
 // @description  Prepare T504 daily, weekly, and Thursday rope drafts. Save In Process only; never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.9' };
+  window.__rebelIqT504 = { version: '0.1.10' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.9';
+  const IQ_VERSION = '0.1.10';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -408,6 +408,125 @@
         ROPE_TASKS[runningRopes.index].name);
     } else if (ropeResult) notify(ropeResult);
     else if (prior) notify(prior);
+  }
+
+
+  // T504 Asset Requirements page review aid. Uses existing, live Operative IQ
+  // statuses. NEVER toggles a verification control or signs off an asset.
+  const ASSET_GUIDE_ID = 'rebel-iq-t504-asset-guide';
+  let assetGuideRows = [], assetGuideNext = -1, assetGuideLastScan = 0;
+
+  function readAssetReviewRows() {
+    if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible()) return [];
+    const statusPattern = /^(Not Verified|Verified|Needs Attention|Requires Attention)$/i;
+    const statusNodes = [...document.querySelectorAll('span,div,small,p,label,strong')]
+      .filter(node => visible(node) && node.children.length === 0 &&
+        !node.closest('#' + PANEL + ', #' + ASSET_GUIDE_ID) &&
+        statusPattern.test(clean(node.textContent || '')));
+    const used = new Set(), rows = [];
+    for (const label of statusNodes) {
+      const status = clean(label.textContent).toLowerCase();
+      let card = label.parentElement;
+      for (let depth = 0; depth < 7 && card; depth++, card = card.parentElement) {
+        const text = String(card.innerText || card.textContent || '');
+        const bounds = card.getBoundingClientRect();
+        if (text.length > 750 || bounds.height > 240) break;
+        if (bounds.height < 28 ||
+            !/\b(?:Location|Asset Tag|Asset Type|Asset Class|Part|Qty|Quantity)\b/i.test(text)) continue;
+        if (used.has(card)) break;
+        // Each identified row must contain exactly one status leaf. Otherwise
+        // this is a section wrapper, not an individual requirement.
+        const statusesInCard = statusNodes.filter(node => card.contains(node));
+        if (statusesInCard.length !== 1) continue;
+        used.add(card);
+        const title = clean(text.split(/\r?\n/)[0] || 'Asset');
+        rows.push({element: card, title: title.slice(0, 110), status});
+        break;
+      }
+    }
+    return rows;
+  }
+
+  function showNextAssetToReview() {
+    const pending = assetGuideRows.filter(row =>
+      row.status === 'not verified' || row.status === 'needs attention' ||
+      row.status === 'requires attention');
+    const panel = document.getElementById(ASSET_GUIDE_ID);
+    const status = panel?.querySelector('[data-asset-guide-status]');
+    if (!pending.length) {
+      if (status) status.textContent = assetGuideRows.length
+        ? 'No unverified items detected. Confirm status in Operative IQ.'
+        : 'No individual asset statuses detected. Use the native list.';
+      return;
+    }
+    assetGuideNext = (assetGuideNext + 1) % pending.length;
+    const target = pending[assetGuideNext];
+    target.element.scrollIntoView({behavior: 'smooth', block: 'center'});
+    const previous = target.element.style.outline;
+    target.element.style.outline = '3px solid #176b8e';
+    setTimeout(() => {
+      if (target.element.isConnected) target.element.style.outline = previous;
+    }, 2200);
+    if (status) status.textContent =
+      'Review ' + (assetGuideNext + 1) + '/' + pending.length + ': ' +
+      target.title + '. Verify physically using Operative IQ controls.';
+  }
+
+  function refreshAssetReviewGuide() {
+    if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible()) {
+      document.getElementById(ASSET_GUIDE_ID)?.remove();
+      assetGuideRows = [];
+      assetGuideNext = -1;
+      return;
+    }
+    if (now() - assetGuideLastScan < 2000) return;
+    assetGuideLastScan = now();
+    assetGuideRows = readAssetReviewRows();
+    let panel = document.getElementById(ASSET_GUIDE_ID);
+    if (!panel) {
+      panel = document.createElement('aside');
+      panel.id = ASSET_GUIDE_ID;
+      panel.setAttribute('aria-label', 'Rebel IQ Asset Review');
+      panel.style.cssText = 'position:fixed;right:12px;bottom:83px;z-index:2147483645;' +
+        'width:315px;max-width:calc(100vw - 24px);box-sizing:border-box;' +
+        'background:white;border:1px solid #b8c8d6;border-left:4px solid #176b8e;' +
+        'padding:10px;border-radius:8px;box-shadow:0 3px 13px #0002;' +
+        'font:12px/1.4 Arial,sans-serif;color:#18384f;';
+      const heading = document.createElement('div');
+      heading.textContent = 'Rebel IQ | T504 Asset Review';
+      heading.style.cssText = 'font-weight:bold;margin-bottom:5px;';
+      const summary = document.createElement('div');
+      summary.setAttribute('data-asset-guide-summary','');
+      const status = document.createElement('div');
+      status.setAttribute('data-asset-guide-status','');
+      status.style.cssText = 'font-size:11px;margin:5px 0;';
+      status.textContent = 'Review every asset physically; no status is changed automatically.';
+      const next = document.createElement('button');
+      next.type = 'button';
+      next.textContent = 'Next Unverified';
+      next.style.cssText = 'background:#176b8e;color:white;border:0;border-radius:5px;' +
+        'padding:7px 10px;margin-right:5px;cursor:pointer;';
+      next.onclick = showNextAssetToReview;
+      const collapse = document.createElement('button');
+      collapse.type = 'button';
+      collapse.textContent = 'Hide';
+      collapse.style.cssText = 'background:#eef3f6;border:1px solid #c4d0d7;' +
+        'border-radius:5px;padding:6px 9px;cursor:pointer;';
+      collapse.onclick = () => {panel.dataset.dismissed = 'yes';panel.style.display = 'none';};
+      panel.append(heading,summary,status,next,collapse);
+      document.body.appendChild(panel);
+    }
+    const counts = {not: 0, verified: 0, attention: 0};
+    for (const row of assetGuideRows) {
+      if (row.status === 'not verified') counts.not++;
+      else if (row.status === 'verified') counts.verified++;
+      else counts.attention++;
+    }
+    const summary = panel.querySelector('[data-asset-guide-summary]');
+    if (summary) summary.textContent = assetGuideRows.length
+      ? counts.not + ' Not Verified  |  ' + counts.verified +
+        ' Verified  |  ' + counts.attention + ' Attention'
+      : 'Asset status reading unavailable. Use Operative IQ controls.';
   }
 
   function beginAssets() {
@@ -987,6 +1106,7 @@
       lastRoute = location.pathname;
       attempts = 0;
     }
+    refreshAssetReviewGuide();
     const assetFollowup = readAssetFollowup();
     if (assetFollowup?.stage === 'assets_opening' && isAssetPage() &&
         t504Visible() && /Asset Requirements/i.test(document.body.innerText || '')) {
