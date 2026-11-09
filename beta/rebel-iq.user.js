@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.10
+// @version      0.1.11
 // @description  Prepare T504 daily, weekly, and Thursday rope drafts. Save In Process only; never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.10' };
+  window.__rebelIqT504 = { version: '0.1.11' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.10';
+  const IQ_VERSION = '0.1.11';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -416,6 +416,39 @@
   const ASSET_GUIDE_ID = 'rebel-iq-t504-asset-guide';
   let assetGuideRows = [], assetGuideNext = -1, assetGuideLastScan = 0;
 
+  // Read Operative IQ's own top-bar totals independently from individual rows.
+  // Action Required and Maintenance Due are distinct native categories;
+  // maintenance due may overlap other counts, so never sum it into total.
+  function readNativeAssetTotals() {
+    if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible()) return null;
+    const patterns = {
+      total: /^All Assets\s*(\d{1,4})$/i,
+      required: /^Action Required\s*(\d{1,4})$/i,
+      completed: /^Completed\s*(\d{1,4})$/i,
+      maintenance: /^Maintenance Due\s*(\d{1,4})$/i
+    };
+    const totals = {};
+    const nodes = [...document.querySelectorAll('button,a,[role="tab"],[role="button"],div,span')]
+      .filter(node => visible(node) && !node.closest('#' + PANEL + ', #' + ASSET_GUIDE_ID))
+      .map(node => clean(node.innerText || node.textContent || ''))
+      .filter(text => text.length > 0 && text.length <= 64);
+    for (const [key, pattern] of Object.entries(patterns)) {
+      const matches = nodes.map(text => text.match(pattern)?.[1])
+        .filter(value => value !== undefined).map(Number);
+      if (matches.length && matches.every(value => value === matches[0])) {
+        totals[key] = matches[0];
+      }
+    }
+    // Do not present an inconsistent or partial page-header read as truth.
+    if (totals.total > 0 && totals.total <= 500 &&
+        Number.isInteger(totals.required) &&
+        Number.isInteger(totals.completed) &&
+        totals.required + totals.completed === totals.total &&
+        (totals.maintenance === undefined ||
+         totals.maintenance <= totals.total)) return totals;
+    return null;
+  }
+
   function readAssetReviewRows() {
     if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible()) return [];
     const statusPattern = /^(Not Verified|Verified|Needs Attention|Requires Attention)$/i;
@@ -426,22 +459,38 @@
     const used = new Set(), rows = [];
     for (const label of statusNodes) {
       const status = clean(label.textContent).toLowerCase();
-      let card = label.parentElement;
-      for (let depth = 0; depth < 7 && card; depth++, card = card.parentElement) {
+      let card = label.parentElement, fallback = null;
+      for (let depth = 0; depth < 8 && card; depth++, card = card.parentElement) {
         const text = String(card.innerText || card.textContent || '');
         const bounds = card.getBoundingClientRect();
-        if (text.length > 750 || bounds.height > 240) break;
-        if (bounds.height < 28 ||
-            !/\b(?:Location|Asset Tag|Asset Type|Asset Class|Part|Qty|Quantity)\b/i.test(text)) continue;
-        if (used.has(card)) break;
-        // Each identified row must contain exactly one status leaf. Otherwise
-        // this is a section wrapper, not an individual requirement.
+        if (text.length > 850 || bounds.height > 260) break;
+        if (bounds.height < 28 || used.has(card)) continue;
+        // Exclude wrappers containing other statuses and overview badges.
         const statusesInCard = statusNodes.filter(node => card.contains(node));
         if (statusesInCard.length !== 1) continue;
-        used.add(card);
-        const title = clean(text.split(/\r?\n/)[0] || 'Asset');
-        rows.push({element: card, title: title.slice(0, 110), status});
-        break;
+        const lines = text.split(/\r?\n/).map(clean).filter(Boolean);
+        const titleLine = lines.find(line =>
+          line.length >= 3 && line.length <= 160 &&
+          !statusPattern.test(line) &&
+          !/^(?:Location|Asset Tag|Asset Type|Asset Class|Part|Qty|Quantity|P\/N|S\/N)\s*:/i.test(line) &&
+          /[A-Za-z]{2,}/.test(line));
+        if (!titleLine) continue;
+        const title = clean(titleLine.replace(
+          /\b(?:Not Verified|Verified|Needs Attention|Requires Attention)\s*$/i, ''));
+        if (!title || !/[A-Za-z]{2,}/.test(title)) continue;
+        const row = {element: card, title: title.slice(0, 110), status};
+        const hasMetadata = /\b(?:Location|Asset Tag|Asset Type|Asset Class|Part|Qty|Quantity)\s*:/i.test(text);
+        if (hasMetadata) {
+          fallback = row;
+          break;
+        }
+        // The lower T504 list includes requirements without location/tag
+        // metadata. Keep the smallest plausible one-status item card.
+        if (text.length >= 12 && !fallback) fallback = row;
+      }
+      if (fallback && !used.has(fallback.element)) {
+        used.add(fallback.element);
+        rows.push(fallback);
       }
     }
     return rows;
@@ -497,6 +546,9 @@
       heading.style.cssText = 'font-weight:bold;margin-bottom:5px;';
       const summary = document.createElement('div');
       summary.setAttribute('data-asset-guide-summary','');
+      const coverage = document.createElement('div');
+      coverage.setAttribute('data-asset-guide-coverage','');
+      coverage.style.cssText = 'font-size:11px;margin-top:4px;color:#9b4c18;';
       const status = document.createElement('div');
       status.setAttribute('data-asset-guide-status','');
       status.style.cssText = 'font-size:11px;margin:5px 0;';
@@ -513,7 +565,7 @@
       collapse.style.cssText = 'background:#eef3f6;border:1px solid #c4d0d7;' +
         'border-radius:5px;padding:6px 9px;cursor:pointer;';
       collapse.onclick = () => {panel.dataset.dismissed = 'yes';panel.style.display = 'none';};
-      panel.append(heading,summary,status,next,collapse);
+      panel.append(heading,summary,coverage,status,next,collapse);
       document.body.appendChild(panel);
     }
     const counts = {not: 0, verified: 0, attention: 0};
@@ -522,11 +574,28 @@
       else if (row.status === 'verified') counts.verified++;
       else counts.attention++;
     }
+    const native = readNativeAssetTotals();
     const summary = panel.querySelector('[data-asset-guide-summary]');
-    if (summary) summary.textContent = assetGuideRows.length
-      ? counts.not + ' Not Verified  |  ' + counts.verified +
-        ' Verified  |  ' + counts.attention + ' Attention'
-      : 'Asset status reading unavailable. Use Operative IQ controls.';
+    const coverage = panel.querySelector('[data-asset-guide-coverage]');
+    if (summary) summary.textContent = native
+      ? 'Operative IQ: ' + native.total + ' Assets | ' +
+        native.required + ' Action Required | ' +
+        native.completed + ' Completed' +
+        (Number.isInteger(native.maintenance)
+          ? ' | ' + native.maintenance + ' Maintenance Due' : '')
+      : 'Detected only: ' + counts.not + ' Not Verified | ' +
+        counts.verified + ' Verified | ' + counts.attention + ' Attention';
+    if (coverage) {
+      const missing = native ? native.total - assetGuideRows.length : 0;
+      coverage.textContent = native
+        ? (missing > 0
+          ? 'Guide detects ' + assetGuideRows.length + '/' + native.total +
+            ' rows. ' + missing + ' not mapped: use the native list for these.'
+          : assetGuideRows.length === native.total
+            ? 'Guide detects all ' + native.total + ' rows; verify physically.'
+            : 'Guide row count differs from native totals; use native list.')
+        : 'Native totals unavailable. The guide may miss some equipment.';
+    }
   }
 
   function beginAssets() {
