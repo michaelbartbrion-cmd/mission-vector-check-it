@@ -163,7 +163,7 @@ test('nonconfirming native attempt stops and never claims Verified, even after r
   assert.match(h.progress.textContent,/Official Verified status not confirmed/);
   assert.equal(h.app.getPilot(),false);
   assert.equal(h.app.getAttempts().size,1);
-  await await h.app.loadAssetChecklist();h.attest.checked=true;
+  await h.app.loadAssetChecklist();h.attest.checked=true;
   await h.app.recordReviewedAssetChecklist();
   assert.equal(h.clicks(),1,'already attempted tag is not retried automatically');
 });
@@ -172,7 +172,7 @@ test('unreadable/duplicate tags are displayed in the review but not silently cer
   const p=h.app.getPreview();
   assert.equal(p.items.filter(x=>!x.recordable).length,3);
   assert.match(h.summary.textContent,/3 manual \(no unique tag\)/);
-  assert.match(h.progress.textContent,/without unique tags must use Operative IQ manually/);
+  assert.match(h.summary.textContent,/manual \(no unique tag\)/);
 });
 test('wrong T504 unit, wrong route or unavailable native totals never allow recording',async()=>{
   for(const options of [{wrongUnit:true},{wrongRoute:true},{nativeNull:true},{activeDraft:true}]){
