@@ -2,7 +2,7 @@
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
 // @version      0.1.17
-// @description  Prepare T504 daily, weekly, and Thursday rope drafts. Save In Process only; never submit.
+// @description  T504 Daily Tour, weekly, rope drafts, and inspector-confirmed Assets review.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -369,7 +369,7 @@
     setRcStatus(readIqErrors().length ?
       readIqErrors().length + ' error(s) pending delivery' : 'no errors queued');
     statusWrap.append(detail, rcStatusEl);
-    // Asset review belongs inside the single expanded Rebel IQ menu.
+    // Keep the launcher compact. Assets opens its own full-page review.
     body.append(actions, statusWrap);
     menu.append(header, body);
 
@@ -405,7 +405,7 @@
   // T504 Asset Requirements: native status read + attended inspection recording.
   // Never infer that an asset was inspected from its appearance on the page.
   const ASSET_GUIDE_ID = 'rebel-iq-t504-asset-guide';
-  let assetGuideRows = [], assetGuideLastScan = 0, assetAssetScanBusy = false;
+  let assetGuideRows = [], assetGuideLastScan = 0, assetScanBusy = false;
   let assetBatchPreview = null, assetBatchRunning = false;
   let assetBatchCancel = false;
   const attemptedAssetRecords = new Set();
@@ -707,7 +707,7 @@
     if (section.style.display !== 'block') return;
     if (now() - assetGuideLastScan < 2500) return;
     assetGuideLastScan = now();
-    if(!assetBatchPreview && !assetAssetScanBusy) assetGuideRows = readAssetReviewRows();
+    if(!assetBatchPreview && !assetScanBusy) assetGuideRows = readAssetReviewRows();
     const native = readNativeAssetTotals();
     const summary = section.querySelector('[data-asset-guide-summary]');
     const coverage = section.querySelector('[data-asset-guide-coverage]');
@@ -879,10 +879,10 @@
 
   async function loadAssetChecklist() {
     const section=document.getElementById(ASSET_GUIDE_ID);
-    if(!section || assetBatchRunning || assetAssetScanBusy ||
+    if(!section || assetBatchRunning || assetScanBusy ||
         section.style.display !== 'block')return;
     assetBatchPreview=null;
-    assetAssetScanBusy=true;
+    assetScanBusy=true;
     const progress=section.querySelector('[data-asset-check-progress]');
     const load=section.querySelector('[data-asset-check-load]');
     if(load)load.disabled=true;
@@ -909,7 +909,7 @@
       if(progress)progress.textContent='Unable to load all assets: '+
         clean(error?.message||error)+'. No verification was recorded.';
     }finally{
-      assetAssetScanBusy=false;
+      assetScanBusy=false;
       if(load)load.disabled=false;
     }
   }
