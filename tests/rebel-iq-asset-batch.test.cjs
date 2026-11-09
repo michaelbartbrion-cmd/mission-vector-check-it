@@ -113,7 +113,7 @@ test('Load finds every Not Verified row and defaults answers to Verified without
   assert.equal(h.clicks(),0);
   assert.equal(h.attest.checked,false);
   assert.equal(h.record.disabled,true);
-  assert.match(h.summary.textContent,/7 Not Verified/);
+  assert.match(h.summary.textContent,/7 unverified entries \(7 required pieces\)/);
   assert.equal(p.items.filter(item=>item.recordable).length,4);
   assert.equal(p.unmapped,82);
 });
@@ -194,7 +194,7 @@ test('no direct API writes, no unchecked bulk PASS, no modal and no extra popup'
   assert.match(logic,/const maximum=chosen.length/);
   assert.doesNotMatch(logic,/assetBatchPilotConfirmed/);
   assert.doesNotMatch(logic,/\bfetch\(|GM_xmlhttpRequest\(|\.submit\(|window\.confirm\(/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.18/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.19/m);
 });
 
 test('native row check control records present even when tag scanner cannot be found',async()=>{
