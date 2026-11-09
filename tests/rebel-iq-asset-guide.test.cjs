@@ -91,10 +91,10 @@ test('native T504 badges reconcile exactly to 90 total, 76 action, 14 complete, 
       {querySelectorAll:()=>rows},()=>true,
       'rebel-iq-t504-panel','rebel-iq-t504-asset-guide',clean
     );
-  assert.deepEqual(run(badges),{total:90,required:76,completed:14,maintenance:16});
+  assert.deepEqual(run(badges)(),{total:90,required:76,completed:14,maintenance:16});
   assert.equal(run(badges.map(x=>x.innerText==='Completed\n14'
-    ? makeBadge('Completed\n13') : x)),null);
-  assert.equal(run(badges,'99999'),null);
+    ? makeBadge('Completed\n13') : x))(),null);
+  assert.equal(run(badges,'99999')(),null);
 });
 test('unmatched asset coverage is visibly disclosed and native counts are authoritative',()=>{
   const block=src.slice(src.indexOf('  function refreshAssetReviewGuide() {'),
