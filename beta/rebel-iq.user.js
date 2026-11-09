@@ -856,7 +856,8 @@
         // Untagged/UNASSIGNED assets can only be targeted by their own native
         // Present button when their readable title is also unique.
         const uniqueTitle = (!assetTag || assetTag === 'UNASSIGNED') &&
-          titleCounts.get(row.title) === 1;
+          titleCounts.get(row.title) === 1 &&
+          !!findNativeRowVerifyControl(row);
         return {
           id:index, assetTag,title:row.title,choice:'verified',
           uniqueTag, uniqueTitle, recordable: uniqueTag || uniqueTitle
