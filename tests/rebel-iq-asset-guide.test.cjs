@@ -45,19 +45,19 @@ test('other units or non-asset pages never expose an asset review',()=>{
   assert.deepEqual(harness([['Some Gear','Not Verified']],{onAssetPage:false})(),[]);
 });
 test('asset guide scrolls to the next item but does not certify any equipment',()=>{
-  const block=src.slice(start,src.indexOf('  function beginAssets() {',start));
+  const block=src.slice(start,src.indexOf('  // An attended, one-item-only native Operative IQ operation.',start));
   assert.match(block,/scrollIntoView\(\{behavior: 'smooth', block: 'center'\}\)/);
   assert.match(block,/Next Unverified/);
   assert.match(block,/No asset has been marked checked|no status is changed automatically/i);
-  assert.doesNotMatch(block,/\.click\(|\.checked\s*=|\.dispatchEvent\(|fetch\(|GM_xmlhttpRequest\(|Submit Inspection/);
+  assert.doesNotMatch(block,/\.click\(|\.dispatchEvent\(|fetch\(|GM_xmlhttpRequest\(|Submit Inspection/);
 });
 test('asset review remains a separate phase after confirmed saved Tour draft',()=>{
   assert.match(src,/Daily Tour \+ Assets/);
   assert.match(src,/Asset Checks/);
   assert.match(src,/const assetFollowup = readAssetFollowup\(\)/);
   assert.match(src,/location\.assign\(assetUrl\(followup\.unitId\)\)/);
-  assert.match(src,/const IQ_VERSION = '0\.1\.12'/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.12/m);
+  assert.match(src,/const IQ_VERSION = '0\.1\.13'/);
+  assert.match(src,/^\/\/ @version\s+0\.1\.13/m);
 });
 
 test('full 90-item T504 list includes 24 cards lacking location and tag metadata',()=>{
@@ -98,10 +98,26 @@ test('native T504 badges reconcile exactly to 90 total, 76 action, 14 complete, 
 });
 test('unmatched asset coverage is visibly disclosed and native counts are authoritative',()=>{
   const block=src.slice(src.indexOf('  function refreshAssetReviewGuide() {'),
-    src.indexOf('  function beginAssets() {'));
+    src.indexOf('  // An attended, one-item-only native Operative IQ operation.'));
   assert.match(block,/readNativeAssetTotals\(\)/);
   assert.match(block,/not mapped: use the native list for these/);
   assert.match(block,/guide detects|Guide detects/);
   assert.match(block,/Maintenance Due/);
-  assert.doesNotMatch(block,/\.click\(|\.checked\s*=|Submit Inspection/);
+  assert.doesNotMatch(block,/\.click\(|Submit Inspection/);
+});
+
+test('read-only scanner cannot record any item without a unique asset tag and physical confirmation',()=>{
+  const section=src.slice(src.indexOf('  function makeAssetReviewSection() {'),
+    src.indexOf('  function beginAssets() {'));
+  assert.match(section,/Record Present \(1 asset\)/);
+  assert.match(section,/record\.disabled = true/);
+  assert.match(section,/presenceBox.type = 'checkbox'/);
+  assert.match(section,/data-asset-guide-confirm/);
+  assert.doesNotMatch(section,/window\.confirm\(/);
+  assert.match(section,/readPending\(\) \|\| readRopes\(\)/);
+  assert.match(section,/selectOnePendingAssetByTag\(assetTag,title\)/);
+  assert.match(section,/attemptedAssetRecords\.add\(key\)/);
+  assert.match(section,/native\.button\.click\(\)/);
+  assert.match(section,/rows\.length === 1 && rows\[0\]\.status === 'verified'/);
+  assert.doesNotMatch(section,/fetch\(|GM_xmlhttpRequest\(|Submit Inspection/);
 });
