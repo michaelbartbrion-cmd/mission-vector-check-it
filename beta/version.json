@@ -5,10 +5,10 @@
   "latestVersion": "3.2.52",
   "minimumSupportedVersion": "2.3.1",
   "status": "current",
-  "message": "Vector Rebel 3.2.52 candidate: continuous exact-identity verification for clipped PPE names in Tour and Daily Captain.",
-  "releaseNotes": "Candidate on draft PR #18, not yet live accepted. Based on repeated Baldree reports affecting Bunker Coat, Structural Gloves, Hood and Structural Boot. A single bounded verification loop now waits for the exact Vector pool/item route, independently labeled matching serial, complete matching PPE title/type, and verified full name before proceeding. Unverified and wrong-owner gear still blocks without inspection. Both Tour and read-only Daily Captain use the same logic. Source-level regression tests must pass; live field acceptance and release approval remain required. Preserves previous 3.2.51 and 3.2.50 protections.",
+  "message": "Vector Rebel 3.2.52 beta: repeated clipped PPE labels are verified against full item details in Tour and Daily Captain.",
+  "releaseNotes": "Beta release for supervised field verification. Corrects a recurrent failure when Vector lists an abbreviated PPE Name but later shows its full heading and labeled serial. Tour PPE and read-only Daily Captain use one 18-second exact pool/item, full name, type, and serial proof loop before proceeding. Wrong or ambiguous equipment still stops; only physically inspected and authorized gear may be submitted. Tested with the four documented Baldree cases and fail-closed scenarios; live operator acceptance remains pending.",
   "installUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js",
   "legacyUpdateUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
   "repoUrl": "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
-  "publishedAt": "2026-11-03"
+  "publishedAt": "2026-11-09"
 }
