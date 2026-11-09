@@ -34,11 +34,13 @@ function scenario(options={}) {
   const rows=[row];
   if(options.duplicate) rows.push({title:'Another asset',assetTag:'213',status:'not verified'});
   const status={textContent:''},record={disabled:false};
+  const presence={checked:options.accept!==false,disabled:false};
   const section={querySelector(sel){
     return sel==='[data-asset-guide-status]'?status:
-      sel==='[data-asset-guide-record]'?record:null;
+      sel==='[data-asset-guide-record]'?record:
+      sel==='[data-asset-guide-confirm]'?presence:null;
   }};
-  let clicks=0,confirms=0;
+  let clicks=0;
   const button={
     type:'button',disabled:false,isConnected:true,textContent:'',
     getAttribute:()=>'',getBoundingClientRect:()=>({left:263,right:300,top:100,bottom:130}),
@@ -65,25 +67,23 @@ function scenario(options={}) {
     '60443',()=>true,doc,()=>true,'rebel-iq-t504-panel',
     'rebel-iq-t504-asset-guide',clean,()=>rows,
     ()=>options.pending?{}:null,()=>null,{pathname:'/inspections/60443/assets/group/-1'},
-    {confirm(){confirms++;return options.accept!==false;}},
+    {},
     MockInput,fakeEvent,cb=>cb(),()=>{});
-  return {app,input,status,record,row,rows,clicks:()=>clicks,
-    confirms:()=>confirms};
+  return {app,input,status,record,presence,row,rows,clicks:()=>clicks};
 }
 test('one physically confirmed exact asset tag is handed to native Operative IQ once',async()=>{
   const h=scenario({complete:true});
   await h.app.recordSelectedAssetPresence();
-  assert.equal(h.confirms(),1);
   assert.equal(h.clicks(),1);
   assert.equal(h.input.value,'213');
   assert.equal(h.row.status,'verified');
   assert.match(h.status.textContent,/Operative IQ confirms VERIFIED/);
   assert.equal(h.record.disabled,true);
+  assert.equal(h.presence.checked,false,'confirmation is single-use');
 });
-test('declined physical confirmation never touches the native asset field',async()=>{
+test('unchecked in-panel physical confirmation never touches the native asset field',async()=>{
   const h=scenario({accept:false});
   await h.app.recordSelectedAssetPresence();
-  assert.equal(h.confirms(),1);
   assert.equal(h.clicks(),0);
   assert.equal(h.input.value,'');
 });
@@ -105,8 +105,7 @@ test('wrong unit/route and active draft fail closed',async()=>{
     const h=scenario(x);
     await h.app.recordSelectedAssetPresence();
     assert.equal(h.clicks(),0,JSON.stringify(x));
-    assert.equal(h.confirms(),0);
-  }
+    }
 });
 test('non-confirmed native outcome never claims verification, cannot auto retry',async()=>{
   const h=scenario({complete:false});
@@ -119,7 +118,8 @@ test('non-confirmed native outcome never claims verification, cannot auto retry'
   assert.match(h.status.textContent,/already attempted/);
 });
 test('the only native click requires physical confirmation, a unique tag and exact T504 route',()=>{
-  assert.match(functions,/window\.confirm\(/);
+  assert.match(functions,/checkbox\.checked/);
+  assert.doesNotMatch(functions,/window\.confirm\(/);
   assert.match(functions,/selectOnePendingAssetByTag\(assetTag,title\)/);
   assert.match(functions,/const currentNative = findNativeAssetTagEntry\(\)/);
   assert.match(functions,/attemptedAssetRecords\.add\(key\)/);
