@@ -18,16 +18,17 @@ const locations=[
 test('airpack check is independently available in existing Vector Rebel panel',()=>{
     assert.match(src,/mainAction\('SCBA Airpacks', showStation4ScbaAirpackCheck, false\)/);
     assert.match(src,/mainAction\('My Tour PPE',/);
-    assert.match(src,/^\/\/ @version\s+3\.2\.55/m);
+    assert.match(src,/^\/\/ @version\s+3\.2\.56/m);
     assert.match(src,/const SCBA_AIRPACK_DRAFT_KEY = 'vector-rebel-station4-airpack-draft-v1'/);
     const check=cut('function showStation4ScbaAirpackCheck() {','function installPanel() {');
     assert.match(check,/makeOverlayBox\('830px'\)/);
     assert.match(check,/Find SCBA Airpacks/);
-    assert.match(check,/Set Vector Filters/);
+    assert.doesNotMatch(check,/makeButton\('Set Vector Filters'\)/);
+    assert.match(check,/scbaAirpackEnsureNativeFilters\(chosen/);
     assert.match(check,/Locations to check today/);
     assert.match(check,/type='checkbox'/);
     assert.match(check,/scbaAirpackPendingSelection\(\)/);
-    assert.match(check,/sessionStorage\.setItem\(SCBA_AIRPACK_PENDING_SELECTION_KEY/);
+    assert.doesNotMatch(check,/sessionStorage\.setItem\(SCBA_AIRPACK_PENDING_SELECTION_KEY/);
     assert.match(check,/Save Local Draft/);
     assert.match(check,/draftOnly:true/);
     assert.match(check,/No SCBA inspection, inspection signature, or Vector check/);
@@ -217,4 +218,82 @@ test('page-readiness guard requires every native Standard row, not only matched 
         ()=>({first:1,last:2,total:2}),()=> 'stable',clean,async()=>{}
     );
     await assert.rejects(fn({first:1,last:2,total:2},1),/did not finish loading/);
+});
+
+test('native filter control uses explicit checkbox or accessibility state, never guessed visual styling',()=>{
+    const code=cut('function scbaAirpackNativeOptionState(node) {',
+        'function scbaAirpackFindNativeFilterOption(loc) {')+
+        '\nreturn scbaAirpackNativeOptionState;';
+    const state=new Function(code)();
+    const label={};
+    const input={checked:false,closest:()=>label};
+    const standard={matches:()=>false,querySelector:()=>input};
+    assert.deepEqual(state(standard),{checked:false,control:label});
+    input.checked=true;
+    assert.deepEqual(state(standard),{checked:true,control:label});
+    const role={getAttribute:name=>name==='aria-checked'?'false':null};
+    const wrapper={matches:()=>false,querySelector:()=>role};
+    assert.deepEqual(state(wrapper),{checked:false,control:role});
+    const unknown={matches:()=>false,querySelector:()=>({getAttribute:()=>null})};
+    assert.equal(state(unknown),null);
+});
+test('Find SCBA automatically opens native Filters, corrects selected locations and confirms native chips',async()=>{
+    const source=cut('async function scbaAirpackEnsureNativeFilters(selectedIds,report) {',
+        'function isScbaAirpackStandardItem(item) {')+
+        '\nreturn scbaAirpackEnsureNativeFilters;';
+    const active=new Set(['station4']);
+    const applied=new Set(['station4']);
+    const actions=[];
+    let popup=false;
+    const scope=ids=>({
+        ready:ids.length>0 &&
+            ids.every(x=>applied.has(x)) &&
+            [...applied].every(x=>ids.includes(x)),
+        selected:[...applied],requested:ids,missing:[],extra:[]
+    });
+    const option=loc=>popup ? {
+        checked:active.has(loc.id),
+        control:{click(){
+            actions.push('toggle:'+loc.id);
+            if(active.has(loc.id))active.delete(loc.id);else active.add(loc.id);
+        }}
+    }:null;
+    const apply={innerText:'Apply Filters',closest:()=>null,
+        click(){actions.push('apply');applied.clear();for(const x of active)applied.add(x);}};
+    const document={querySelectorAll:selector=>
+        selector==='button,[role="button"]'?[apply]:[]};
+    const open={click(){actions.push('open');popup=true;}};
+    const fn=new Function('getRun','scbaAirpackStandardTable',
+        'scbaAirpackFilterScope','findVectorNavigationTarget','visible','sleep',
+        'SCBA_AIRPACK_LOCATIONS','scbaAirpackFindNativeFilterOption','document',
+        'clean','PANEL_ID','OVERLAY_ID',source)(
+            ()=>null,()=>({table:{}}),scope,()=>open,()=>true,async()=>{},
+            locations,option,document,clean,'rebel-panel','rebel-overlay');
+    const messages=[];
+    await fn(['truck504','medic504'],message=>messages.push(message));
+    assert.deepEqual(actions,[
+        'open','toggle:truck504','toggle:medic504','toggle:station4','apply'
+    ]);
+    assert.deepEqual([...applied].sort(),['medic504','truck504']);
+    assert.equal(scope(['truck504','medic504']).ready,true);
+    const before=actions.length;
+    await fn(['truck504','medic504']);
+    assert.equal(actions.length,before,'no repeated filter clicks when already selected');
+});
+test('SCBA auto-filter refuses unknown native controls rather than guessing or scanning all inventory',async()=>{
+    const source=cut('async function scbaAirpackEnsureNativeFilters(selectedIds,report) {',
+        'function isScbaAirpackStandardItem(item) {')+
+        '\nreturn scbaAirpackEnsureNativeFilters;';
+    let scans=0,opens=0;
+    const fn=new Function('getRun','scbaAirpackStandardTable',
+        'scbaAirpackFilterScope','findVectorNavigationTarget','visible','sleep',
+        'SCBA_AIRPACK_LOCATIONS','scbaAirpackFindNativeFilterOption','document',
+        'clean','PANEL_ID','OVERLAY_ID',source)(
+            ()=>null,()=>{scans++;return {table:{}};},
+            ids=>({ready:false,selected:[],missing:ids,extra:[],requested:ids}),
+            ()=>({click(){opens++;}}),()=>true,async()=>{},
+            locations,()=>null,{querySelectorAll:()=>[]},clean,'rebel-panel','rebel-overlay');
+    await assert.rejects(fn(['truck504']),/Cannot identify the native checkbox/);
+    assert.equal(opens,1);
+    assert.equal(scans,1,'only the read-only table preflight was done');
 });
