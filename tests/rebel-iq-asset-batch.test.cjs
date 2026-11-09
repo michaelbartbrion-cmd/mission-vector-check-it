@@ -2,7 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path');
 const src=fs.readFileSync(path.join(__dirname,'../beta/rebel-iq.user.js'),'utf8');
-const begin=src.indexOf('  function buildReviewedAssetChecklist() {');
+const begin=src.indexOf('  function buildReviewedAssetChecklist(rowsOverride) {');
 const end=src.indexOf('  function beginAssets() {',begin);
 assert.ok(begin>0&&end>begin,'Vector-style reviewed asset checklist present');
 const logic=src.slice(begin,end);
