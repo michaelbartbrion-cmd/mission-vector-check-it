@@ -407,7 +407,7 @@
   const ASSET_GUIDE_ID = 'rebel-iq-t504-asset-guide';
   let assetGuideRows = [], assetGuideLastScan = 0, assetAssetScanBusy = false;
   let assetBatchPreview = null, assetBatchRunning = false;
-  let assetBatchCancel = false, assetBatchPilotConfirmed = false;
+  let assetBatchCancel = false;
   const attemptedAssetRecords = new Set();
 
   // Read Operative IQ's own top-bar totals independently from individual rows.
@@ -825,9 +825,7 @@
       c.manual+' manual (no unique tag)'+
       (plan.unmapped>0?' | '+plan.unmapped+' unmapped':'');
     if(record) {
-      record.textContent=!assetBatchPilotConfirmed
-        ? 'Record 1 Test Asset'
-        : 'Record Verified Assets ('+c.recordable+')';
+      record.textContent='Record Verified Assets ('+c.recordable+')';
       record.disabled=assetBatchRunning || !attest?.checked || c.recordable===0;
     }
   }
@@ -935,7 +933,9 @@
       return;
     }
     const chosen=plan.items.filter(item=>item.choice==='verified' && item.recordable);
-    const maximum=assetBatchPilotConfirmed?chosen.length:1;
+    // The first native receipt is verified before the next asset begins.
+    // This is one operator-authorized action, not a second confirmation loop.
+    const maximum=chosen.length;
     const list=section.querySelector('[data-asset-check-list]');
     if(record)record.disabled=true;
     if(stop)stop.disabled=false;
@@ -1005,7 +1005,6 @@
         break;
       }
     }
-    if(!assetBatchPilotConfirmed && confirmed===1 && !failed)assetBatchPilotConfirmed=true;
     assetBatchRunning=false;assetBatchCancel=false;
     if(stop)stop.disabled=true;
     if(load)load.disabled=false;
@@ -1018,23 +1017,13 @@
         ' Remaining equipment unchanged.');
       return;
     }
-    const remainder=chosen.filter(item=>!item.recorded);
-    if(remainder.length){
-      plan.items=plan.items.filter(item=>!item.recorded);
-      plan.preparedAt=Date.now();
-      assetBatchPreview=plan;
-      renderReviewedAssetChecklist();
-      report('Test asset confirmed VERIFIED by Operative IQ. '+
-        'Your other selections are preserved. Review and press Record Verified Assets again.');
-    }else {
-      assetBatchPreview=null;
-      section.querySelector('[data-asset-check-list]')?.replaceChildren();
-      const wrap=section.querySelector('[data-asset-check-attest-wrap]');
-      if(wrap)wrap.style.display='none';
-      if(record)record.disabled=true;
-      report(confirmed+' Verified in Operative IQ. Exceptions and untagged '+
-        'assets remain for separate attention.');
-    }
+    assetBatchPreview=null;
+    section.querySelector('[data-asset-check-list]')?.replaceChildren();
+    const wrap=section.querySelector('[data-asset-check-attest-wrap]');
+    if(wrap)wrap.style.display='none';
+    if(record)record.disabled=true;
+    report(confirmed+' asset(s) confirmed Verified by Operative IQ. '+
+      'Exceptions and unmapped/untagged assets remain for separate review.');
     assetGuideLastScan=0;refreshAssetReviewGuide();
   }
 
