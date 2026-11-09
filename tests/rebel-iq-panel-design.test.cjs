@@ -120,14 +120,14 @@ test('asset review is inline inside expanded Rebel IQ, never a second popup',()=
   assert.equal(section.tagName,'SECTION','inline semantic section, not an aside');
   assert.ok(!walk(h.menu).includes(section),'main menu stays compact');
   assert.equal(section.parentElement,h.body,'dedicated screen sits outside main panel');
-  assert.equal(section.style.cssText.includes('position:fixed;inset:0'),true,
-    'screen fills the entire viewport, not a floating mini popup');
+  assert.equal(section.style.cssText.includes('position:fixed;top:188px;left:16px'),true,
+    'in-page drawer leaves native Operative IQ visible');
   assert.equal(section.style.cssText.includes('display:none'),true,
     'review screen starts closed');
   assert.ok(walk(section).some(el=>el.tagName==='BUTTON'&&
-    el.textContent==='Refresh Unverified List'));
+    el.textContent==='Refresh'));
   assert.ok(walk(section).some(el=>el.tagName==='BUTTON'&&
-    el.textContent==='← Back to Operative IQ'));
+    el.textContent==='Close'));
   assert.equal(full.filter(el=>el.tagName==='ASIDE').length,0,
     'no separate mini popup');
   assert.equal(full.filter(el=>el.id==='rebel-iq-t504-panel').length,1);

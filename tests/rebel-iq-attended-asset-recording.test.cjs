@@ -6,11 +6,12 @@ const begin=src.indexOf('  function makeAssetReviewScreen() {');
 const end=src.indexOf('  function beginAssets() {',begin);
 assert.ok(begin>0&&end>begin);
 const section=src.slice(begin,end);
-test('asset controls sit in a dedicated full-screen review separate from main menu',()=>{
+test('asset controls sit in a compact drawer on the existing native page',()=>{
   assert.match(src,/body\.append\(actions, statusWrap\)/);
   assert.match(src,/document\.body\.append\(root, makeAssetReviewScreen\(\)\)/);
-  assert.match(section,/position:fixed;inset:0/);
-  assert.match(section,/Refresh Unverified List/);
+  assert.match(section,/position:fixed;top:188px;left:16px/);
+  assert.doesNotMatch(section,/position:fixed;inset:0/);
+  assert.match(section,/load.textContent = 'Refresh'/);
   assert.match(section,/Record Verified Assets/);
   assert.doesNotMatch(section,/window\.confirm\(/);
 });
@@ -40,7 +41,7 @@ test('unverified items with missing or duplicate tags are shown but not auto-rec
 test('recording is physical presence and operation, unrelated to scheduled maintenance',()=>{
   assert.match(section,/present and working/);
   assert.doesNotMatch(section,/maintenanceBlocked|blocked\.maintenance/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.20/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.21/m);
 });
 
 test('Assets opens its own screen and loads a draft without submitting',()=>{
