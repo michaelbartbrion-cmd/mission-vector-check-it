@@ -168,7 +168,7 @@ test('unreadable/duplicate tags are displayed in the review but not silently cer
   const p=h.app.getPreview();
   assert.equal(p.items.filter(x=>!x.recordable).length,3);
   assert.match(h.summary.textContent,/3 manual \(ambiguous identity\)/);
-  assert.match(h.summary.textContent,/manual \(no unique tag\)/);
+  assert.match(h.summary.textContent,/manual \(ambiguous identity\)/);
 });
 test('wrong T504 unit, wrong route or unavailable native totals never allow recording',async()=>{
   for(const options of [{wrongUnit:true},{wrongRoute:true},{nativeNull:true},{activeDraft:true}]){
@@ -202,9 +202,9 @@ test('native row check control records present even when tag scanner cannot be f
   await h.app.loadAssetChecklist();
   h.attest.checked=true;
   await h.app.recordReviewedAssetChecklist();
-  assert.equal(h.rows.filter(x=>x.status==='verified').length,8);
-  assert.equal(h.clicks(),7,'each of the seven pending rows gets its own native row check');
-  assert.match(h.progress.textContent,/7 asset\(s\) confirmed Verified/);
+  assert.equal(h.rows.filter(x=>x.status==='verified').length,6);
+  assert.equal(h.clicks(),5,'each uniquely identified pending row gets its native check');
+  assert.match(h.progress.textContent,/5 asset\(s\) confirmed Verified/);
 });
 test('UNASSIGNED assets can be recorded by a unique native asset row check, never by fake tags',async()=>{
   const h=scenario({rowControls:true,nativeMissing:true,rows:[
