@@ -6,35 +6,41 @@ const cut=(a,b)=>{
   assert.ok(i>0&&j>i,a+' .. '+b+' missing');
   return src.slice(i,j);
 };
-test('asset verification is a required second phase after the daily draft receipt, not a safety shortcut',()=>{
-  assert.match(src,/button\('Daily Tour \+ Assets', 'daily'\)/);
-  assert.match(src,/button\('Asset Checks', 'assets'\)/);
-  const tick=cut('  function tick() {','  // Only capture global errors');
-  assert.match(tick,/const followup = readAssetFollowup\(\)/);
-  assert.match(tick,/task === TASKS\.daily/);
-  assert.ok(tick.indexOf("clean(el.textContent).includes('Saved in Process')")<
-    tick.indexOf('task === TASKS.daily'),'must only open assets after actual Save In Process receipt');
-  assert.match(tick,/location\.assign\(assetUrl\(followup\.unitId\)\)/);
-  assert.match(tick,/No asset has been marked checked by Rebel IQ/);
+test('Daily Tour and Assets are separate independent actions',()=>{
+  assert.match(src,/button\('Daily Tour', 'daily'\)/);
+  assert.match(src,/button\('Assets', 'assets'\)/);
+  assert.doesNotMatch(src,/Daily Tour \+ Assets|readAssetFollowup|writeAssetFollowup/);
+  const begin=cut('  function begin(kind) {','  function beginRopes() {');
+  assert.match(begin,/writePending\(\{ kind, unitId: id/);
+  assert.doesNotMatch(begin,/assetUrl\(|ASSET_OPEN_KEY|location\.assign\(assetUrl/);
 });
-test('direct asset entry is read-only navigation in the existing T504 tab',()=>{
+test('Assets button opens a dedicated full-screen review, not a mini popup',()=>{
   const begin=cut('  function beginAssets() {','  function begin(kind) {');
-  assert.match(begin,/id !== ASSET_UNIT_ID \|\| !t504Visible\(\)/);
-  assert.match(begin,/readRopes\(\) \|\| readPending\(\)/);
+  assert.match(begin,/openAssetReviewScreen\(\)/);
+  assert.match(begin,/sessionStorage\.setItem\(ASSET_OPEN_KEY/);
   assert.match(begin,/location\.assign\(assetUrl\(id\)\)/);
-  assert.doesNotMatch(begin,/\.click\(\)|fetch\(|\.post\(/);
+  assert.match(src,/const ASSET_OPEN_KEY = 'rebelIqT504AssetsOpenOnceV1'/);
+  const screen=cut('  function makeAssetReviewScreen() {','  function refreshAssetReviewGuide() {');
+  assert.match(screen,/position:fixed;inset:0/);
+  assert.match(screen,/width:100vw;height:100vh/);
+  assert.match(screen,/← Back to Operative IQ/);
+  assert.match(screen,/Refresh Unverified List/);
+  assert.match(screen,/screen\.style\.display='block'/);
+  assert.match(screen,/screen\.style\.display='none'/);
+  assert.doesNotMatch(src,/makeAssetReviewSection\(\)/);
 });
-test('asset followup remembers its target and has a bounded lifetime',()=>{
-  const setup=cut("  const ASSET_FOLLOWUP_KEY = 'rebelIqT504DailyAssetFollowupV1';",'  const readPending = () =>');
-  assert.match(setup,/ASSET_UNIT_ID = '60443'/);
-  assert.match(setup,/inspections\/' \+ id \+ '\/assets\/group\/-1'/);
-  assert.match(setup,/Date\.now\(\) - run\.startedAt < 5 \* 60 \* 1000/);
+test('cross-route Assets opens once after the native page actually loads',()=>{
+  const tick=cut('  function tick() {','  // Only capture global errors');
+  assert.match(tick,/const assetOpenAt = Number\(sessionStorage\.getItem\(ASSET_OPEN_KEY\)/);
+  assert.match(tick,/isAssetPage\(\) && t504Visible\(\)/);
+  assert.match(tick,/openAssetReviewScreen\(\)/);
+  assert.match(tick,/sessionStorage\.removeItem\(ASSET_OPEN_KEY\)/);
 });
 test('questionnaire prep still uses Save In Process and avoids official completion',()=>{
   const prep=cut('  async function prepare(kind) {','  async function runPending() {');
   assert.match(prep,/verified\.save\.click\(\)/);
   assert.doesNotMatch(prep,/submit|Submit|Complete Inspection/i);
-  assert.match(src,/No asset has been marked checked by Rebel IQ/);
+  assert.match(src,/Draft answers are not yet recorded in Operative IQ/);
 });
 test('overview inspection route is recognized without a trailing slash',()=>{
   const line=src.split('\n').find(x=>x.includes('const inspectionId = () =>'));
