@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.11
+// @version      0.1.12
 // @description  Prepare T504 daily, weekly, and Thursday rope drafts. Save In Process only; never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.11' };
+  window.__rebelIqT504 = { version: '0.1.12' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.11';
+  const IQ_VERSION = '0.1.12';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -379,7 +379,8 @@
     setRcStatus(readIqErrors().length ?
       readIqErrors().length + ' error(s) pending delivery' : 'no errors queued');
     statusWrap.append(detail, rcStatusEl);
-    body.append(actions, statusWrap);
+    // Asset review belongs inside the single expanded Rebel IQ menu.
+    body.append(actions, makeAssetReviewSection(), statusWrap);
     menu.append(header, body);
 
     const setExpanded = (expanded) => {
@@ -496,15 +497,63 @@
     return rows;
   }
 
+  function makeAssetReviewSection() {
+    // Inline only: no fixed-position popup, second launcher, or Hide button.
+    // The single Rebel Starbird controls whether this panel is expanded.
+    const section = document.createElement('section');
+    section.id = ASSET_GUIDE_ID;
+    section.setAttribute('aria-label', 'Truck 504 Asset Review');
+    section.style.cssText =
+      'display:none;margin-top:10px;padding:10px;border:1px solid #d6e2e9;' +
+      'border-left:3px solid #176b8e;border-radius:7px;background:#f7f9fa;' +
+      'font-size:11px;line-height:1.45;';
+
+    const heading = document.createElement('div');
+    heading.textContent = 'T504 Asset Checks';
+    heading.style.cssText = 'font-size:12px;font-weight:bold;margin-bottom:5px;';
+
+    const summary = document.createElement('div');
+    summary.setAttribute('data-asset-guide-summary', '');
+    summary.textContent = 'Reading Operative IQ asset statuses...';
+
+    const coverage = document.createElement('div');
+    coverage.setAttribute('data-asset-guide-coverage', '');
+    coverage.style.cssText = 'margin-top:4px;color:#9b4c18;';
+
+    const instructions = document.createElement('div');
+    instructions.textContent =
+      'Find Next Unverified moves to the next pending item on this page. ' +
+      'It does not verify, change, or submit any asset.';
+    instructions.style.cssText = 'margin:6px 0;color:#526a78;';
+
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.textContent = 'Find Next Unverified';
+    next.setAttribute('aria-label', 'Scroll to the next unverified T504 asset');
+    next.style.cssText =
+      'border:1px solid #176b8e;border-radius:5px;background:#176b8e;' +
+      'color:#fff;padding:8px 10px;font-weight:bold;cursor:pointer;';
+    next.onclick = showNextAssetToReview;
+
+    const status = document.createElement('div');
+    status.setAttribute('data-asset-guide-status', '');
+    status.setAttribute('role', 'status');
+    status.style.cssText = 'margin-top:6px;color:#526a78;';
+    status.textContent = 'Physically inspect each item; no status is changed automatically.';
+
+    section.append(heading, summary, coverage, instructions, next, status);
+    return section;
+  }
+
   function showNextAssetToReview() {
     const pending = assetGuideRows.filter(row =>
       row.status === 'not verified' || row.status === 'needs attention' ||
       row.status === 'requires attention');
-    const panel = document.getElementById(ASSET_GUIDE_ID);
-    const status = panel?.querySelector('[data-asset-guide-status]');
+    const section = document.getElementById(ASSET_GUIDE_ID);
+    const status = section?.querySelector('[data-asset-guide-status]');
     if (!pending.length) {
       if (status) status.textContent = assetGuideRows.length
-        ? 'No unverified items detected. Confirm status in Operative IQ.'
+        ? 'No pending items detected by the guide. Confirm the full list in Operative IQ.'
         : 'No individual asset statuses detected. Use the native list.';
       return;
     }
@@ -518,56 +567,24 @@
     }, 2200);
     if (status) status.textContent =
       'Review ' + (assetGuideNext + 1) + '/' + pending.length + ': ' +
-      target.title + '. Verify physically using Operative IQ controls.';
+      target.title + '. Use Operative IQ to record the actual result.';
   }
 
   function refreshAssetReviewGuide() {
+    const section = document.getElementById(ASSET_GUIDE_ID);
+    if (!section) return;
     if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible()) {
-      document.getElementById(ASSET_GUIDE_ID)?.remove();
+      // Keep section in the Rebel IQ menu, but hide it off the T504 asset page.
+      section.style.display = 'none';
       assetGuideRows = [];
       assetGuideNext = -1;
+      assetGuideLastScan = 0;
       return;
     }
+    section.style.display = 'block';
     if (now() - assetGuideLastScan < 2000) return;
     assetGuideLastScan = now();
     assetGuideRows = readAssetReviewRows();
-    let panel = document.getElementById(ASSET_GUIDE_ID);
-    if (!panel) {
-      panel = document.createElement('aside');
-      panel.id = ASSET_GUIDE_ID;
-      panel.setAttribute('aria-label', 'Rebel IQ Asset Review');
-      panel.style.cssText = 'position:fixed;right:12px;bottom:83px;z-index:2147483645;' +
-        'width:315px;max-width:calc(100vw - 24px);box-sizing:border-box;' +
-        'background:white;border:1px solid #b8c8d6;border-left:4px solid #176b8e;' +
-        'padding:10px;border-radius:8px;box-shadow:0 3px 13px #0002;' +
-        'font:12px/1.4 Arial,sans-serif;color:#18384f;';
-      const heading = document.createElement('div');
-      heading.textContent = 'Rebel IQ | T504 Asset Review';
-      heading.style.cssText = 'font-weight:bold;margin-bottom:5px;';
-      const summary = document.createElement('div');
-      summary.setAttribute('data-asset-guide-summary','');
-      const coverage = document.createElement('div');
-      coverage.setAttribute('data-asset-guide-coverage','');
-      coverage.style.cssText = 'font-size:11px;margin-top:4px;color:#9b4c18;';
-      const status = document.createElement('div');
-      status.setAttribute('data-asset-guide-status','');
-      status.style.cssText = 'font-size:11px;margin:5px 0;';
-      status.textContent = 'Review every asset physically; no status is changed automatically.';
-      const next = document.createElement('button');
-      next.type = 'button';
-      next.textContent = 'Next Unverified';
-      next.style.cssText = 'background:#176b8e;color:white;border:0;border-radius:5px;' +
-        'padding:7px 10px;margin-right:5px;cursor:pointer;';
-      next.onclick = showNextAssetToReview;
-      const collapse = document.createElement('button');
-      collapse.type = 'button';
-      collapse.textContent = 'Hide';
-      collapse.style.cssText = 'background:#eef3f6;border:1px solid #c4d0d7;' +
-        'border-radius:5px;padding:6px 9px;cursor:pointer;';
-      collapse.onclick = () => {panel.dataset.dismissed = 'yes';panel.style.display = 'none';};
-      panel.append(heading,summary,coverage,status,next,collapse);
-      document.body.appendChild(panel);
-    }
     const counts = {not: 0, verified: 0, attention: 0};
     for (const row of assetGuideRows) {
       if (row.status === 'not verified') counts.not++;
@@ -575,8 +592,8 @@
       else counts.attention++;
     }
     const native = readNativeAssetTotals();
-    const summary = panel.querySelector('[data-asset-guide-summary]');
-    const coverage = panel.querySelector('[data-asset-guide-coverage]');
+    const summary = section.querySelector('[data-asset-guide-summary]');
+    const coverage = section.querySelector('[data-asset-guide-coverage]');
     if (summary) summary.textContent = native
       ? 'Operative IQ: ' + native.total + ' Assets | ' +
         native.required + ' Action Required | ' +
