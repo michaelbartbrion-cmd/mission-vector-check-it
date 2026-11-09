@@ -306,7 +306,8 @@
     menu.style.cssText =
       'display:none;width:430px;max-width:calc(100vw - 28px);' +
       'background:#fff;border:1px solid #cbd9e2;border-radius:12px;' +
-      'padding:0;overflow:hidden;box-shadow:0 10px 28px rgba(12,43,62,.22);';
+      'padding:0;max-height:calc(100vh - 24px);overflow-y:auto;' +
+      'box-shadow:0 10px 28px rgba(12,43,62,.22);';
 
     const header = document.createElement('div');
     header.style.cssText =
