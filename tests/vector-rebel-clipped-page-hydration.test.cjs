@@ -23,7 +23,7 @@ const verifyFactory=new Function(
 );
 const recoverFactory=new Function(
   'clean','isAssetPageFor','repairReadDetailDocument','document',
-  'visible','PANEL_ID','OVERLAY_ID','uiText','normalizedPpeTypeText',
+  'visible','PANEL_ID','OVERLAY_ID','uiText','normalizedPpeTypeText','escapeRegex',
   recoveryCode+'\nreturn resolveClippedPpeNameFromVerifiedDetail;'
 );
 const identityFactory=new Function(
@@ -55,7 +55,7 @@ function makePage(tuple,opts={}) {
     '/app/equipment/PPE/pool/'+candidate.pool+'/'+candidate.itemId+'/item';
   const resolve=recoverFactory(clean,routeOk,
     ()=>({serial:polls>=readyAt?observedSerial:''}),
-    document,()=>true,'panel','overlay',clean,x=>clean(x).toLowerCase());
+    document,()=>true,'panel','overlay',clean,x=>clean(x).toLowerCase(),x=>x);
   const findIdentity=identityFactory(clean,routeOk,document,()=>true,
     'panel','overlay',location,x=>x,clean,()=>null);
   const waitFor=async(fn,timeout,interval)=>{
@@ -141,7 +141,7 @@ test('release candidate version is consistent across userscript and managed upda
   const meta=src.match(/^\/\/ @version\s+(\S+)/m)?.[1];
   const runtime=src.match(/const VERSION = '([^']+)'/)?.[1];
   const instance=src.match(/window\.__vectorRebelInstance = \{\s*version: '([^']+)'/)?.[1];
-  assert.equal(meta,'3.2.52');
+  assert.equal(meta,'3.2.53');
   assert.equal(meta,manifest.latestVersion);
   assert.equal(meta,runtime);
   assert.equal(meta,instance);
