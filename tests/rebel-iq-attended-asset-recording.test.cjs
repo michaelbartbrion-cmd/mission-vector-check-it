@@ -127,5 +127,5 @@ test('the only native click requires physical confirmation, a unique tag and exa
   assert.match(functions,/native\.button\.click\(\)/);
   assert.doesNotMatch(functions,/GM_xmlhttpRequest\(|\bfetch\(|\.submit\(/);
   assert.match(src,/button\('Daily Tour \+ Assets', 'daily'\)/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.13/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.14/m);
 });
