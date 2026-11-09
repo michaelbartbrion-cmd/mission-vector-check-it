@@ -45,7 +45,7 @@ test('other units or non-asset pages never expose an asset review',()=>{
   assert.deepEqual(harness([['Some Gear','Not Verified']],{onAssetPage:false})(),[]);
 });
 test('asset guide scrolls to the next item but does not certify any equipment',()=>{
-  const block=src.slice(start,src.indexOf('  function beginAssets() {',start));
+  const block=src.slice(start,src.indexOf('  // An attended, one-item-only native Operative IQ operation.',start));
   assert.match(block,/scrollIntoView\(\{behavior: 'smooth', block: 'center'\}\)/);
   assert.match(block,/Next Unverified/);
   assert.match(block,/No asset has been marked checked|no status is changed automatically/i);
@@ -98,7 +98,7 @@ test('native T504 badges reconcile exactly to 90 total, 76 action, 14 complete, 
 });
 test('unmatched asset coverage is visibly disclosed and native counts are authoritative',()=>{
   const block=src.slice(src.indexOf('  function refreshAssetReviewGuide() {'),
-    src.indexOf('  function beginAssets() {'));
+    src.indexOf('  // An attended, one-item-only native Operative IQ operation.'));
   assert.match(block,/readNativeAssetTotals\(\)/);
   assert.match(block,/not mapped: use the native list for these/);
   assert.match(block,/guide detects|Guide detects/);
