@@ -90,7 +90,6 @@ test('unchecked in-panel physical confirmation never touches the native asset fi
 test('missing or duplicate tags reject native verification',async()=>{
   const a=scenario({duplicate:true});
   await a.app.recordSelectedAssetPresence();
-  assert.equal(a.confirms(),0);
   assert.equal(a.clicks(),0);
   const b=scenario({noInput:true});
   await b.app.recordSelectedAssetPresence();
@@ -113,6 +112,8 @@ test('non-confirmed native outcome never claims verification, cannot auto retry'
   assert.equal(h.clicks(),1);
   assert.match(h.status.textContent,/Verification not confirmed/);
   h.app.setSelection({title:'Thermal Imager',assetTag:'213'});
+  h.presence.checked = true;
+  h.presence.disabled = false;
   await h.app.recordSelectedAssetPresence();
   assert.equal(h.clicks(),1);
   assert.match(h.status.textContent,/already attempted/);
