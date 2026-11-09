@@ -65,12 +65,13 @@ test('native location filters must all be present, missing selections are called
     const app=documentText=>({querySelectorAll(){return [{
         innerText:documentText,closest:()=>null
     }];},body:{innerText:documentText}});
-    const fn=new Function('SCBA_AIRPACK_LOCATIONS','document',code);
+    const create=new Function('SCBA_AIRPACK_LOCATIONS','document',code);
     const all='Equipment Standard Search: Filtered To: Station 4 SCBA Supply Room × '+
         'Truck 504: 63000-13 × Medic 504: 61000-12 × Name Pool Location';
-    assert.deepEqual(fn(locations,app(all)).selected,['truck504','medic504','station4']);
-    assert.equal(fn(locations,app(all)).ready,true);
-    const incomplete=fn(locations,app(all.replace('Medic 504: 61000-12','Medic 506: 61000-16')));
+    const evaluate=text=>create(locations,app(text))();
+    assert.deepEqual(evaluate(all).selected,['truck504','medic504','station4']);
+    assert.equal(evaluate(all).ready,true);
+    const incomplete=evaluate(all.replace('Medic 504: 61000-12','Medic 506: 61000-16'));
     assert.equal(incomplete.ready,false);
     assert.deepEqual(incomplete.missing,['Medic 504: 61000-12']);
 });
