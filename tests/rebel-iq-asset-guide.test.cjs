@@ -63,8 +63,8 @@ test('asset review is independent from Daily Tour',()=>{
   assert.match(src,/button\('Daily Tour', 'daily'\)/);
   assert.match(src,/button\('Assets', 'assets'\)/);
   assert.match(src,/openAssetReviewScreen\(\)/);
-  assert.match(src,/const IQ_VERSION = '0\.1\.19'/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.19/m);
+  assert.match(src,/const IQ_VERSION = '0\.1\.20'/);
+  assert.match(src,/^\/\/ @version\s+0\.1\.20/m);
 });
 
 test('full 90-item T504 list includes 24 cards lacking location and tag metadata',()=>{
