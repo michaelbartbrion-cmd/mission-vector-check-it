@@ -1024,33 +1024,48 @@
           !t504Visible() || location.pathname!==plan.route) {
         failed='T504 asset page changed.';break;
       }
-      const key=location.pathname+'|'+item.assetTag;
+      const key=location.pathname+'|'+
+        (item.uniqueTag?'tag:'+item.assetTag:'title:'+item.title);
       if(attemptedAssetRecords.has(key)){
-        failed='Previously attempted tag '+item.assetTag+'. Review native status.';break;
+        failed='Previously attempted '+item.title+'. Review native status.';break;
       }
       const same=readAssetReviewRows().filter(row=>
-        clean(row.assetTag).toUpperCase()===item.assetTag);
+        item.uniqueTag ?
+          clean(row.assetTag).toUpperCase()===item.assetTag :
+          row.title===item.title);
       if(same.length!==1 || same[0].status!=='not verified' ||
           same[0].title!==item.title){
         failed='Asset identity/status changed for '+item.title+'.';break;
       }
-      const native=findNativeAssetTagEntry();
-      if(!native || !native.input.isConnected || !native.button.isConnected){
-        failed='Native Operative IQ tag control unavailable.';break;
+      const rowAction=findNativeRowVerifyControl(same[0]);
+      const scanner=!rowAction && item.uniqueTag ? findNativeAssetTagEntry():null;
+      const native=rowAction ? {mode:'row',button:rowAction} :
+        scanner ? {mode:'tag',button:scanner.button,input:scanner.input}:null;
+      if(!native || !native.button.isConnected ||
+          (native.input && !native.input.isConnected)){
+        failed='Cannot identify the native Present/Verified control for '+
+          item.title+'. Nothing recorded for this item. '+
+          'Use its checkmark in Operative IQ.';break;
       }
-      const setter=Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,'value')?.set;
-      if(!setter){failed='Native input unavailable.';break;}
+      const setter=native.mode==='tag' ?
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set :null;
+      if(native.mode==='tag' && !setter){
+        failed='Native tag input unavailable.';break;
+      }
       attemptedAssetRecords.add(key);
       attempted++;
       report('Recording '+attempted+'/'+maximum+': '+item.title+' ['+item.assetTag+']');
       try{
-        native.input.focus();
-        setter.call(native.input,item.assetTag);
-        native.input.dispatchEvent(new Event('input',{bubbles:true}));
-        native.input.dispatchEvent(new Event('change',{bubbles:true}));
-        if(native.input.value!==item.assetTag)
-          throw Error('Tag control did not accept exact tag');
+        if (native.mode==='tag') {
+          native.input.focus();
+          setter.call(native.input,item.assetTag);
+          native.input.dispatchEvent(new Event('input',{bubbles:true}));
+          native.input.dispatchEvent(new Event('change',{bubbles:true}));
+          if(native.input.value!==item.assetTag)
+            throw Error('Tag control did not accept exact tag');
+        }
+        // User explicitly confirmed physical presence/operation. Invoke
+        // the exact native asset's Present/Verified control once.
         native.button.click();
         let verified=false;
         for(let n=0;n<22;n++){
@@ -1065,16 +1080,18 @@
         if(!verified)throw Error('Official Verified status not confirmed');
         confirmed++;
         item.recorded=true;
-        // Do not overwrite independent data entered by the operator.
-        const current=clean(native.input.value);
-        if(current===item.assetTag){
-          setter.call(native.input,'');
-          native.input.dispatchEvent(new Event('input',{bubbles:true}));
-          native.input.dispatchEvent(new Event('change',{bubbles:true}));
-        }else if(current)throw Error('Native input unexpectedly changed');
-        if(clean(native.input.value))throw Error('Native input did not reset');
+        if(native.mode==='tag') {
+          // Do not overwrite independent data entered by the operator.
+          const current=clean(native.input.value);
+          if(current===item.assetTag){
+            setter.call(native.input,'');
+            native.input.dispatchEvent(new Event('input',{bubbles:true}));
+            native.input.dispatchEvent(new Event('change',{bubbles:true}));
+          }else if(current)throw Error('Native input unexpectedly changed');
+          if(clean(native.input.value))throw Error('Native input did not reset');
+        }
       }catch(error){
-        failed='Tag '+item.assetTag+': '+clean(error?.message||error)+
+        failed='Asset '+item.title+': '+clean(error?.message||error)+
           '. Reconcile Operative IQ before retrying.';
         break;
       }
