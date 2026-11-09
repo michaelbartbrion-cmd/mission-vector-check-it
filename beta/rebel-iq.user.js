@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.12
+// @version      0.1.13
 // @description  Prepare T504 daily, weekly, and Thursday rope drafts. Save In Process only; never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.12' };
+  window.__rebelIqT504 = { version: '0.1.13' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.12';
+  const IQ_VERSION = '0.1.13';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -416,6 +416,8 @@
   // statuses. NEVER toggles a verification control or signs off an asset.
   const ASSET_GUIDE_ID = 'rebel-iq-t504-asset-guide';
   let assetGuideRows = [], assetGuideNext = -1, assetGuideLastScan = 0;
+  let selectedAssetReview = null, assetRecordBusy = false;
+  const attemptedAssetRecords = new Set();
 
   // Read Operative IQ's own top-bar totals independently from individual rows.
   // Action Required and Maintenance Due are distinct native categories;
@@ -479,7 +481,11 @@
         const title = clean(titleLine.replace(
           /\b(?:Not Verified|Verified|Needs Attention|Requires Attention)\s*$/i, ''));
         if (!title || !/[A-Za-z]{2,}/.test(title)) continue;
-        const row = {element: card, title: title.slice(0, 110), status};
+        // A tag differentiates assets with the same visible description.
+        // Do not infer identity from position, description or a fake serial.
+        const tag = text.match(/\bAsset\s*Tag\s*:\s*([A-Za-z0-9._-]{1,80})/i)?.[1] || '';
+        const row = {element: card, title: title.slice(0, 110), status,
+          assetTag: tag.trim()};
         const hasMetadata = /\b(?:Location|Asset Tag|Asset Type|Asset Class|Part|Qty|Quantity)\s*:/i.test(text);
         if (hasMetadata) {
           fallback = row;
@@ -522,8 +528,9 @@
 
     const instructions = document.createElement('div');
     instructions.textContent =
-      'Find Next Unverified moves to the next pending item on this page. ' +
-      'It does not verify, change, or submit any asset.';
+      'Find Next Unverified scrolls to an item. After physically checking its ' +
+      'identity and presence, Record Present can use the existing Operative IQ ' +
+      'asset-tag entry. Each item requires a separate confirmation.';
     instructions.style.cssText = 'margin:6px 0;color:#526a78;';
 
     const next = document.createElement('button');
@@ -535,13 +542,23 @@
       'color:#fff;padding:8px 10px;font-weight:bold;cursor:pointer;';
     next.onclick = showNextAssetToReview;
 
+    const record = document.createElement('button');
+    record.type = 'button';
+    record.textContent = 'Record Present (1 asset)';
+    record.setAttribute('data-asset-guide-record', '');
+    record.disabled = true;
+    record.style.cssText = 'border:1px solid #176b8e;border-radius:5px;' +
+      'background:#fff;color:#176b8e;padding:8px 9px;font-weight:bold;' +
+      'cursor:pointer;margin-left:4px;';
+    record.onclick = () => { void recordSelectedAssetPresence(); };
+
     const status = document.createElement('div');
     status.setAttribute('data-asset-guide-status', '');
     status.setAttribute('role', 'status');
     status.style.cssText = 'margin-top:6px;color:#526a78;';
     status.textContent = 'Physically inspect each item; no status is changed automatically.';
 
-    section.append(heading, summary, coverage, instructions, next, status);
+    section.append(heading, summary, coverage, instructions, next, record, status);
     return section;
   }
 
@@ -559,6 +576,9 @@
     }
     assetGuideNext = (assetGuideNext + 1) % pending.length;
     const target = pending[assetGuideNext];
+    selectedAssetReview = target.assetTag ? {title: target.title, assetTag: target.assetTag} : null;
+    const record = section?.querySelector('[data-asset-guide-record]');
+    if (record) record.disabled = !selectedAssetReview || assetRecordBusy;
     target.element.scrollIntoView({behavior: 'smooth', block: 'center'});
     const previous = target.element.style.outline;
     target.element.style.outline = '3px solid #176b8e';
@@ -567,7 +587,9 @@
     }, 2200);
     if (status) status.textContent =
       'Review ' + (assetGuideNext + 1) + '/' + pending.length + ': ' +
-      target.title + '. Use Operative IQ to record the actual result.';
+      target.title + (target.assetTag ? ' (tag ' + target.assetTag + ').' +
+        ' Physically check it, then select Record Present.' :
+        '. No unique asset tag detected. Use the native Operative IQ controls.');
   }
 
   function refreshAssetReviewGuide() {
@@ -578,6 +600,9 @@
       section.style.display = 'none';
       assetGuideRows = [];
       assetGuideNext = -1;
+      selectedAssetReview = null;
+      const record = section.querySelector('[data-asset-guide-record]');
+      if (record) record.disabled = true;
       assetGuideLastScan = 0;
       return;
     }
@@ -612,6 +637,131 @@
             ? 'Guide detects all ' + native.total + ' rows; verify physically.'
             : 'Guide row count differs from native totals; use native list.')
         : 'Native totals unavailable. The guide may miss some equipment.';
+    }
+  }
+
+
+  // An attended, one-item-only native Operative IQ operation.
+  // No direct HTTP mutation, no bulk verification, no synthetic signatures.
+  // The user must explicitly confirm they physically checked this exact tag.
+  function findNativeAssetTagEntry() {
+    if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible()) return null;
+    const fields = [...document.querySelectorAll('input')]
+      .filter(node => visible(node) && !node.disabled && !node.readOnly &&
+        !node.closest('#' + PANEL) &&
+        /enter\s+asset\s+tag\s*\/\s*serial/i.test(
+          (node.getAttribute('placeholder') || '') + ' ' +
+          (node.getAttribute('aria-label') || '')));
+    if (fields.length !== 1 || clean(fields[0].value)) return null;
+    const input = fields[0], rect = input.getBoundingClientRect();
+    let container = input.parentElement;
+    for (let depth = 0; depth < 5 && container; depth++, container = container.parentElement) {
+      const matches = [...container.querySelectorAll('button')]
+        .filter(button => visible(button) && !button.disabled && button.type !== 'reset')
+        .filter(button => {
+          const box = button.getBoundingClientRect();
+          const label = clean([
+            button.getAttribute('aria-label') || '',
+            button.getAttribute('title') || '',
+            button.textContent || ''
+          ].join(' '));
+          return box.left >= rect.right - 5 &&
+            box.left < rect.right + 110 &&
+            Math.abs((box.top + box.bottom) / 2 - (rect.top + rect.bottom) / 2) < 22 &&
+            (label === '' || /^(search|go|find|verify)(\s+(asset|tag))?$/i.test(label));
+        });
+      if (matches.length === 1) return {input, button: matches[0]};
+      if (matches.length > 1) return null;
+    }
+    return null;
+  }
+
+  function selectOnePendingAssetByTag(assetTag, title) {
+    const matching = readAssetReviewRows().filter(row =>
+      row.assetTag === assetTag && row.title === title);
+    return matching.length === 1 && matching[0].status === 'not verified'
+      ? matching[0] : null;
+  }
+
+  async function recordSelectedAssetPresence() {
+    const section = document.getElementById(ASSET_GUIDE_ID);
+    const status = section?.querySelector('[data-asset-guide-status]');
+    const record = section?.querySelector('[data-asset-guide-record]');
+    const fail = message => {if (status) status.textContent = message; };
+    if (assetRecordBusy || !section || !selectedAssetReview ||
+        !isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible() ||
+        readPending() || readRopes()) {
+      fail('Cannot record: select a T504 asset after finishing other draft work.');
+      return;
+    }
+    const {assetTag,title} = selectedAssetReview;
+    const key = location.pathname + '|' + assetTag;
+    if (attemptedAssetRecords.has(key)) {
+      fail('This tag was already attempted on this page. Check Operative IQ before retrying.');
+      return;
+    }
+    const pending = selectOnePendingAssetByTag(assetTag,title);
+    if (!pending) {
+      fail('Target not uniquely identifiable or already updated. No record was changed.');
+      return;
+    }
+    const native = findNativeAssetTagEntry();
+    if (!native) {
+      fail('The native asset-tag scanner/search control is not uniquely identified or contains text. Use the original Operative IQ checkmark or scanner.');
+      return;
+    }
+    if (!window.confirm(
+      'Confirm you PHYSICALLY inspected this equipment on Truck 504:\n\n' +
+      title + '\nAsset Tag: ' + assetTag + '\n\n' +
+      'Is it PRESENT? If damaged or missing, cancel and report it using Operative IQ.\n\n' +
+      'Proceed with ONE native asset-tag verification?')) return;
+    // Reread exactly the same item and control after user confirmation.
+    if (!selectOnePendingAssetByTag(assetTag,title) ||
+        !native.input.isConnected || !native.button.isConnected ||
+        !isAssetPage() || inspectionId() !== ASSET_UNIT_ID) {
+      fail('Asset changed while confirming; no action taken.');
+      return;
+    }
+    assetRecordBusy = true;
+    attemptedAssetRecords.add(key);  // Never auto-repeat a potentially consequential click.
+    if (record) record.disabled = true;
+    try {
+      native.input.focus();
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      if (!setter) throw Error('Native input setter unavailable.');
+      setter.call(native.input,assetTag);
+      native.input.dispatchEvent(new Event('input',{bubbles:true}));
+      native.input.dispatchEvent(new Event('change',{bubbles:true}));
+      if (native.input.value !== assetTag) throw Error('Native input rejected the selected tag.');
+      // The official Front Line guide documents entering/scanning the asset
+      // tag in this bottom field as a verification method. One click only.
+      native.button.click();
+      fail('Submitted tag ' + assetTag + ' through Operative IQ. Checking for its Verified status...');
+      let confirmed = false;
+      for (let i = 0; i < 22; i++) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID) break;
+        const rows = readAssetReviewRows().filter(row =>
+          row.assetTag === assetTag && row.title === title);
+        if (rows.length === 1 && rows[0].status === 'verified') {
+          confirmed = true;
+          break;
+        }
+      }
+      fail(confirmed
+        ? 'Operative IQ confirms VERIFIED: ' + title + ' (tag ' + assetTag + ').'
+        : 'Verification not confirmed for tag ' + assetTag +
+          '. Inspect the native status. Do not retry until it is reconciled.');
+      selectedAssetReview = null;
+      assetGuideNext = -1;
+      assetGuideLastScan = 0;
+      refreshAssetReviewGuide();
+    } catch (error) {
+      fail('Recording outcome UNKNOWN for tag ' + assetTag +
+        ': ' + clean(error?.message || 'operation failed') +
+        '. Check Operative IQ before trying again.');
+    } finally {
+      assetRecordBusy = false;
     }
   }
 
