@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.52
+// @version      3.2.53
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.52',
+        version: '3.2.53',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.52';
+    const VERSION = '3.2.53';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -4187,13 +4187,22 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         if (!/(?:\.{3}|\u2026)$/.test(clipped)) return '';
         const stem = clipped.replace(/(?:\.{3}|\u2026)$/, '');
         if (stem.length < 8) return '';
-        const serialToken = stem.match(/(?:^|[^0-9])(\d{6,})(?=$|[^0-9])/)?.[1] || '';
-        if (!serialToken) return '';
+        // Real SCBA mask serials can be ALPHANUMERIC, e.g. E004015306F73814.
+        // A numeric-only extraction misidentifies the digits embedded inside
+        // that serial and rejects the correct equipment page.
+        // Use the independent, labeled Vector Serial Number exactly. Accept
+        // it only as a COMPLETE token in the listed clipped name stem.
         let observedSerial = '';
         try {
             observedSerial = clean(repairReadDetailDocument(document).serial).toUpperCase();
         } catch { return ''; }
-        if (observedSerial !== serialToken) return '';
+        if (observedSerial.length < 6 || observedSerial.length > 100 ||
+            !/^[A-Z0-9-]+$/.test(observedSerial) || !/\d/.test(observedSerial)) return '';
+        const serialToken = observedSerial;
+        const exactSerialToken = new RegExp(
+            `(?:^|[^A-Z0-9])${escapeRegex(serialToken)}(?=$|[^A-Z0-9])`, 'i'
+        );
+        if (!exactSerialToken.test(stem)) return '';
 
         const headings = [...document.querySelectorAll('h1,h2,h3,h4,[data-testid*="title"]')]
             .filter(visible)
@@ -4212,7 +4221,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const full = clean(match[2]).toUpperCase();
             if (full.startsWith(stem) && full.length >= stem.length &&
                 full.length <= 160 && !/(?:\.{3}|\u2026)$/.test(full) &&
-                full.includes(serialToken)) fullNames.add(full);
+                exactSerialToken.test(full)) fullNames.add(full);
         }
         // Ambiguous or conflicting headings fail closed.
         return fullNames.size === 1 ? [...fullNames][0] : '';
