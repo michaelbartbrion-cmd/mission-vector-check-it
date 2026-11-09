@@ -56,8 +56,8 @@ test('asset review remains a separate phase after confirmed saved Tour draft',()
   assert.match(src,/Asset Checks/);
   assert.match(src,/const assetFollowup = readAssetFollowup\(\)/);
   assert.match(src,/location\.assign\(assetUrl\(followup\.unitId\)\)/);
-  assert.match(src,/const IQ_VERSION = '0\.1\.11'/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.11/m);
+  assert.match(src,/const IQ_VERSION = '0\.1\.12'/);
+  assert.match(src,/^\/\/ @version\s+0\.1\.12/m);
 });
 
 test('full 90-item T504 list includes 24 cards lacking location and tag metadata',()=>{
