@@ -151,7 +151,7 @@ test('one reviewed action records all present and working choices but not except
   assert.equal(h.rows.find(x=>x.assetTag==='CM2328').status,'not verified');
   assert.equal(h.rows.find(x=>x.assetTag==='DUP').status,'not verified');
   assert.equal(h.app.getPreview(),null);
-  assert.match(h.progress.textContent,/3 asset\(s\) confirmed Verified/);
+  assert.match(h.progress.textContent,/Operative IQ confirmed Verified: 3\/3 selected assets/);
 });
 test('nonconfirming native attempt stops and never claims Verified, even after retry',async()=>{
   const h=scenario({neverConfirm:true});await h.app.loadAssetChecklist();
@@ -205,7 +205,7 @@ test('native row check control records present even when tag scanner cannot be f
   await h.app.recordReviewedAssetChecklist();
   assert.equal(h.rows.filter(x=>x.status==='verified').length,6);
   assert.equal(h.clicks(),5,'each uniquely identified pending row gets its native check');
-  assert.match(h.progress.textContent,/5 asset\(s\) confirmed Verified/);
+  assert.match(h.progress.textContent,/Operative IQ confirmed Verified: 5\/5 selected assets/);
 });
 test('Paratech alone is outside the crew check, never offered or recorded',async()=>{
   const h=scenario({rowControls:true,nativeMissing:true,rows:[
