@@ -13,6 +13,19 @@ Michael explicitly designated a successor conversation in this existing Project 
 
 **Binding later operating decision:** CrewSense remains read-only/collector-only and Michael makes changes manually. The Alignment Record's earlier one-time November 2 overtime write requirement was **not** formally amended. Do **not** revive that automation or mark the milestone closed without Michael explicitly amending that requirement or separately authorizing a new attended write path. Postmaster remains read-only. The old ActionPackage execution path, generalized writes, and speculative Forge Yard redesign remain parked.
 
+## PRIMARY succession and current acceptance checkpoint (2026-11-09)
+
+Michael explicitly designated the **current successor conversation** as the sole authoritative `Mission Vector Check It - PRIMARY` on November 9, 2026. Its immediate predecessor is **retired from active Mission authority** but preserved as historical reference. The canonical Project and PRIMARY names, application ownership, objective, and one active milestone remain unchanged. This entry supersedes earlier PRIMARY succession designations, not their historical evidence.
+
+**Approved anchor:** `MISSION_VECTOR_ALIGNMENT_RECORD_V2_2026-10-03.txt`. **One active milestone: production acceptance and finalization.** Later explicit instructions keep Rebel Scout/CrewSense **collector-only with Michael doing CrewSense edits manually**, and Rebel Postmaster **read-only**. The Alignment V2 one-time November 2 OT write criterion is stale but **not formally amended**; it cannot justify a write or be silently marked complete. Project X retains shared Engineering/Operations/JOBS/procurement ownership. Do not send email without Michael's separate authorization.
+
+**Verified source status as of November 9:**
+- GitHub PR [#33](https://github.com/michaelbartbrion-cmd/mission-vector-check-it/pull/33) is merged, and `beta/version.json` reports **Vector Rebel 3.2.55**. A new **SCBA Airpacks** control supports independently selecting any non-empty subset of Truck 504 (63000-13), Medic 504 (61000-12), and Station 4 SCBA Supply Room for each check. Native **Equipment > Standard** filters must match; the scanner is read-only and saves **local review drafts**, not official SCBA inspections. Actual installed-user version, full inventory, official airpack inspection template, and successful official receipt are **not live-verified**.
+- GitHub PR [#31](https://github.com/michaelbartbrion-cmd/mission-vector-check-it/pull/31) is merged for **Rebel IQ 0.1.21**: compact in-page Assets panel, separate from Daily Tour, with **Paratech excluded** from Michael's crew scope. The proposed default Verified review requires physical inspection/confirmation and per-item official native receipt. Real native Verified status change and user installation remain **unverified**.
+- The existing Rebel Command Base44 app `6aa6b7634a031657377d4fad` reports **ready**. This is builder/build status, **not** evidence of live feature acceptance. Roster publication, error report delivery, PPE identity fixes, SCBA face mask workflow acceptance, Scout/Postmaster live attended acceptance, and final supported release remain open unless independently proven.
+
+**Shortest acceptance path:** (1) Use installed Vector Rebel 3.2.55 with an operator-chosen SCBA location subset, match native location filters, collect the real airpack list and inspect one native official SCBA form without submitting it. (2) Physically review one eligible Rebel IQ crew asset, record once and verify the real native green Verified receipt before expanding. (3) Resolve any live PPE/roster/error defects, then complete Scout and Postmaster read-only acceptance and final release verification. Never infer official PASS, verification, submissions or completion from a draft, source commit, CI pass, or green build alone. Preselected proposed PASS answers are allowed only in user-requested review workflows; equipment certification still requires actual physical inspection and explicit operator confirmation.
+
 ## Verified snapshot, November 3, 2026
 
 | Component | Evidence from current source/live data | Acceptance |
@@ -43,7 +56,7 @@ The current **human-critical dependency** is the accurate local master roster ex
 - Do not create GitHub Actions pipelines without explicit cost approval.
 - Personal/local information such as signatures, inspector-specific PPE state, and private inspection answers belongs in the user's local installation and authoritative Vector system, not this public repository.
 - Use Vector's exact **Responsible Party** for PPE ownership, not equipment-name prefixes.
-- Never preselect PASS, forge an inspection/signature, automatically retry a failed submit, or write CrewSense without fresh explicit authorization.
+- Never certify PASS or forge an inspection/signature without physical inspection and explicit operator confirmation; never automatically retry a failed submit or write CrewSense without fresh, specific authorization.
 
 ## Authoritative references
 
