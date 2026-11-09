@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.19
+// @version      0.1.20
 // @description  T504 Daily Tour, weekly, rope drafts, and inspector-confirmed Assets review.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.19' };
+  window.__rebelIqT504 = { version: '0.1.20' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.19';
+  const IQ_VERSION = '0.1.20';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -726,6 +726,11 @@
     if(parent)parent.style.display='';
   }
 
+  // Paratech catalog equipment is outside the crew's daily asset check.
+  // Preserve native inventory totals but never offer these rows as answers
+  // or recording targets.
+  const isExcludedAsset = row => /^Paratech\b/i.test(clean(row?.title || ''));
+
   function refreshAssetReviewGuide() {
     const section = document.getElementById(ASSET_GUIDE_ID);
     if (!section) return;
@@ -749,23 +754,22 @@
     const native = readNativeAssetTotals();
     const summary = section.querySelector('[data-asset-guide-summary]');
     const coverage = section.querySelector('[data-asset-guide-coverage]');
-    const found = assetGuideRows.filter(row => row.status === 'not verified').length;
+    const pending = assetGuideRows.filter(row => row.status==='not verified');
+    const crew = pending.filter(row => !isExcludedAsset(row));
+    const excluded = pending.filter(isExcludedAsset);
+    const excludedUnits = excluded.reduce((sum,row)=>sum+(row.quantity||1),0);
     const mapped = assetGuideRows.reduce((sum,row)=>sum+(row.quantity||1),0);
-    const pendingUnits = assetGuideRows.filter(row=>row.status==='not verified')
-      .reduce((sum,row)=>sum+(row.quantity||1),0);
-    if (summary) summary.textContent = native
-      ? 'Operative IQ: ' + native.required + ' Action Required | ' +
-        native.completed + ' Completed'
-      : 'Detected ' + found + ' Not Verified asset entries';
+    const pendingUnits = pending.reduce((sum,row)=>sum+(row.quantity||1),0);
+    if (summary) summary.textContent =
+      'Truck 504: '+crew.length+' unverified crew assets';
     if (coverage) coverage.textContent = native &&
         mapped===native.total && pendingUnits===native.required
-      ? 'Complete: '+found+' unverified asset entries represent '+
-        pendingUnits+' required pieces (including PAR inventory counts).'
+      ? 'Paratech excluded: '+excluded.length+' catalog entries ('+
+        excludedUnits+' pieces). Not part of your check.'
       : native
-        ? 'Incomplete: '+found+' entries represent '+pendingUnits+'/'+
-          native.required+' required pieces; '+mapped+'/'+native.total+
-          ' total units accounted for. Review the native list.'
-        : 'Native totals unavailable. Review asset coverage in Operative IQ.';
+        ? 'Native asset coverage incomplete: '+mapped+'/'+native.total+
+          ' total pieces identified. Paratech excluded from your checklist.'
+        : 'Native totals unavailable. Paratech excluded from your checklist.';
   }
 
   // Prefer the real Present/Verified control on an exact native asset row.
@@ -896,7 +900,9 @@
     const mapped = rows.reduce((sum,row)=>sum+(row.quantity||1),0);
     const pendingUnits = rows.filter(row=>row.status==='not verified')
       .reduce((sum,row)=>sum+(row.quantity||1),0);
-    const items = rows.filter(row => row.status === 'not verified')
+    const excluded = rows.filter(row => row.status==='not verified' && isExcludedAsset(row));
+    const excludedUnits=excluded.reduce((sum,row)=>sum+(row.quantity||1),0);
+    const items = rows.filter(row => row.status === 'not verified' && !isExcludedAsset(row))
       .map((row,index) => {
         const assetTag = clean(row.assetTag).toUpperCase();
         const uniqueTag = !!assetTag && assetTag !== 'UNASSIGNED' &&
@@ -912,9 +918,11 @@
           choice:'verified',uniqueTag, uniqueTitle, recordable: uniqueTag || uniqueTitle
         };
       });
-    if (!items.length) return {error:'No unverified T504 items were detected.'};
+    if (!items.length) return {error:'No unverified crew assets. Paratech is excluded from your check.'};
     return {items, native:totals, route:location.pathname,
-      preparedAt:Date.now(), pendingUnits,
+      preparedAt:Date.now(),
+      pendingUnits:items.reduce((sum,row)=>sum+(row.quantity||1),0),
+      excludedCount:excluded.length, excludedUnits,
       unmapped: Math.max(0,totals.total-mapped),
       pendingUnmapped: Math.max(0,totals.required-pendingUnits)};
   }
@@ -949,8 +957,9 @@
       plan.items.length+' unverified entries ('+plan.pendingUnits+
       ' required pieces) | '+c.verified+' proposed Verified | '+
       c.exceptions+' exceptions | '+c.skipped+' skipped | '+
-      c.manual+' manual catalog/ambiguous'+
-      (plan.pendingUnmapped>0?' | '+plan.pendingUnmapped+' pieces unaccounted for':'');
+      c.manual+' manual/ambiguous | Paratech excluded ('+
+      plan.excludedCount+' entries, '+plan.excludedUnits+' pieces)'+
+      (plan.pendingUnmapped>0?' | '+plan.pendingUnmapped+' native pieces not reconciled':'');
     if(record) {
       record.textContent='Record Verified Assets ('+c.recordable+')';
       record.disabled=assetBatchRunning || !attest?.checked || c.recordable===0;
@@ -1061,7 +1070,8 @@
       report('Not ready. Load the list, review the choices and confirm inspection.');
       return;
     }
-    const chosen=plan.items.filter(item=>item.choice==='verified' && item.recordable);
+    const chosen=plan.items.filter(item=>item.choice==='verified' &&
+      item.recordable && !isExcludedAsset(item));
     // The first native receipt is verified before the next asset begins.
     // This is one operator-authorized action, not a second confirmation loop.
     const maximum=chosen.length;
