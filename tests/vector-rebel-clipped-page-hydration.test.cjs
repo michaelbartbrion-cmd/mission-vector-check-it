@@ -23,7 +23,7 @@ const verifyFactory=new Function(
 );
 const recoverFactory=new Function(
   'clean','isAssetPageFor','repairReadDetailDocument','document',
-  'visible','PANEL_ID','OVERLAY_ID','uiText','normalizedPpeTypeText',
+  'visible','PANEL_ID','OVERLAY_ID','uiText','normalizedPpeTypeText','escapeRegex',
   recoveryCode+'\nreturn resolveClippedPpeNameFromVerifiedDetail;'
 );
 const identityFactory=new Function(
@@ -37,7 +37,8 @@ const tuples=[
  ['Bunker Coat','BALDREE-10948322-F...','BALDREE-10948322-FL','10948322','300045','4604890'],
  ['Structural Gloves','BALDREE-3290824-BU...','BALDREE-3290824-BU','3290824','299879','4598134'],
  ['Hood','BALDREE-3290326-BU...','BALDREE-3290326-BU','3290326','299900','4599982'],
- ['Structural Boot','BALDREE-5633595-BB...','BALDREE-5633595-BB','5633595','299881','4598714']
+ ['Structural Boot','BALDREE-5633595-BB...','BALDREE-5633595-BB','5633595','299881','4598714'],
+ ['SCBA Face Mask','E004015306F73814...','E004015306F73814','E004015306F73814','299947','4601272']
 ];
 function makePage(tuple,opts={}) {
   const [type,clipped,full,serial,pool,itemId]=tuple;
@@ -54,7 +55,7 @@ function makePage(tuple,opts={}) {
     '/app/equipment/PPE/pool/'+candidate.pool+'/'+candidate.itemId+'/item';
   const resolve=recoverFactory(clean,routeOk,
     ()=>({serial:polls>=readyAt?observedSerial:''}),
-    document,()=>true,'panel','overlay',clean,x=>clean(x).toLowerCase());
+    document,()=>true,'panel','overlay',clean,x=>clean(x).toLowerCase(),x=>x);
   const findIdentity=identityFactory(clean,routeOk,document,()=>true,
     'panel','overlay',location,x=>x,clean,()=>null);
   const waitFor=async(fn,timeout,interval)=>{
@@ -140,9 +141,31 @@ test('release candidate version is consistent across userscript and managed upda
   const meta=src.match(/^\/\/ @version\s+(\S+)/m)?.[1];
   const runtime=src.match(/const VERSION = '([^']+)'/)?.[1];
   const instance=src.match(/window\.__vectorRebelInstance = \{\s*version: '([^']+)'/)?.[1];
-  assert.equal(meta,'3.2.52');
+  assert.equal(meta,'3.2.53');
   assert.equal(meta,manifest.latestVersion);
   assert.equal(meta,runtime);
   assert.equal(meta,instance);
   assert.match(src,/^\/\/ @updateURL\s+https:\/\/raw\.githubusercontent\.com\/michaelbartbrion-cmd\/mission-vector-check-it\/main\/beta\/vector-rebel\.user\.js/m);
+});
+
+test('SCBA exact alpha-numeric serial must not match a numeric substring or near-collision',async()=>{
+  const mask=tuples.find(tuple=>tuple[0]==='SCBA Face Mask');
+  assert.ok(mask);
+  for(const config of [
+    {serial:'004015306'},
+    {serial:'E004015306F7381A'},
+    {serial:'E004015306F73814A'},
+    {serial:'BALDREE-E004015306F73814'},
+    {heading:'SCBA Face Mask: E004015306F73814A'},
+    {heading:'Bunker Coat: E004015306F73814'},
+    {headers:['SCBA Face Mask: E004015306F73814','SCBA Face Mask: E004015306F73814-OTHER']}
+  ]){
+    const p=makePage(mask,{...config,readyAt:1});
+    assert.equal(await p.verifier(p.item),null,JSON.stringify(config));
+    assert.equal(p.item.assetId,mask[1],'no unproven mask label saved');
+  }
+});
+test('SCBA mask with no separately labeled serial fails closed despite exact heading',async()=>{
+  const p=makePage(tuples[4],{serial:'',readyAt:1});
+  assert.equal(await p.verifier(p.item),null);
 });

@@ -13,9 +13,9 @@ function create({serial='10948322',title='Bunker Coat: BALDREE-10948322-FL',
  const named=(headings||[title]).map(textContent=>({textContent,closest:()=>null}));
  const doc={querySelectorAll:()=>named};
  return new Function('clean','isAssetPageFor','repairReadDetailDocument','document',
-  'visible','PANEL_ID','OVERLAY_ID','uiText','normalizedPpeTypeText',code)(
+  'visible','PANEL_ID','OVERLAY_ID','uiText','normalizedPpeTypeText','escapeRegex',code)(
     clean,()=>correctRoute,()=>({serial}),doc,()=>true,'panel','overlay',
-    clean,type
+    clean,type,s=>s
   );
 }
 const target={assetId:'BALDREE-10948322-F...',pool:'300045',
