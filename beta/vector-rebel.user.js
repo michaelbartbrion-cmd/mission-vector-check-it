@@ -4304,6 +4304,33 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
     }
 
+    // One verification path for Tour and READ-ONLY Captain checks.
+    // PPE list labels can be clipped (e.g. BALDREE-10948322-F...).
+    // Recheck evidence WHILE Vector hydrates this exact pool/item detail page:
+    // neither a clipped label nor a guessed suffix may certify identity.
+    async function verifyPpeDetailIdentity(item) {
+        if (!item || !isAssetPageFor(item)) return null;
+        const clipped = /(?:\.{3}|\u2026)$/.test(clean(item.assetId));
+        if (!clipped) {
+            return await verifyExpectedAssetPage(item)
+                ? { verifiedItem: item, restoredName: '' } : null;
+        }
+        try {
+            return await waitFor(() => {
+                if (!isAssetPageFor(item)) return null;
+                const restoredName = resolveClippedPpeNameFromVerifiedDetail(item);
+                if (!restoredName) return null;
+                const verifiedItem = { ...item, assetId: restoredName };
+                // BOTH recovered exact name AND visible exact-page identity
+                // are necessary in the SAME poll. Never trust a clipped name.
+                return findAssetIdentityElement(verifiedItem)
+                    ? { verifiedItem, restoredName } : null;
+            }, 18000, 180);
+        } catch {
+            return null;
+        }
+    }
+
     function isCompletedInspectionView(modeTitle) {
         if (!currentInspection()) return false;
         const body = document.body.innerText || '';
@@ -5260,14 +5287,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const captainMode = getMode('captain');
         if (!captainMode) throw new Error('Captain inspection mode is unavailable.');
         if (!isAssetPageFor(item)) throw new Error(`${item.assetId}: wrong PPE asset page.`);
-        // The same live PPE Name truncation can affect READ-ONLY Captain
-        // audits. Use the proven detail heading + labeled serial recovery,
-        // but do not mutate the audit inventory's original item ID.
-        const restoredName = resolveClippedPpeNameFromVerifiedDetail(item);
-        const verifiedItem = restoredName ? { ...item, assetId: restoredName } : item;
-        if (!(await verifyExpectedAssetPage(verifiedItem))) {
+        // Share the same delayed identity check as Tour PPE, without
+        // changing Captain audit's original inventory or writing to Vector.
+        const proof = await verifyPpeDetailIdentity(item);
+        if (!proof) {
             throw new Error(`${item.assetId}: asset identity could not be verified.`);
         }
+        const { verifiedItem } = proof;
 
         if (item.inspectionModeKey === 'scbaTour') {
             const scbaMode = getMode('scbaTour');
@@ -6813,30 +6839,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             return;
         }
 
-        // Vector can hydrate its PPE heading and Serial Number after navigation.
-        // For clipped list labels, briefly wait for BOTH exact fields on the
-        // already-verified pool/item route; never infer a missing suffix.
-        // The existing identity gate still runs BEFORE any inspection.
-        let restoredName = resolveClippedPpeNameFromVerifiedDetail(item);
-        if (!restoredName && /(?:\.{3}|\u2026)$/.test(clean(item.assetId))) {
-            try {
-                restoredName = await waitFor(
-                    () => resolveClippedPpeNameFromVerifiedDetail(item), 6000, 180
-                );
-            } catch {
-                // No exact proof arrived; keep the original name so the
-                // normal asset identity verification fails closed.
-            }
-        }
-        const verifiedItem = restoredName ? { ...item, assetId: restoredName } : item;
-        const identityVerified = await verifyExpectedAssetPage(verifiedItem);
-        if (!identityVerified) {
+        // Use the same continuous identity retry as read-only Captain,
+        // not a one-shot name recovery followed by waiting for a stale label.
+        const proof = await verifyPpeDetailIdentity(item);
+        if (!proof) {
             stopRun(
                 `${item.assetId}: Vector reached pool ${item.pool} / item ${item.itemId}, ` +
                 'but neither the exact PPE Name nor its labeled serial number matched the verified item. No inspection was started. Open DIAGNOSTICS and share the report.'
             );
             return;
         }
+        const { restoredName, verifiedItem } = proof;
         if (restoredName) {
             // Change the selected item's label only AFTER full identity proof.
             // Its verified Responsible Party and pool/item URL are untouched.
