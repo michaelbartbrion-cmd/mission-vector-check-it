@@ -9,7 +9,7 @@ const source=src.slice(start,end)+'\nreturn readAssetReviewRows;';
 const clean=v=>String(v??'').replace(/\s+/g,' ').trim();
 function harness(statuses,{onT504=true,onAssetPage=true}={}){
   const labels=[];
-  for(const [name,status,hasLocation=true,maintenanceText=''] of statuses){
+  for(const [name,status,hasLocation=true,maintenanceText='',hasIcon=false] of statuses){
     const card={
       innerText:name+(hasLocation?'\nLocation: T504\nAsset Tag: 1234':'\nRequirements: Physically inspect')+ (maintenanceText ? '\nMaintenance Due: '+maintenanceText : '')+'\n'+status,
       getBoundingClientRect:()=>({height:58}),
@@ -17,7 +17,7 @@ function harness(statuses,{onT504=true,onAssetPage=true}={}){
       parentElement:null
     };
     const label={
-      textContent:status,children:[],
+      textContent:status,children:hasIcon?[{textContent:''}]:[],
       closest:()=>null,parentElement:card
     };
     labels.push(label);
@@ -40,6 +40,14 @@ test('T504 asset guide reads statuses without changing them',()=>{
   assert.deepEqual(rows.map(r=>r.status),[
     'not verified','verified','needs attention']);
 });
+test('status chips containing icons are still recognized as Not Verified',()=>{
+  const rows=harness([
+    ['Cardiac Monitor','Not Verified',true,'',true],
+    ['SCBA Frame','Verified',true,'',true]
+  ])();
+  assert.equal(rows.length,2);
+  assert.deepEqual(rows.map(row=>row.status),['not verified','verified']);
+});
 test('other units or non-asset pages never expose an asset review',()=>{
   assert.deepEqual(harness([['Some Gear','Not Verified']],{onT504:false})(),[]);
   assert.deepEqual(harness([['Some Gear','Not Verified']],{onAssetPage:false})(),[]);
@@ -55,8 +63,8 @@ test('asset review is independent from Daily Tour',()=>{
   assert.match(src,/button\('Daily Tour', 'daily'\)/);
   assert.match(src,/button\('Assets', 'assets'\)/);
   assert.match(src,/openAssetReviewScreen\(\)/);
-  assert.match(src,/const IQ_VERSION = '0\.1\.17'/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.17/m);
+  assert.match(src,/const IQ_VERSION = '0\.1\.18'/);
+  assert.match(src,/^\/\/ @version\s+0\.1\.18/m);
 });
 
 test('full 90-item T504 list includes 24 cards lacking location and tag metadata',()=>{

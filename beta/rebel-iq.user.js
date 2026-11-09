@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.17
+// @version      0.1.18
 // @description  T504 Daily Tour, weekly, rope drafts, and inspector-confirmed Assets review.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.17' };
+  window.__rebelIqT504 = { version: '0.1.18' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.17';
+  const IQ_VERSION = '0.1.18';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -447,9 +447,13 @@
     if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible()) return [];
     const statusPattern = /^(Not Verified|Verified|Needs Attention|Requires Attention)$/i;
     const statusNodes = [...document.querySelectorAll('span,div,small,p,label,strong')]
-      .filter(node => visible(node) && node.children.length === 0 &&
+      .filter(node => visible(node) &&
         !node.closest('#' + PANEL + ', #' + ASSET_GUIDE_ID) &&
-        statusPattern.test(clean(node.textContent || '')));
+        statusPattern.test(clean(node.textContent || '')) &&
+        // Some native status labels wrap an icon. Select the deepest
+        // readable status rather than rejecting all non-leaf nodes.
+        ![...node.children].some(child =>
+          statusPattern.test(clean(child.textContent || ''))));
     const used = new Set(), rows = [];
     for (const label of statusNodes) {
       const status = clean(label.textContent).toLowerCase();
@@ -457,7 +461,7 @@
       for (let depth = 0; depth < 8 && card; depth++, card = card.parentElement) {
         const text = String(card.innerText || card.textContent || '');
         const bounds = card.getBoundingClientRect();
-        if (text.length > 850 || bounds.height > 260) break;
+        if (text.length > 1100 || bounds.height > 320) break;
         if (bounds.height < 28 || used.has(card)) continue;
         // Exclude wrappers containing other statuses and overview badges.
         const statusesInCard = statusNodes.filter(node => card.contains(node));
@@ -504,12 +508,11 @@
   // Native Operative IQ can render the long 90-asset list incrementally.
   // Read the ENTIRE scrollable page (without changing verification states)
   // rather than only the first visible rows, which yielded 52 of 76 pending.
+  // Read-only search of BOTH the document and native scrollable asset
+  // containers. Operative IQ does not necessarily use document.scrollingElement;
+  // the original root-only scan continued to find 52 of 76 pending items.
   async function scanAllNativeAssetRows() {
     if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible()) return [];
-    const root = document.scrollingElement || document.documentElement;
-    if (!root || !Number.isFinite(root.scrollHeight) || !Number.isFinite(root.clientHeight))
-      return readAssetReviewRows();
-    const saved = root.scrollTop;
     const collected = new Map();
     const addRows = () => {
       const unnamedCounts = new Map();
@@ -518,35 +521,57 @@
         if (tag) {
           collected.set('tag:' + tag + ':' + row.title,row);
         } else {
-          // Preserve visible duplicates with the same description. There
-          // is no durable ID for untagged rows, so count only the greatest
-          // observed number on one native screen slice (no invented rows).
           const fingerprint = row.title + ':' + row.status;
           const occurrence = (unnamedCounts.get(fingerprint) || 0) + 1;
           unnamedCounts.set(fingerprint,occurrence);
-          const key='untagged:' + fingerprint + ':' + occurrence;
+          const key = 'untagged:' + fingerprint + ':' + occurrence;
           if (!collected.has(key)) collected.set(key,row);
         }
       }
     };
-    try {
-      const limit = Math.max(0,root.scrollHeight-root.clientHeight);
-      const step = Math.max(250,Math.floor(root.clientHeight*0.72));
-      addRows();
-      for(let i=0,pos=0; pos<=limit && i<55; i++,pos+=step) {
-        if(!isAssetPage() || inspectionId()!==ASSET_UNIT_ID)break;
-        root.scrollTop=Math.min(pos,limit);
-        await new Promise(resolve=>setTimeout(resolve,90));
+    const canScan = element => element &&
+      Number.isFinite(element.scrollHeight) &&
+      Number.isFinite(element.clientHeight) &&
+      element.scrollHeight - element.clientHeight > 125 &&
+      !element.closest?.('#' + PANEL + ', #' + ASSET_GUIDE_ID);
+    const roots = [];
+    const root = document.scrollingElement || document.documentElement;
+    if (canScan(root)) roots.push(root);
+    const candidates = [...document.querySelectorAll('body *')]
+      .filter(el => canScan(el) &&
+        el.clientWidth >= 280 && el.clientHeight >= 130 &&
+        !roots.includes(el) && visible(el))
+      .filter(el => /^(?:auto|scroll|overlay)$/i.test(
+        getComputedStyle(el).overflowY || ''));
+    // Largest visible native scroll areas first. A bounded scan avoids
+    // unrelated sidebar scrollers and never touches the Rebel IQ checklist.
+    candidates.sort((a,b) => b.clientHeight - a.clientHeight);
+    roots.push(...candidates.slice(0,6));
+
+    addRows();
+    const totals = readNativeAssetTotals();
+    for (const container of roots) {
+      if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID) break;
+      const saved = container.scrollTop;
+      const limit = Math.max(0,container.scrollHeight-container.clientHeight);
+      const step = Math.max(220,Math.floor(container.clientHeight * 0.75));
+      try {
+        for(let n=0,pos=0; pos<=limit && n<80; n++,pos+=step) {
+          if (!isAssetPage() || inspectionId()!==ASSET_UNIT_ID) break;
+          container.scrollTop=Math.min(pos,limit);
+          await new Promise(resolve=>setTimeout(resolve,95));
+          addRows();
+        }
+        container.scrollTop=limit;
+        await new Promise(resolve=>setTimeout(resolve,180));
         addRows();
+      }finally{
+        container.scrollTop=saved;
       }
-      root.scrollTop=limit;
-      await new Promise(resolve=>setTimeout(resolve,160));
-      addRows();
-    } finally {
-      root.scrollTop=saved;
+      if(totals &&
+         [...collected.values()].filter(row=>row.status==='not verified').length >= totals.required &&
+         collected.size >= totals.total) break;
     }
-    // Uniquely tagged assets can be safely reunited across scroll slices.
-    // Untagged duplicates require native manual verification: do not invent IDs.
     return [...collected.values()];
   }
 
@@ -728,6 +753,46 @@
           'Native totals unavailable. Review asset coverage in Operative IQ.';
   }
 
+  // Prefer the real Present/Verified control on an exact native asset row.
+  // Operative IQ's tag scanner is optional; its blue search-icon button is
+  // not consistently exposed as a native <button> in the authenticated page.
+  function findNativeRowVerifyControl(row) {
+    if (!row || row.status !== 'not verified' || !row.element?.isConnected) return null;
+    const card=row.element;
+    const actions=[...card.querySelectorAll(
+      'button,[role="button"],a,input[type="button"],input[type="submit"]')];
+    const good=actions.filter(node=>{
+      if (node.disabled || node.getAttribute('aria-disabled') === 'true') return false;
+      const label=clean([
+        node.getAttribute('aria-label') || '',
+        node.getAttribute('title') || '',
+        node.getAttribute('mattooltip') || '',
+        node.getAttribute('data-tooltip') || '',
+        node.getAttribute('data-testid') || '',
+        node.getAttribute('data-icon') || ''
+      ].join(' '));
+      const icons=[...node.querySelectorAll(
+        'svg,mat-icon,i,[data-icon],[class*="icon"]')]
+        .map(icon=>clean([
+          icon.getAttribute('aria-label') || '',
+          icon.getAttribute('title') || '',
+          icon.getAttribute('data-icon') || '',
+          icon.getAttribute('class') || '',
+          icon.textContent || ''
+        ].join(' '))).join(' ');
+      const words=label+' '+icons;
+      if (/\b(warning|danger|alert|attention|report|missing|damaged|delete|remove|more|menu|dots|edit|failed|cancel)\b/i.test(words))
+        return false;
+      if (!/\b(verify|verified|mark.{0,12}present|mark.{0,12}verified|check.circle|checkmark|task.alt|done)\b/i.test(words) ||
+          /\b(not verified|unverified)\b/i.test(words)) return false;
+      // Avoid a navigation hyperlink pretending to be a presence action.
+      if (node.tagName === 'A' && node.href && !/\b(verify|present)\b/i.test(label))
+        return false;
+      return true;
+    });
+    return good.length === 1 ? good[0] : null;
+  }
+
   function findNativeAssetTagEntry() {
     if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible()) return null;
     const fields = [...document.querySelectorAll('input')]
@@ -740,8 +805,9 @@
     const input = fields[0], rect = input.getBoundingClientRect();
     let container = input.parentElement;
     for (let depth = 0; depth < 5 && container; depth++, container = container.parentElement) {
-      const matches = [...container.querySelectorAll('button')]
-        .filter(button => visible(button) && !button.disabled && button.type !== 'reset')
+      const matches = [...container.querySelectorAll('button,[role="button"],a')]
+        .filter(button => visible(button) && !button.disabled && button.type !== 'reset' &&
+          button.getAttribute('aria-disabled') !== 'true')
         .filter(button => {
           const box = button.getBoundingClientRect();
           const label = clean([
@@ -774,18 +840,27 @@
     if (!totals || totals.total < 1 || totals.total > 180 ||
         !rows.length || rows.length > totals.total)
       return {error:'Cannot reconcile the native asset list. No checks were recorded.'};
-    const tagCounts = new Map();
+    const tagCounts = new Map(), titleCounts=new Map();
     for (const row of rows) {
       const tag = clean(row.assetTag).toUpperCase();
-      if (tag) tagCounts.set(tag,(tagCounts.get(tag) || 0) + 1);
+      if (tag && tag !== 'UNASSIGNED')
+        tagCounts.set(tag,(tagCounts.get(tag) || 0) + 1);
+      titleCounts.set(row.title,(titleCounts.get(row.title) || 0) + 1);
     }
     const items = rows.filter(row => row.status === 'not verified')
       .map((row,index) => {
         const assetTag = clean(row.assetTag).toUpperCase();
+        const uniqueTag = !!assetTag && assetTag !== 'UNASSIGNED' &&
+          /^[A-Z0-9._-]{1,80}$/.test(assetTag) &&
+          tagCounts.get(assetTag) === 1;
+        // Untagged/UNASSIGNED assets can only be targeted by their own native
+        // Present button when their readable title is also unique.
+        const uniqueTitle = (!assetTag || assetTag === 'UNASSIGNED') &&
+          titleCounts.get(row.title) === 1 &&
+          !!findNativeRowVerifyControl(row);
         return {
           id:index, assetTag,title:row.title,choice:'verified',
-          recordable:!!assetTag && /^[A-Z0-9._-]{1,80}$/.test(assetTag) &&
-            tagCounts.get(assetTag) === 1
+          uniqueTag, uniqueTitle, recordable: uniqueTag || uniqueTitle
         };
       });
     if (!items.length) return {error:'No unverified T504 items were detected.'};
@@ -822,7 +897,7 @@
     if(countsEl)countsEl.textContent=
       plan.items.length+' Not Verified | '+c.verified+' proposed Verified | '+
       c.exceptions+' exceptions | '+c.skipped+' skipped | '+
-      c.manual+' manual (no unique tag)'+
+      c.manual+' manual (ambiguous identity)'+
       (plan.unmapped>0?' | '+plan.unmapped+' unmapped':'');
     if(record) {
       record.textContent='Record Verified Assets ('+c.recordable+')';
@@ -950,33 +1025,48 @@
           !t504Visible() || location.pathname!==plan.route) {
         failed='T504 asset page changed.';break;
       }
-      const key=location.pathname+'|'+item.assetTag;
+      const key=location.pathname+'|'+
+        (item.uniqueTag?'tag:'+item.assetTag:'title:'+item.title);
       if(attemptedAssetRecords.has(key)){
-        failed='Previously attempted tag '+item.assetTag+'. Review native status.';break;
+        failed='Previously attempted '+item.title+'. Review native status.';break;
       }
       const same=readAssetReviewRows().filter(row=>
-        clean(row.assetTag).toUpperCase()===item.assetTag);
+        item.uniqueTag ?
+          clean(row.assetTag).toUpperCase()===item.assetTag :
+          row.title===item.title);
       if(same.length!==1 || same[0].status!=='not verified' ||
           same[0].title!==item.title){
         failed='Asset identity/status changed for '+item.title+'.';break;
       }
-      const native=findNativeAssetTagEntry();
-      if(!native || !native.input.isConnected || !native.button.isConnected){
-        failed='Native Operative IQ tag control unavailable.';break;
+      const rowAction=findNativeRowVerifyControl(same[0]);
+      const scanner=!rowAction && item.uniqueTag ? findNativeAssetTagEntry():null;
+      const native=rowAction ? {mode:'row',button:rowAction} :
+        scanner ? {mode:'tag',button:scanner.button,input:scanner.input}:null;
+      if(!native || !native.button.isConnected ||
+          (native.input && !native.input.isConnected)){
+        failed='Cannot identify the native Present/Verified control for '+
+          item.title+'. Nothing recorded for this item. '+
+          'Use its checkmark in Operative IQ.';break;
       }
-      const setter=Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,'value')?.set;
-      if(!setter){failed='Native input unavailable.';break;}
+      const setter=native.mode==='tag' ?
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set :null;
+      if(native.mode==='tag' && !setter){
+        failed='Native tag input unavailable.';break;
+      }
       attemptedAssetRecords.add(key);
       attempted++;
       report('Recording '+attempted+'/'+maximum+': '+item.title+' ['+item.assetTag+']');
       try{
-        native.input.focus();
-        setter.call(native.input,item.assetTag);
-        native.input.dispatchEvent(new Event('input',{bubbles:true}));
-        native.input.dispatchEvent(new Event('change',{bubbles:true}));
-        if(native.input.value!==item.assetTag)
-          throw Error('Tag control did not accept exact tag');
+        if (native.mode==='tag') {
+          native.input.focus();
+          setter.call(native.input,item.assetTag);
+          native.input.dispatchEvent(new Event('input',{bubbles:true}));
+          native.input.dispatchEvent(new Event('change',{bubbles:true}));
+          if(native.input.value!==item.assetTag)
+            throw Error('Tag control did not accept exact tag');
+        }
+        // User explicitly confirmed physical presence/operation. Invoke
+        // the exact native asset's Present/Verified control once.
         native.button.click();
         let verified=false;
         for(let n=0;n<22;n++){
@@ -984,23 +1074,26 @@
           if(assetBatchCancel || !isAssetPage() ||
               inspectionId()!==ASSET_UNIT_ID || location.pathname!==plan.route)break;
           const actual=readAssetReviewRows().filter(row=>
-            clean(row.assetTag).toUpperCase()===item.assetTag);
+            item.uniqueTag ? clean(row.assetTag).toUpperCase()===item.assetTag :
+              row.title===item.title);
           if(actual.length===1 && actual[0].title===item.title &&
               actual[0].status==='verified'){verified=true;break;}
         }
         if(!verified)throw Error('Official Verified status not confirmed');
         confirmed++;
         item.recorded=true;
-        // Do not overwrite independent data entered by the operator.
-        const current=clean(native.input.value);
-        if(current===item.assetTag){
-          setter.call(native.input,'');
-          native.input.dispatchEvent(new Event('input',{bubbles:true}));
-          native.input.dispatchEvent(new Event('change',{bubbles:true}));
-        }else if(current)throw Error('Native input unexpectedly changed');
-        if(clean(native.input.value))throw Error('Native input did not reset');
+        if(native.mode==='tag') {
+          // Do not overwrite independent data entered by the operator.
+          const current=clean(native.input.value);
+          if(current===item.assetTag){
+            setter.call(native.input,'');
+            native.input.dispatchEvent(new Event('input',{bubbles:true}));
+            native.input.dispatchEvent(new Event('change',{bubbles:true}));
+          }else if(current)throw Error('Native input unexpectedly changed');
+          if(clean(native.input.value))throw Error('Native input did not reset');
+        }
       }catch(error){
-        failed='Tag '+item.assetTag+': '+clean(error?.message||error)+
+        failed='Asset '+item.title+': '+clean(error?.message||error)+
           '. Reconcile Operative IQ before retrying.';
         break;
       }
