@@ -108,7 +108,7 @@ test('unmatched asset coverage is visibly disclosed and native counts are author
     src.indexOf('  function findNativeAssetTagEntry() {'));
   assert.match(block,/readNativeAssetTotals\(\)/);
   assert.match(block,/Incomplete:/);
-  assert.match(block,/Found /);
+  assert.match(block,/Complete:/);
   assert.doesNotMatch(block,/Maintenance Due/);
   assert.doesNotMatch(block,/\.click\(|Submit Inspection/);
 });
