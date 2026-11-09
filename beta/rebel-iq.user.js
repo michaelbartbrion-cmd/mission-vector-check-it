@@ -836,6 +836,244 @@
     }
   }
 
+  // Build an exact, attended batch from native T504 data. This is NOT
+  // an assertion that the inspector has inspected anything. Only their
+  // subsequent in-panel physical-attestation permits the native writes.
+  function buildAssetBatchPlan(rawExceptions) {
+    if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible())
+      return {error: 'Open T504 Asset Requirements before preparing a batch.'};
+    if (readPending() || readRopes() || assetRecordBusy || assetBatchRunning)
+      return {error: 'Finish existing checks before preparing asset verification.'};
+    const native = readNativeAssetTotals();
+    const rows = readAssetReviewRows();
+    if (!native || native.total < 1 || native.total > 180 ||
+        !rows.length || rows.length > native.total)
+      return {error: 'Cannot reconcile live Operative IQ asset totals. No batch prepared.'};
+    const excludedTags = [...new Set(
+      clean(rawExceptions).split(/[\s,;]+/).filter(Boolean)
+        .map(tag => tag.toUpperCase())
+    )];
+    if (excludedTags.length > native.total ||
+        excludedTags.some(tag => !/^[A-Z0-9._-]{1,80}$/.test(tag)))
+      return {error: 'Exception tags are invalid or too numerous. Check the entries.'};
+
+    const tagCounts = new Map();
+    const knownTags = new Set();
+    for (const row of rows) {
+      const tag = clean(row.assetTag).toUpperCase();
+      if (!tag) continue;
+      knownTags.add(tag);
+      tagCounts.set(tag,(tagCounts.get(tag) || 0) + 1);
+    }
+    const unknownExceptions = excludedTags.filter(tag => !knownTags.has(tag));
+    if (unknownExceptions.length)
+      return {error: 'Exception tag not found in the current T504 list: ' +
+        unknownExceptions.slice(0,4).join(', ') + '. No batch prepared.'};
+    const exceptions = new Set(excludedTags);
+    const blocked = {exception:0, maintenance:0, untagged:0,
+      duplicate:0, otherStatus:0};
+    const items = [];
+    for (const row of rows) {
+      if (row.status !== 'not verified') {
+        blocked.otherStatus++;
+        continue;
+      }
+      const tag = clean(row.assetTag).toUpperCase();
+      if (exceptions.has(tag)) {blocked.exception++;continue;}
+      if (row.maintenanceBlocked) {blocked.maintenance++;continue;}
+      if (!tag || !/^[A-Z0-9._-]{1,80}$/.test(tag)) {blocked.untagged++;continue;}
+      if (tagCounts.get(tag) !== 1) {blocked.duplicate++;continue;}
+      items.push({assetTag:tag, title:row.title});
+    }
+    if (!items.length) return {error: 'No uniquely identified, currently unverified ' +
+      'T504 assets are eligible. Use Operative IQ for individual exceptions.'};
+    if (items.length > 90) return {error:'Unusually large batch. No records prepared.'};
+    return {
+      items, native, excludedTags, blocked, unmapped: native.total-rows.length,
+      route: location.pathname, preparedAt: Date.now(),
+      confirmed: false
+    };
+  }
+
+  function invalidateAssetBatchPreview() {
+    assetBatchPreview = null;
+    const section = document.getElementById(ASSET_GUIDE_ID);
+    if (!section || assetBatchRunning) return;
+    const attestation = section.querySelector('[data-asset-batch-attest]');
+    const action = section.querySelector('[data-asset-batch-run]');
+    if (attestation) {attestation.checked = false; attestation.disabled = true;}
+    if (action) action.disabled = true;
+    const plan = section.querySelector('[data-asset-batch-plan]');
+    if (plan) plan.textContent = 'Exceptions changed. Preview again before verification.';
+  }
+
+  function prepareAssetBatchPreview() {
+    const section = document.getElementById(ASSET_GUIDE_ID);
+    if (!section || assetBatchRunning) return;
+    invalidateAssetBatchPreview();
+    const raw = section.querySelector('[data-asset-batch-exceptions]')?.value || '';
+    const proposed = buildAssetBatchPlan(raw);
+    const output = section.querySelector('[data-asset-batch-plan]');
+    if (!output) return;
+    if (proposed.error) {
+      output.textContent = proposed.error;
+      return;
+    }
+    assetBatchPreview = proposed;
+    const remaining = proposed.blocked.maintenance + proposed.blocked.untagged +
+      proposed.blocked.duplicate + proposed.blocked.exception;
+    const limit = assetBatchPilotConfirmed ? proposed.items.length : 1;
+    output.textContent = proposed.items.length + ' uniquely identified candidate(s) | ' +
+      remaining + ' require individual attention or are excluded | ' +
+      proposed.unmapped + ' native row(s) not mapped. ' +
+      (assetBatchPilotConfirmed ? 'Ready to record selected inspected assets.' :
+        'Safety pilot: the first run records ONE asset and checks the native result.') +
+      ' No maintenance-due or exception assets are included.';
+    const details = document.createElement('details');
+    details.style.cssText = 'margin-top:4px;';
+    const sum = document.createElement('summary');
+    sum.textContent = 'Review included tags (' + proposed.items.length + ')';
+    sum.style.cssText = 'cursor:pointer;';
+    const ids = document.createElement('div');
+    ids.style.cssText = 'overflow-wrap:anywhere;max-height:125px;overflow:auto;';
+    ids.textContent = proposed.items.map(item =>
+      item.title + ' [' + item.assetTag + ']').join('; ');
+    details.append(sum,ids);
+    output.append(details);
+    const attest = section.querySelector('[data-asset-batch-attest]');
+    const wording = section.querySelector('[data-asset-batch-attest-text]');
+    if (wording) wording.textContent =
+      'I physically inspected all ' + proposed.items.length +
+      ' included T504 assets, confirmed they are present and serviceable, ' +
+      'and excluded every known missing/damaged item.';
+    if (attest) {attest.checked = false;attest.disabled = false;}
+    const button = section.querySelector('[data-asset-batch-run]');
+    if (button) {
+      button.disabled = true;
+      button.textContent = assetBatchPilotConfirmed
+        ? 'Verify Inspected Assets (' + limit + ')'
+        : 'Verify 1 Pilot Asset';
+    }
+  }
+
+  async function runInspectedAssetBatch() {
+    const section = document.getElementById(ASSET_GUIDE_ID);
+    const attestation = section?.querySelector('[data-asset-batch-attest]');
+    const action = section?.querySelector('[data-asset-batch-run]');
+    const stop = section?.querySelector('[data-asset-batch-stop]');
+    const progress = section?.querySelector('[data-asset-batch-progress]');
+    const output = message => {if(progress) progress.textContent = message;};
+    const plan = assetBatchPreview;
+    if (assetBatchRunning || assetRecordBusy || !section || !plan ||
+        !attestation || !attestation.checked || attestation.disabled ||
+        !isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible() ||
+        readPending() || readRopes() ||
+        plan.route !== location.pathname ||
+        Date.now() - plan.preparedAt > 10*60*1000) {
+      output('Cannot start: refresh the asset list, preview, and physically confirm first.');
+      return;
+    }
+    const currentExceptions = clean(
+      section.querySelector('[data-asset-batch-exceptions]')?.value || ''
+    ).split(/[\s,;]+/).filter(Boolean).map(x => x.toUpperCase());
+    if (currentExceptions.length !== plan.excludedTags.length ||
+        currentExceptions.some(x => !plan.excludedTags.includes(x))) {
+      invalidateAssetBatchPreview();
+      output('Exceptions changed. Preview again. Nothing recorded.');
+      return;
+    }
+    assetBatchRunning = true;
+    assetBatchCancel = false;
+    if (action) action.disabled = true;
+    if (stop) stop.disabled = false;
+    attestation.checked = false;
+    attestation.disabled = true;
+    const maximum = assetBatchPilotConfirmed ? plan.items.length : 1;
+    let confirmed = 0, attempted = 0, failed = '';
+    for (const item of plan.items.slice(0,maximum)) {
+      if (assetBatchCancel) {failed='Stopped by inspector.';break;}
+      if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID ||
+          location.pathname !== plan.route || !t504Visible()) {
+        failed='T504 page changed. Stop and reconcile in Operative IQ.';break;
+      }
+      const key = location.pathname + '|' + item.assetTag;
+      if (attemptedAssetRecords.has(key)) {
+        failed = 'Previously attempted tag ' + item.assetTag +
+          '. Inspect native status before retrying.';break;
+      }
+      const rows = readAssetReviewRows().filter(row =>
+        clean(row.assetTag).toUpperCase() === item.assetTag);
+      if (rows.length !== 1 || rows[0].title !== item.title ||
+          rows[0].status !== 'not verified' || rows[0].maintenanceBlocked) {
+        failed = 'Asset identity/status changed for tag ' + item.assetTag + '.';break;
+      }
+      const native = findNativeAssetTagEntry();
+      if (!native || !native.input.isConnected || !native.button.isConnected) {
+        failed='Native tag input unavailable. No further assets attempted.';break;
+      }
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,'value')?.set;
+      if (!setter) {failed='Native tag entry unavailable.';break;}
+      attemptedAssetRecords.add(key);
+      attempted++;
+      output('Recording ' + attempted + '/' + maximum + ': ' +
+        item.title + ' [' + item.assetTag + ']...');
+      try {
+        native.input.focus();
+        setter.call(native.input,item.assetTag);
+        native.input.dispatchEvent(new Event('input',{bubbles:true}));
+        native.input.dispatchEvent(new Event('change',{bubbles:true}));
+        if (native.input.value !== item.assetTag)
+          throw Error('Native tag field rejected the exact tag');
+        native.button.click(); // One native Operative IQ action per item.
+        let verified = false;
+        for (let i = 0; i < 22; i++) {
+          await new Promise(resolve => setTimeout(resolve,500));
+          if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID ||
+              location.pathname !== plan.route) break;
+          const again = readAssetReviewRows().filter(row =>
+            clean(row.assetTag).toUpperCase() === item.assetTag);
+          if (again.length === 1 && again[0].title === item.title &&
+              again[0].status === 'verified') {verified=true;break;}
+        }
+        if (!verified) throw Error('Official Verified status not confirmed');
+        confirmed++;
+        // Clear ONLY the value entered by this flow, never the inspector's
+        // independent entry. Some Angular controls clear themselves.
+        const existing = clean(native.input.value);
+        if (existing === item.assetTag) {
+          setter.call(native.input,'');
+          native.input.dispatchEvent(new Event('input',{bubbles:true}));
+          native.input.dispatchEvent(new Event('change',{bubbles:true}));
+        } else if (existing) throw Error('Tag field changed unexpectedly');
+        if (clean(native.input.value))
+          throw Error('Tag field did not reset');
+      } catch (error) {
+        failed = 'Tag ' + item.assetTag + ': ' +
+          clean(error?.message || error) +
+          '. Stop. Check Operative IQ; do not retry automatically.';
+        break;
+      }
+    }
+    if (!assetBatchPilotConfirmed && confirmed === 1 && !failed)
+      assetBatchPilotConfirmed = true;
+    assetBatchPreview = null;
+    assetBatchRunning = false;
+    assetBatchCancel = false;
+    if (stop) stop.disabled = true;
+    if (action) action.disabled = true;
+    assetGuideLastScan = 0;
+    refreshAssetReviewGuide();
+    if (failed) output('Confirmed ' + confirmed + ' of ' + attempted +
+      ' attempted. ' + failed + ' All remaining unverified items need review.');
+    else if (maximum < plan.items.length)
+      output('Pilot confirmed: 1 asset VERIFIED in Operative IQ. ' +
+        'Preview again to record the remaining inspected assets together.');
+    else output('Verified ' + confirmed + '/' + maximum +
+      ' selected assets in Operative IQ. ' +
+      'Inspect excluded, maintenance-due, and unmapped items separately.');
+  }
+
   function beginAssets() {
     const id = inspectionId();
     if (id !== ASSET_UNIT_ID || !t504Visible()) {
