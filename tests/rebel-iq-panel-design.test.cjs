@@ -111,3 +111,23 @@ test('Compact footer retains error status and Rebel Command reporting, without t
   assert.ok(source.includes("form.save.click()"));
   assert.ok(!source.includes("form.submit.click()"));
 });
+test('asset review is inline inside expanded Rebel IQ, never a second popup',()=>{
+  const h=harness();
+  const full=walk(h.body);
+  const guides=full.filter(el=>el.id==='rebel-iq-t504-asset-guide');
+  assert.equal(guides.length,1,'one asset review section');
+  const section=guides[0];
+  assert.equal(section.tagName,'SECTION','inline semantic section, not an aside');
+  assert.ok(walk(h.menu).includes(section),'review is a descendant of main menu');
+  assert.equal(section.style.cssText.includes('position:fixed'),false,
+    'never creates independently positioned floating overlay');
+  assert.equal(section.style.cssText.includes('display:none'),true,
+    'review is hidden off the asset route');
+  assert.ok(walk(section).some(el=>el.tagName==='BUTTON'&&
+    el.textContent==='Find Next Unverified'));
+  assert.equal(walk(section).some(el=>el.textContent==='Hide'),false,
+    'remove redundant Hide control: original Starbird collapses panel');
+  assert.equal(full.filter(el=>el.tagName==='ASIDE').length,0,
+    'no separate asset popup');
+  assert.equal(full.filter(el=>el.id==='rebel-iq-t504-panel').length,1);
+});
