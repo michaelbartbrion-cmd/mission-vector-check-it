@@ -747,7 +747,9 @@
         'padding:7px;';
       const name=document.createElement('div');
       name.style.cssText='min-width:0;overflow-wrap:anywhere;';
-      name.textContent=item.title+(item.assetTag?' ['+item.assetTag+']':' [tag unavailable]');
+      name.textContent=item.title+
+        (item.assetTag?' ['+item.assetTag+']':' [tag unavailable]')+
+        (!item.recordable?' • manual verification required':'');
       const choice=document.createElement('select');
       choice.setAttribute('aria-label','Inspection result: '+item.title);
       choice.style.cssText='font:11px Arial,sans-serif;width:116px;' +
