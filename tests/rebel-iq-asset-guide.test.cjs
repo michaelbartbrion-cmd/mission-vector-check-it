@@ -54,7 +54,7 @@ test('other units or non-asset pages never expose an asset review',()=>{
 });
 test('asset guide reads native statuses; inspection batch requires attended action',()=>{
   const block=src.slice(start,src.indexOf('  function findNativeAssetTagEntry() {',start));
-  assert.match(block,/Refresh Unverified List/);
+  assert.match(block,/load.textContent = 'Refresh'/);
   assert.match(block,/Record Verified Assets/);
   assert.match(block,/data-asset-check-attest/);
   assert.doesNotMatch(block,/\.click\(|\.dispatchEvent\(|fetch\(|GM_xmlhttpRequest\(|Submit Inspection/);
@@ -63,8 +63,8 @@ test('asset review is independent from Daily Tour',()=>{
   assert.match(src,/button\('Daily Tour', 'daily'\)/);
   assert.match(src,/button\('Assets', 'assets'\)/);
   assert.match(src,/openAssetReviewScreen\(\)/);
-  assert.match(src,/const IQ_VERSION = '0\.1\.20'/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.20/m);
+  assert.match(src,/const IQ_VERSION = '0\.1\.21'/);
+  assert.match(src,/^\/\/ @version\s+0\.1\.21/m);
 });
 
 test('full 90-item T504 list includes 24 cards lacking location and tag metadata',()=>{
@@ -116,7 +116,7 @@ test('unmatched asset coverage is visibly disclosed and native counts are author
 test('asset checklist defaults to verified draft and permits exceptions before a human record action',()=>{
   const section=src.slice(src.indexOf('  function makeAssetReviewScreen() {'),
     src.indexOf('  function beginAssets() {'));
-  assert.match(section,/Refresh Unverified List/);
+  assert.match(section,/load.textContent = 'Refresh'/);
   assert.match(section,/Record Verified Assets/);
   assert.match(section,/\['verified','Verified'\]/);
   assert.match(section,/\['missing','Missing'\]/);
