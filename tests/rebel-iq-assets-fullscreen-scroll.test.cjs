@@ -74,13 +74,14 @@ test('unscannable native page degrades to currently visible rows without claimin
   assert.equal((await run()).length,1);
   assert.match(src,/Native asset coverage incomplete/);
 });
-test('the Assets button opens one full-screen overlay while Daily Tour stays independent',()=>{
+test('the Assets button opens a compact in-page review drawer while Daily Tour stays independent',()=>{
   assert.match(src,/button\('Daily Tour', 'daily'\)/);
   assert.match(src,/button\('Assets', 'assets'\)/);
   assert.match(src,/document\.body\.append\(root, makeAssetReviewScreen\(\)\)/);
   assert.match(src,/screen\.style\.display='block'/);
   assert.match(src,/screen\.style\.display='none'/);
-  assert.match(src,/position:fixed;inset:0/);
+  assert.match(src,/position:fixed;top:188px;left:16px/);
+  assert.doesNotMatch(src,/position:fixed;inset:0/);
   assert.doesNotMatch(src,/Daily Tour \+ Assets|readAssetFollowup/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.20/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.21/m);
 });
