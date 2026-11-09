@@ -55,6 +55,7 @@ test('SCBA mask, loose cylinder and charger are not airpacks',()=>{
         {name:'SCBA Face Mask: E004015306F73814',pool:'SCBA Face Mask'},
         {name:'SCBA Cylinder',pool:'SCBA'},
         {name:'SCBA Battery Charger',pool:'Charging'},
+        {name:'SCBA Regulator',pool:'SCBA'},
         {name:'Boots',pool:'PPE'},
         {name:'2001',pool:'Chainsaw'}
     ]) assert.equal(fn(sample),false,JSON.stringify(sample));
@@ -121,13 +122,14 @@ test('inventory traversal is read-only apart from pagination and validates every
     const fn=new Function('scbaAirpackBusy','getRun','scbaAirpackFilterScope',
         'scbaAirpackStandardTable','scbaAirpackRange','getPaginationControl',
         'paginationControlEnabled','scbaAirpackNativeSignature',
-        'scbaAirpackWaitForPageChange','scbaAirpackVisibleRows',code)(
+        'scbaAirpackWaitForPageChange','scbaAirpackVisibleRows',
+        'scbaAirpackWaitForCompletePage',code)(
             false,()=>null,()=>({ready:true,selected:locations.map(x=>x.id)}),
             ()=>({table:{}}),range,
             type=>({disabled: type==='previous'?page===0:page===2,
                 click(){page+=type==='next'?1:-1;}}),
             btn=>!btn.disabled,()=>signatures[page],async()=>range(),
-            ()=>[scopes[page]]
+            ()=>[scopes[page]],async()=>true
         );
     const result=await fn(()=>{});
     assert.equal(result.complete,true);
@@ -136,4 +138,21 @@ test('inventory traversal is read-only apart from pagination and validates every
     assert.equal(result.items.length,3);
     assert.deepEqual(result.items.map(x=>x.scope),['truck504','medic504','station4']);
     assert.doesNotMatch(code,/\bfetch\(|GM_xmlhttpRequest\(|submitInspection\(|\.submit\(/);
+});
+
+test('page-readiness guard requires every native Standard row, not only matched airpacks',async()=>{
+    const fn=new Function('scbaAirpackStandardTable','scbaAirpackRange',
+        'scbaAirpackNativeSignature','clean','sleep',
+        cut('async function scbaAirpackWaitForCompletePage(range,timeoutMs=14000) {',
+            'function scbaAirpackNativeSignature() {')+
+        '\nreturn scbaAirpackWaitForCompletePage;')(
+        ()=>({table:{querySelectorAll:()=>[
+            {querySelectorAll:()=>[
+                {textContent:'A'},{textContent:'SCBA Air Pack'},
+                {textContent:'Truck 504: 63000-13'},{textContent:''},{textContent:'In Service'}
+            ]}
+        ]},labels:['name','pool','location','responsible party','item status']}),
+        ()=>({first:1,last:2,total:2}),()=> 'stable',clean,async()=>{}
+    );
+    await assert.rejects(fn({first:1,last:2,total:2},1),/did not finish loading/);
 });
