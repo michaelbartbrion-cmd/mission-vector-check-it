@@ -6,7 +6,7 @@ const path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../beta/rebel-iq.user.js'),'utf8');
 const vector=fs.readFileSync(path.join(__dirname,'../beta/vector-rebel.user.js'),'utf8');
 const begin=source.indexOf('  const notify = (message, error = false) => {');
-const end=source.indexOf('  function begin(kind) {',begin);
+const end=source.indexOf('  function beginAssets() {',begin);
 assert.ok(begin>0&&end>begin,'isolated complete Rebel IQ panel code');
 function element(tagName) {
   return {
@@ -29,7 +29,7 @@ function walk(node) {
   return [node,...node.children.flatMap(walk)];
 }
 function harness(){
-  const invoked={daily:0,weekly:0,ropes:0},body=element('body');
+  const invoked={daily:0,weekly:0,ropes:0,assets:0},body=element('body');
   const document={
     body,createElement:element,
     getElementById:()=>null
@@ -39,12 +39,12 @@ function harness(){
     '\nmakeUi(); return {root,menu,detail,rcStatusEl};';
   const factory=new Function('document','IQ_VERSION','PANEL','rebelStarbirdIcon',
     'readIqErrors','setRcStatus','t504Visible','readRopes','sessionStorage',
-    'ROPE_RESULT','RESULT','ROPE_TASKS','begin','beginRopes',code);
+    'ROPE_RESULT','RESULT','ROPE_TASKS','begin','beginRopes','beginAssets',code);
   const data=factory(
-    document,'0.1.8','rebel-iq-t504-panel','<img alt="" src="data:image/png;base64,FAKE" />',
+    document,'0.1.9','rebel-iq-t504-panel','<img alt="" src="data:image/png;base64,FAKE" />',
     ()=>[],()=>{},()=>true,()=>null,{getItem:()=>null},
     'ropeResult','normalResult',[],
-    kind=>{invoked[kind]++},()=>{invoked.ropes++}
+    kind=>{invoked[kind]++},()=>{invoked.ropes++},()=>{invoked.assets++}
   );
   return {...data,body,invoked};
 }
@@ -60,18 +60,18 @@ test('Rebel IQ uses Vector Rebel navy header, white 430px card, and two-column a
   assert.ok(actions.style.cssText.includes('grid-template-columns:1fr 1fr'));
   assert.ok(vector.includes('background:#153e5c;color:#fff'));
   assert.ok(vector.includes('grid-template-columns:1fr 1fr'));
-  const title=nodes.find(el=>el.textContent==='Rebel IQ v0.1.8');
+  const title=nodes.find(el=>el.textContent==='Rebel IQ v0.1.9');
   const subtitle=nodes.find(el=>el.textContent==='T504  ·  This is the way.');
   assert.ok(title&&subtitle,'same title/subtitle hierarchy as Vector Rebel');
 });
-test('Exactly four concise actions route to original daily, weekly and three-rope workflows',()=>{
+test('Five concise actions include daily asset verification and the independent asset shortcut',()=>{
   const h=harness();
   const actions=walk(h.body).find(el=>el.getAttribute('data-rebel-iq-actions')==='1');
   assert.deepEqual(actions.children.map(x=>x.textContent),
-    ['Daily Tour','Weekly Check','Rope Checks ×3','Check for Update']);
-  for(let i=0;i<3;i++)actions.children[i].click();
-  assert.deepEqual(h.invoked,{daily:1,weekly:1,ropes:1});
-  const update=actions.children[3];
+    ['Daily Tour + Assets','Weekly Check','Asset Checks','Rope Checks ×3','Check for Update']);
+  for(let i=0;i<4;i++)actions.children[i].click();
+  assert.deepEqual(h.invoked,{daily:1,weekly:1,ropes:1,assets:1});
+  const update=actions.children[4];
   assert.equal(update.tagName,'A');
   assert.equal(update.target,'_blank');
   assert.equal(update.rel,'noopener noreferrer');
