@@ -11806,6 +11806,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // Neither a PPE-mask inspection nor an official Vector inspection
     // is inferred from a row appearing on the Standard equipment list.
     const SCBA_AIRPACK_DRAFT_KEY = 'vector-rebel-station4-airpack-draft-v1';
+    const SCBA_AIRPACK_PENDING_SELECTION_KEY = 'vector-rebel-scba-airpack-location-setup-v1';
     const SCBA_AIRPACK_LOCATIONS = Object.freeze([
         { id: 'truck504', label: 'Truck 504', location: 'Truck 504: 63000-13',
           exact: /^Truck 504\s*:\s*63000-13$/i },
@@ -11833,24 +11834,45 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return null;
     }
 
-    function scbaAirpackFilterScope() {
-        // Require the three native filter chips seen on Equipment > Standard.
-        // Matching location names in our own panel is not evidence of an
-        // applied server-side filter.
+    // Remember location choices only during a temporary native-filter setup.
+    // Successful searches clear the pending selection. Future checks start
+    // with no locations selected.
+    function scbaAirpackPendingSelection() {
+        try {
+            const raw=sessionStorage.getItem(SCBA_AIRPACK_PENDING_SELECTION_KEY);
+            const entry=raw?JSON.parse(raw):null;
+            if(!entry || Date.now()-entry.savedAt>10*60*1000) {
+                sessionStorage.removeItem(SCBA_AIRPACK_PENDING_SELECTION_KEY);
+                return [];
+            }
+            return SCBA_AIRPACK_LOCATIONS.filter(loc=>entry.ids?.includes(loc.id))
+                .map(loc=>loc.id);
+        } catch {return [];}
+    }
+
+    function scbaAirpackFilterScope(requestedIds=[]) {
+        // The inspector chooses which of the three stations to inspect.
+        // Verify those SAME locations are applied to the underlying Vector
+        // Standard Equipment list; panel selections do not silently change it.
         const content = [...document.querySelectorAll(
             'main,[role="main"],.main-content,.asset-manager,[class*="asset-manager"]')]
             .filter(el => !el.closest('#' + PANEL_ID + ',#' + OVERLAY_ID))
             .map(el => el.innerText || '').find(t => /Filtered To\s*:/i.test(t)) ||
             (document.body.innerText || '');
-        const match = content.match(/Filtered To\s*:\s*([\s\S]{0,340})/i);
-        const band = match ? match[1].split(/(?:Search:|Name\s+Pool\s+Location|Responsible Party|Items per page)/i)[0] : '';
-        const selected = SCBA_AIRPACK_LOCATIONS.filter(loc =>
+        const match = content.match(/Filtered To\s*:\s*([\s\S]{0,500})/i);
+        const band = match ? match[1].split(
+            /(?:Search:|Name\s+Pool\s+Location|Responsible Party|Items per page)/i)[0] : '';
+        const active=SCBA_AIRPACK_LOCATIONS.filter(loc=>
             band.toLowerCase().includes(loc.location.toLowerCase()));
+        const requested=SCBA_AIRPACK_LOCATIONS.filter(loc=>requestedIds.includes(loc.id));
+        const missing=requested.filter(loc=>!active.includes(loc));
+        const extra=active.filter(loc=>!requested.includes(loc));
         return {
-            ready: selected.length === SCBA_AIRPACK_LOCATIONS.length,
-            selected: selected.map(loc => loc.id),
-            missing: SCBA_AIRPACK_LOCATIONS.filter(loc => !selected.includes(loc))
-                .map(loc => loc.location)
+            ready:requested.length>0 && !missing.length && !extra.length,
+            selected:active.map(loc=>loc.id),
+            requested:requested.map(loc=>loc.id),
+            missing:missing.map(loc=>loc.location),
+            extra:extra.map(loc=>loc.location)
         };
     }
 
@@ -11979,12 +12001,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         throw new Error('Standard equipment page did not settle after pagination. No SCBA check was submitted.');
     }
 
-    async function scbaAirpackReadInventory(report) {
+    async function scbaAirpackReadInventory(report, selectedIds) {
         if(scbaAirpackBusy)throw new Error('An SCBA airpack search is already running.');
         if(getRun())throw new Error('An existing PPE inspection is active. Finish it first.');
-        const scope=scbaAirpackFilterScope();
-        if(!scope.ready)throw new Error('Select exactly these three Equipment > Standard filters: '+
-            scope.missing.join('; ')+'. Then search again.');
+        const scope=scbaAirpackFilterScope(selectedIds);
+        if(!scope.requested.length)
+            throw new Error('Choose at least one location to check.');
+        if(!scope.ready)throw new Error(
+            'Vector filters do not match the selected SCBA locations. '+
+            (scope.missing.length?'Add: '+scope.missing.join('; ')+'. ':'')+
+            (scope.extra.length?'Remove: '+scope.extra.join('; ')+'. ':'')+
+            'Click Set Vector Filters, make these changes, then reopen SCBA Airpacks.'
+        );
         if(!scbaAirpackStandardTable())throw new Error('Equipment > Standard inventory is not ready.');
         const seen=new Map();
         const original=scbaAirpackRange();
@@ -12006,7 +12034,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 if(!current||current.total!==original.total||current.first!==range.first)
                     throw new Error('Standard equipment totals or active page changed during scan.');
                 await scbaAirpackWaitForCompletePage(current);
-                const entries=scbaAirpackVisibleRows();
+                const entries=scbaAirpackVisibleRows().filter(item=>
+                    scope.requested.includes(item.scope));
                 for(const item of entries){
                     const key=item.href || [item.scope,item.pool,item.name].join('|');
                     if(seen.has(key)){
@@ -12032,8 +12061,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
             if(!range||range.last!==original.total)
                 throw new Error('SCBA inventory search ended before the last Standard equipment page.');
-            if(!seen.size)throw new Error('No airpacks matched the three locations. Inspect the actual Pool names; no equipment was guessed.');
-            return {items:[...seen.values()],pages,totalRows:original.total,scope:scope.selected,
+            if(!seen.size)throw new Error('No airpacks matched the selected locations. Inspect the actual Pool names; no equipment was guessed.');
+            return {items:[...seen.values()],pages,totalRows:original.total,scope:scope.requested,
                 capturedAt:new Date().toISOString(),complete:true};
         } finally {
             scbaAirpackBusy=false;
