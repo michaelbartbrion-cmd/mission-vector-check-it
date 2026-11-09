@@ -840,18 +840,26 @@
     if (!totals || totals.total < 1 || totals.total > 180 ||
         !rows.length || rows.length > totals.total)
       return {error:'Cannot reconcile the native asset list. No checks were recorded.'};
-    const tagCounts = new Map();
+    const tagCounts = new Map(), titleCounts=new Map();
     for (const row of rows) {
       const tag = clean(row.assetTag).toUpperCase();
-      if (tag) tagCounts.set(tag,(tagCounts.get(tag) || 0) + 1);
+      if (tag && tag !== 'UNASSIGNED')
+        tagCounts.set(tag,(tagCounts.get(tag) || 0) + 1);
+      titleCounts.set(row.title,(titleCounts.get(row.title) || 0) + 1);
     }
     const items = rows.filter(row => row.status === 'not verified')
       .map((row,index) => {
         const assetTag = clean(row.assetTag).toUpperCase();
+        const uniqueTag = !!assetTag && assetTag !== 'UNASSIGNED' &&
+          /^[A-Z0-9._-]{1,80}$/.test(assetTag) &&
+          tagCounts.get(assetTag) === 1;
+        // Untagged/UNASSIGNED assets can only be targeted by their own native
+        // Present button when their readable title is also unique.
+        const uniqueTitle = (!assetTag || assetTag === 'UNASSIGNED') &&
+          titleCounts.get(row.title) === 1;
         return {
           id:index, assetTag,title:row.title,choice:'verified',
-          recordable:!!assetTag && /^[A-Z0-9._-]{1,80}$/.test(assetTag) &&
-            tagCounts.get(assetTag) === 1
+          uniqueTag, uniqueTitle, recordable: uniqueTag || uniqueTitle
         };
       });
     if (!items.length) return {error:'No unverified T504 items were detected.'};
@@ -888,7 +896,7 @@
     if(countsEl)countsEl.textContent=
       plan.items.length+' Not Verified | '+c.verified+' proposed Verified | '+
       c.exceptions+' exceptions | '+c.skipped+' skipped | '+
-      c.manual+' manual (no unique tag)'+
+      c.manual+' manual (ambiguous identity)'+
       (plan.unmapped>0?' | '+plan.unmapped+' unmapped':'');
     if(record) {
       record.textContent='Record Verified Assets ('+c.recordable+')';
