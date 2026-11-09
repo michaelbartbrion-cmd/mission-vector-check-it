@@ -82,5 +82,5 @@ test('the Assets button opens one full-screen overlay while Daily Tour stays ind
   assert.match(src,/screen\.style\.display='none'/);
   assert.match(src,/position:fixed;inset:0/);
   assert.doesNotMatch(src,/Daily Tour \+ Assets|readAssetFollowup/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.19/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.20/m);
 });
