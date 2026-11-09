@@ -34,7 +34,7 @@ test('all 76 pending assets are collected from 52 initial and 24 lower virtual s
 });
 test('no scan is attempted off T504 Asset Requirements route',async()=>{
   const run=new Function('isAssetPage','inspectionId','ASSET_UNIT_ID',
-    't504Visible','document','readAssetReviewRows','clean','setTimeout',code)(
+    't504Visible','document','readAssetReviewRows','clean','setTimeout','readNativeAssetTotals','visible','getComputedStyle','PANEL','ASSET_GUIDE_ID',code)(
       ()=>false,()=> '60443','60443',()=>true,
       {scrollingElement:{scrollHeight:4000,clientHeight:800,scrollTop:0},querySelectorAll:()=>[]},
       ()=>{throw Error('should never read off-route')},
@@ -45,7 +45,7 @@ test('no scan is attempted off T504 Asset Requirements route',async()=>{
 test('unscannable native page degrades to currently visible rows without claiming full completion',async()=>{
   const single=makeRow(1,'not verified');
   const run=new Function('isAssetPage','inspectionId','ASSET_UNIT_ID',
-    't504Visible','document','readAssetReviewRows','clean','setTimeout',code)(
+    't504Visible','document','readAssetReviewRows','clean','setTimeout','readNativeAssetTotals','visible','getComputedStyle','PANEL','ASSET_GUIDE_ID',code)(
       ()=>true,()=> '60443','60443',()=>true,
       {querySelectorAll:()=>[]},()=>[single],x=>String(x??'').trim(),cb=>cb(),()=>null,()=>true,()=>({overflowY:'auto'}),'rebel-iq-t504-panel','rebel-iq-t504-asset-guide'
     );
