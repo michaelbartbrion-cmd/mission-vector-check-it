@@ -33,14 +33,14 @@ test('each asset gets its own native receipt and stops on uncertain result',()=>
 });
 test('unverified items with missing or duplicate tags are shown but not auto-recorded',()=>{
   assert.match(section,/tagCounts\.get\(assetTag\) === 1/);
-  assert.match(section,/tag unavailable/);
-  assert.match(section,/manual \(ambiguous identity\)/);
+  assert.match(section,/\[UNASSIGNED\]/);
+  assert.match(section,/manual catalog\/ambiguous/);
   assert.match(section,/unmapped/);
 });
 test('recording is physical presence and operation, unrelated to scheduled maintenance',()=>{
   assert.match(section,/present and working/);
   assert.doesNotMatch(section,/maintenanceBlocked|blocked\.maintenance/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.18/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.19/m);
 });
 
 test('Assets opens its own screen and loads a draft without submitting',()=>{

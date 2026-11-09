@@ -56,5 +56,39 @@ test('no unsafe generic report-problem control is mistaken for Verified',()=>{
   assert.match(src,/Official Verified status not confirmed/);
   assert.match(src,/native\.button\.click\(\)/);
   assert.match(src,/const rowAction=findNativeRowVerifyControl\(same\[0\]\)/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.18/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.19/m);
+});
+
+test('actual authenticated Front Line markup selects correct grey check icon, not warning',()=>{
+  const correct={
+    isConnected:true,getAttribute:()=>null,
+    querySelector:sel=>sel==='.svg-checked-not-active'?{}:null
+  };
+  const warning={isConnected:true,getAttribute:()=>null,
+    querySelector:sel=>sel==='.svg-warning-not-active'?{}:null};
+  const status={textContent:' Not Verified '};
+  const card={
+    isConnected:true,
+    matches:sel=>sel==='.item-status.item-alert',
+    innerText:'Thermal Imager\nAsset Tag: 213\nNot Verified',
+    querySelectorAll:sel=>{
+      if(sel==='.asset-row__actions .icon-wrapper[id="87e630a6bd"]')return [correct];
+      if(sel==='.asset-row__actions .icon-wrapper[id="dac0bcd8b6"]')return [warning];
+      if(sel==='.verification-status__wrapper .status.status-alert')return [status];
+      return [];
+    }
+  };
+  assert.equal(run({status:'not verified',element:card}),correct);
+  assert.notEqual(run({status:'not verified',element:card}),warning);
+  status.textContent=' Verified ';
+  assert.equal(run({status:'not verified',element:card}),null,'never recertify a completed item');
+  status.textContent=' Not Verified ';
+  card.innerText='Paratech Base Plate\nPAR: 6\nNot Verified';
+  assert.equal(run({status:'not verified',element:card}),correct,
+    'only a real native exact check icon could authorize a PAR check');
+});
+test('catalog PAR item without native check control is not guessed as Verified',()=>{
+  const card={isConnected:true,innerText:'Paratech Base Plate\nPAR: 6\nNot Verified',
+    matches:()=>true,querySelectorAll:()=>[]};
+  assert.equal(run({status:'not verified',element:card}),null);
 });

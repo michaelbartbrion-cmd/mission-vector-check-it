@@ -9,9 +9,9 @@ const source=src.slice(start,end)+'\nreturn readAssetReviewRows;';
 const clean=v=>String(v??'').replace(/\s+/g,' ').trim();
 function harness(statuses,{onT504=true,onAssetPage=true}={}){
   const labels=[];
-  for(const [name,status,hasLocation=true,maintenanceText='',hasIcon=false] of statuses){
+  for(const [name,status,hasLocation=true,maintenanceText='',hasIcon=false,par=null] of statuses){
     const card={
-      innerText:name+(hasLocation?'\nLocation: T504\nAsset Tag: 1234':'\nRequirements: Physically inspect')+ (maintenanceText ? '\nMaintenance Due: '+maintenanceText : '')+'\n'+status,
+      innerText:name+(hasLocation?'\nLocation: T504\nAsset Tag: 1234':'\nRequirements: Physically inspect')+ (par?'\nPAR:\n'+par:'')+ (maintenanceText ? '\nMaintenance Due: '+maintenanceText : '')+'\n'+status,
       getBoundingClientRect:()=>({height:58}),
       contains:node=>node===label,
       parentElement:null
@@ -63,8 +63,8 @@ test('asset review is independent from Daily Tour',()=>{
   assert.match(src,/button\('Daily Tour', 'daily'\)/);
   assert.match(src,/button\('Assets', 'assets'\)/);
   assert.match(src,/openAssetReviewScreen\(\)/);
-  assert.match(src,/const IQ_VERSION = '0\.1\.18'/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.18/m);
+  assert.match(src,/const IQ_VERSION = '0\.1\.19'/);
+  assert.match(src,/^\/\/ @version\s+0\.1\.19/m);
 });
 
 test('full 90-item T504 list includes 24 cards lacking location and tag metadata',()=>{
@@ -107,8 +107,8 @@ test('unmatched asset coverage is visibly disclosed and native counts are author
   const block=src.slice(src.indexOf('  function refreshAssetReviewGuide() {'),
     src.indexOf('  function findNativeAssetTagEntry() {'));
   assert.match(block,/readNativeAssetTotals\(\)/);
-  assert.match(block,/not loaded or not identifiable/);
-  assert.match(block,/Found /);
+  assert.match(block,/Incomplete:/);
+  assert.match(block,/Complete:/);
   assert.doesNotMatch(block,/Maintenance Due/);
   assert.doesNotMatch(block,/\.click\(|Submit Inspection/);
 });
@@ -145,4 +145,19 @@ test('maintenance-due dates do not change asset inspection eligibility',()=>{
   assert.ok(rows.every(row => row.status === 'not verified'));
   assert.ok(rows.every(row => !('maintenanceBlocked' in row)));
   assert.deepEqual(rows.map(row => row.title), ['Due Maintenance','Not Yet Due','No Date']);
+});
+
+test('real native Paratech PAR quantities explain all 24 extra units, not missing assets',()=>{
+  const pars=[6,4,3,3,2,2,2,4,2,2,2,4];
+  const catalogue=pars.map((par,i)=>['Paratech '+i,'Not Verified',false,'',false,par]);
+  const ordinary=Array.from({length:40},(_,i)=>['Tag '+i,'Not Verified']);
+  const completed=Array.from({length:14},(_,i)=>['Complete '+i,'Verified']);
+  const rows=harness([...catalogue,...ordinary,...completed])();
+  assert.equal(rows.length,66,'one visible card per kind of asset');
+  assert.equal(rows.reduce((sum,row)=>sum+row.quantity,0),90);
+  assert.equal(rows.filter(row=>row.status==='not verified')
+    .reduce((sum,row)=>sum+row.quantity,0),76);
+  assert.equal(rows.filter(row=>row.status==='verified').length,14);
+  assert.equal(rows.filter(row=>row.quantity>1).length,12);
+  assert.equal(rows.reduce((sum,row)=>sum+row.quantity-1,0),24);
 });

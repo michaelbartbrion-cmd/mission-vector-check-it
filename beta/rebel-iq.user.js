@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.18
+// @version      0.1.19
 // @description  T504 Daily Tour, weekly, rope drafts, and inspector-confirmed Assets review.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.18' };
+  window.__rebelIqT504 = { version: '0.1.19' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.18';
+  const IQ_VERSION = '0.1.19';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -481,8 +481,12 @@
         const tag = text.match(/\bAsset\s*Tag\s*:\s*([A-Za-z0-9._-]{1,80})/i)?.[1] || '';
         // Maintenance is handled by another department, and never gates
         // this crew's verification of presence and working condition.
+        // Operative IQ's Catalog Inventory rows represent PAR quantities.
+        // E.g. "Paratech Base Plate, PAR 6" is ONE row but SIX required units.
+        const par = text.match(/\bPAR\s*:\s*(\d{1,3})\b/i);
+        const quantity = par ? Number(par[1]) : 1;
         const row = {element: card, title: title.slice(0, 110), status,
-          assetTag: tag.trim()};
+          assetTag: tag.trim(), quantity};
         const hasMetadata = /\b(?:Location|Asset Tag|Asset Type|Asset Class|Part|Qty|Quantity)\s*:/i.test(text);
         if (hasMetadata) {
           fallback = row;
@@ -550,6 +554,17 @@
 
     addRows();
     const totals = readNativeAssetTotals();
+    const reconciles = () => {
+      const rows = [...collected.values()];
+      const totalUnits = rows.reduce((sum,row) => sum + (row.quantity||1),0);
+      const pendingUnits = rows.filter(row => row.status==='not verified')
+        .reduce((sum,row) => sum + (row.quantity||1),0);
+      return !!totals && totalUnits===totals.total && pendingUnits===totals.required;
+    };
+    // Direct authenticated T504 DOM inspection: 66 native rows represent
+    // 90 equipment units because 12 PAR catalog rows hold 36 units, 24
+    // additional pieces beyond one-per-row. This is NOT 24 missing assets.
+    if (reconciles()) return [...collected.values()];
     for (const container of roots) {
       if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID) break;
       const saved = container.scrollTop;
@@ -568,9 +583,7 @@
       }finally{
         container.scrollTop=saved;
       }
-      if(totals &&
-         [...collected.values()].filter(row=>row.status==='not verified').length >= totals.required &&
-         collected.size >= totals.total) break;
+      if(reconciles()) break;
     }
     return [...collected.values()];
   }
@@ -737,29 +750,60 @@
     const summary = section.querySelector('[data-asset-guide-summary]');
     const coverage = section.querySelector('[data-asset-guide-coverage]');
     const found = assetGuideRows.filter(row => row.status === 'not verified').length;
+    const mapped = assetGuideRows.reduce((sum,row)=>sum+(row.quantity||1),0);
+    const pendingUnits = assetGuideRows.filter(row=>row.status==='not verified')
+      .reduce((sum,row)=>sum+(row.quantity||1),0);
     if (summary) summary.textContent = native
       ? 'Operative IQ: ' + native.required + ' Action Required | ' +
         native.completed + ' Completed'
-      : 'Detected ' + found + ' Not Verified assets';
-    if (coverage) coverage.textContent = native && found < native.required
-      ? 'Found ' + found + ' of ' + native.required +
-        ' Action Required assets. ' + (native.required-found) +
-        ' not loaded or not identifiable. Check those in Operative IQ.'
-      : native && assetGuideRows.length !== native.total
-        ? 'Found ' + found + ' pending. Total visible coverage ' +
-          assetGuideRows.length + '/' + native.total +
-          '. Review unmapped assets in Operative IQ.'
-        : native ? 'All ' + native.total + ' native rows detected.' :
-          'Native totals unavailable. Review asset coverage in Operative IQ.';
+      : 'Detected ' + found + ' Not Verified asset entries';
+    if (coverage) coverage.textContent = native &&
+        mapped===native.total && pendingUnits===native.required
+      ? 'Complete: '+found+' unverified asset entries represent '+
+        pendingUnits+' required pieces (including PAR inventory counts).'
+      : native
+        ? 'Incomplete: '+found+' entries represent '+pendingUnits+'/'+
+          native.required+' required pieces; '+mapped+'/'+native.total+
+          ' total units accounted for. Review the native list.'
+        : 'Native totals unavailable. Review asset coverage in Operative IQ.';
   }
 
   // Prefer the real Present/Verified control on an exact native asset row.
   // Operative IQ's tag scanner is optional; its blue search-icon button is
   // not consistently exposed as a native <button> in the authenticated page.
+  // Confirmed against AUTHENTICATED T504 Front Line HTML on Voyager:
+  // inventory asset cards use <div class="item-status item-alert"> with
+  // two native div.icon-wrapper controls:
+  //   id=dac0bcd8b6 -> svg-warning-not-active (REPORT, never click)
+  //   id=87e630a6bd -> svg-checked-not-active (VERIFY PRESENT)
+  // Both are Angular click controls exposed as InvokePattern, not buttons.
+  // Do not use only icon position or a generic guessed div click target.
   function findNativeRowVerifyControl(row) {
     if (!row || row.status !== 'not verified' || !row.element?.isConnected) return null;
-    const card=row.element;
-    const actions=[...card.querySelectorAll(
+    const card = row.element.matches?.('.item-status.item-alert') ? row.element :
+      row.element.closest?.('.item-status.item-alert');
+    if (card) {
+      const checks=[...card.querySelectorAll(
+        '.asset-row__actions .icon-wrapper[id="87e630a6bd"]')]
+        .filter(el => el.querySelector('.svg-checked-not-active'));
+      const warnings=[...card.querySelectorAll(
+        '.asset-row__actions .icon-wrapper[id="dac0bcd8b6"]')]
+        .filter(el => el.querySelector('.svg-warning-not-active'));
+      const status=[...card.querySelectorAll(
+        '.verification-status__wrapper .status.status-alert')]
+        .filter(el => clean(el.textContent)==='Not Verified');
+      if (checks.length===1 && warnings.length===1 && status.length===1 &&
+          checks[0].isConnected && !checks[0].getAttribute('aria-disabled')) {
+        return checks[0];
+      }
+      // Catalog PAR inventory cards have a native context-menu "Check In",
+      // but NO native present-check icon. Do not click "Check In" blindly;
+      // its inventory flow is separate from simple asset presence verification.
+      if (/\bPAR\s*:\s*\d+/i.test(card.innerText || '')) return null;
+    }
+    // Compatibility: only use an unambiguous explicitly labeled semantic
+    // native button if the exact source row does not expose the known icon.
+    const actions=[...row.element.querySelectorAll(
       'button,[role="button"],a,input[type="button"],input[type="submit"]')];
     const good=actions.filter(node=>{
       if (node.disabled || node.getAttribute('aria-disabled') === 'true') return false;
@@ -785,7 +829,6 @@
         return false;
       if (!/\b(verify|verified|mark.{0,12}present|mark.{0,12}verified|check.circle|checkmark|task.alt|done)\b/i.test(words) ||
           /\b(not verified|unverified)\b/i.test(words)) return false;
-      // Avoid a navigation hyperlink pretending to be a presence action.
       if (node.tagName === 'A' && node.href && !/\b(verify|present)\b/i.test(label))
         return false;
       return true;
@@ -847,6 +890,12 @@
         tagCounts.set(tag,(tagCounts.get(tag) || 0) + 1);
       titleCounts.set(row.title,(titleCounts.get(row.title) || 0) + 1);
     }
+    if (!rows.every(row => Number.isInteger(row.quantity ?? 1) &&
+        (row.quantity ?? 1) > 0 && (row.quantity ?? 1) <= 100))
+      return {error:'PAR inventory counts are invalid. No verification prepared.'};
+    const mapped = rows.reduce((sum,row)=>sum+(row.quantity||1),0);
+    const pendingUnits = rows.filter(row=>row.status==='not verified')
+      .reduce((sum,row)=>sum+(row.quantity||1),0);
     const items = rows.filter(row => row.status === 'not verified')
       .map((row,index) => {
         const assetTag = clean(row.assetTag).toUpperCase();
@@ -859,13 +908,15 @@
           titleCounts.get(row.title) === 1 &&
           !!findNativeRowVerifyControl(row);
         return {
-          id:index, assetTag,title:row.title,choice:'verified',
-          uniqueTag, uniqueTitle, recordable: uniqueTag || uniqueTitle
+          id:index, assetTag,title:row.title,quantity:row.quantity||1,
+          choice:'verified',uniqueTag, uniqueTitle, recordable: uniqueTag || uniqueTitle
         };
       });
     if (!items.length) return {error:'No unverified T504 items were detected.'};
     return {items, native:totals, route:location.pathname,
-      preparedAt:Date.now(), unmapped:totals.total-rows.length};
+      preparedAt:Date.now(), pendingUnits,
+      unmapped: Math.max(0,totals.total-mapped),
+      pendingUnmapped: Math.max(0,totals.required-pendingUnits)};
   }
 
   function countReviewedAssetChoices(plan) {
@@ -895,10 +946,11 @@
     }
     const c=countReviewedAssetChoices(plan);
     if(countsEl)countsEl.textContent=
-      plan.items.length+' Not Verified | '+c.verified+' proposed Verified | '+
+      plan.items.length+' unverified entries ('+plan.pendingUnits+
+      ' required pieces) | '+c.verified+' proposed Verified | '+
       c.exceptions+' exceptions | '+c.skipped+' skipped | '+
-      c.manual+' manual (ambiguous identity)'+
-      (plan.unmapped>0?' | '+plan.unmapped+' unmapped':'');
+      c.manual+' manual catalog/ambiguous'+
+      (plan.pendingUnmapped>0?' | '+plan.pendingUnmapped+' pieces unaccounted for':'');
     if(record) {
       record.textContent='Record Verified Assets ('+c.recordable+')';
       record.disabled=assetBatchRunning || !attest?.checked || c.recordable===0;
@@ -919,8 +971,10 @@
       const name=document.createElement('div');
       name.style.cssText='min-width:0;overflow-wrap:anywhere;';
       name.textContent=item.title+
-        (item.assetTag?' ['+item.assetTag+']':' [tag unavailable]')+
-        (!item.recordable?' • manual verification required':'');
+        (item.quantity>1?' (PAR '+item.quantity+' required)':'')+
+        (item.assetTag && item.assetTag!=='UNASSIGNED'
+          ?' ['+item.assetTag+']':' [UNASSIGNED]')+
+        (!item.recordable?' • native inventory Check In/manual required':'');
       const choice=document.createElement('select');
       choice.setAttribute('aria-label','Inspection result: '+item.title);
       choice.style.cssText='font:11px Arial,sans-serif;width:116px;' +
