@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.8
+// @version      0.1.9
 // @description  Prepare T504 daily, weekly, and Thursday rope drafts. Save In Process only; never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.8' };
+  window.__rebelIqT504 = { version: '0.1.9' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.8';
+  const IQ_VERSION = '0.1.9';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -218,10 +218,27 @@
   const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
   const visible = node => !!node && !!(node.getClientRects().length);
   const t504Visible = () => /63000-13\s*\(\s*T504\s*\)/i.test(document.body.innerText || '');
-  const inspectionId = () => location.pathname.match(/\/inspections\/(\d+)\//)?.[1] || '';
+  const inspectionId = () => location.pathname.match(/\/inspections\/(\d+)(?:\/|$)/)?.[1] || '';
   const formId = () => location.pathname.match(/\/questionaries\/(\d+)\/?$/)?.[1] || '';
   const isGroupPage = () => /\/questionaries\/group\/\d+\/?$/.test(location.pathname);
   const listUrl = id => '/inspections/' + id + '/questionaries/group/0';
+  // Operative IQ separates questionnaire and asset verification. The daily
+  // action opens the assigned asset list only AFTER a verified Tour draft save.
+  const ASSET_FOLLOWUP_KEY = 'rebelIqT504DailyAssetFollowupV1';
+  const ASSET_UNIT_ID = '60443';
+  const assetUrl = id => '/inspections/' + id + '/assets/group/-1';
+  const isAssetPage = () => /\/inspections\/\d+\/assets\/group\/-1\/?$/.test(location.pathname);
+  const readAssetFollowup = () => {
+    try {
+      const run = JSON.parse(sessionStorage.getItem(ASSET_FOLLOWUP_KEY) || 'null');
+      return run && run.unitId === ASSET_UNIT_ID &&
+        ['await_daily_save','assets_opening'].includes(run.stage) &&
+        Date.now() - run.startedAt < 5 * 60 * 1000 ? run : null;
+    } catch { return null; }
+  };
+  const writeAssetFollowup = run => sessionStorage.setItem(ASSET_FOLLOWUP_KEY, JSON.stringify(run));
+  const clearAssetFollowup = () => sessionStorage.removeItem(ASSET_FOLLOWUP_KEY);
+
   const readPending = () => {
     try {
       const data = JSON.parse(sessionStorage.getItem(KEY) || 'null');
@@ -321,7 +338,7 @@
         'border-radius:8px;background:#176b8e;color:#fff;cursor:pointer;' +
         'font:700 12px/1.2 Arial,sans-serif;text-align:center;' +
         'box-shadow:0 1px 2px rgba(15,43,62,.08);';
-      el.onclick = () => kind === 'ropes' ? beginRopes() : begin(kind);
+      el.onclick = () => kind === 'ropes' ? beginRopes() : kind === 'assets' ? beginAssets() : begin(kind);
       return el;
     };
     const update = document.createElement('a');
@@ -338,8 +355,9 @@
       'font:700 12px/1.2 Arial,sans-serif;text-decoration:none;' +
       'box-shadow:0 1px 2px rgba(15,43,62,.08);';
     actions.append(
-      button('Daily Tour', 'daily'),
+      button('Daily Tour + Assets', 'daily'),
       button('Weekly Check', 'weekly'),
+      button('Asset Checks', 'assets'),
       button('Rope Checks ×3', 'ropes'),
       update
     );
@@ -392,6 +410,21 @@
     else if (prior) notify(prior);
   }
 
+  function beginAssets() {
+    const id = inspectionId();
+    if (id !== ASSET_UNIT_ID || !t504Visible()) {
+      notify('Open the Truck 504 inspection first. No assets were marked checked.', true);
+      return;
+    }
+    if (readRopes() || readPending()) {
+      notify('A questionnaire draft is running. Finish it before opening Asset Checks.', true);
+      return;
+    }
+    notify('Opening T504 Asset Requirements. Verify each required asset at the apparatus; Rebel IQ will not mark anything checked.');
+    if (isAssetPage()) return;
+    location.assign(assetUrl(id));
+  }
+
   function begin(kind) {
     if (readRopes()) {
       notify('Three-rope draft run is already active. Do not start another check.', true);
@@ -409,6 +442,11 @@
       'Rebel IQ will use Save In Process, NEVER Submit.'
     )) return;
     sessionStorage.removeItem(RESULT);
+    if (kind === 'daily') {
+      writeAssetFollowup({unitId: id, startedAt: now(), stage: 'await_daily_save'});
+    } else {
+      clearAssetFollowup();
+    }
     attempts = 0;
     writePending({ kind, unitId: id, startedAt: now(), stage: 'list' });
     notify('Opening ' + TASKS[kind].name + '...');
@@ -949,6 +987,20 @@
       lastRoute = location.pathname;
       attempts = 0;
     }
+    const assetFollowup = readAssetFollowup();
+    if (assetFollowup?.stage === 'assets_opening' && isAssetPage() &&
+        t504Visible() && /Asset Requirements/i.test(document.body.innerText || '')) {
+      clearAssetFollowup();
+      const message = 'Daily Tour draft saved. T504 Asset Requirements is ready for physical verification. No asset has been marked checked by Rebel IQ.';
+      sessionStorage.setItem(RESULT, message);
+      notify(message);
+    } else if (assetFollowup?.stage === 'assets_opening' &&
+        now() - (assetFollowup.requestedAt || assetFollowup.startedAt) > 25000) {
+      clearAssetFollowup();
+      notify('Daily Tour draft saved, but Asset Requirements did not open. Use Asset Checks to open it manually.', true);
+    } else if (!assetFollowup && sessionStorage.getItem(ASSET_FOLLOWUP_KEY)) {
+      clearAssetFollowup();
+    }
     const ropeRun = readRopes();
     if (ropeRun) {
       void runRopes().catch(error => finishRopesWithError(error, readRopes()));
@@ -971,6 +1023,15 @@
           clean(el.textContent).includes('Saved in Process'))
         .sort((a, b) => clean(a.textContent).length - clean(b.textContent).length)[0];
       if (card) {
+        const followup = readAssetFollowup();
+        if (task === TASKS.daily && followup?.stage === 'await_daily_save' &&
+            followup.unitId === inspectionId()) {
+          writeAssetFollowup({...followup, stage: 'assets_opening', requestedAt: now()});
+          sessionStorage.setItem(RESULT, task.name + ': Saved in Process confirmed. Opening Asset Requirements for physical verification.');
+          notify('Daily Tour saved in process. Opening the separate asset-verification step, without marking any assets checked.');
+          location.assign(assetUrl(followup.unitId));
+          return;
+        }
         sessionStorage.setItem(RESULT, task.name + ': Saved in Process confirmed. Verify on phone before submission.');
         notify(task.name + ': Saved in Process confirmed. Verify at truck.');
       }
