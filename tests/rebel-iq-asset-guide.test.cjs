@@ -56,8 +56,8 @@ test('asset review remains a separate phase after confirmed saved Tour draft',()
   assert.match(src,/Asset Checks/);
   assert.match(src,/const assetFollowup = readAssetFollowup\(\)/);
   assert.match(src,/location\.assign\(assetUrl\(followup\.unitId\)\)/);
-  assert.match(src,/const IQ_VERSION = '0\.1\.12'/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.12/m);
+  assert.match(src,/const IQ_VERSION = '0\.1\.13'/);
+  assert.match(src,/^\/\/ @version\s+0\.1\.13/m);
 });
 
 test('full 90-item T504 list includes 24 cards lacking location and tag metadata',()=>{
@@ -104,4 +104,19 @@ test('unmatched asset coverage is visibly disclosed and native counts are author
   assert.match(block,/guide detects|Guide detects/);
   assert.match(block,/Maintenance Due/);
   assert.doesNotMatch(block,/\.click\(|\.checked\s*=|Submit Inspection/);
+});
+
+test('read-only scanner cannot record any item without a unique asset tag and physical confirmation',()=>{
+  const section=src.slice(src.indexOf('  function makeAssetReviewSection() {'),
+    src.indexOf('  function beginAssets() {'));
+  assert.match(section,/Record Present \(1 asset\)/);
+  assert.match(section,/record\.disabled = true/);
+  assert.match(section,/assetTag \+ '\\n\\n'/);
+  assert.match(section,/window\.confirm\(/);
+  assert.match(section,/readPending\(\) \|\| readRopes\(\)/);
+  assert.match(section,/selectOnePendingAssetByTag\(assetTag,title\)/);
+  assert.match(section,/attemptedAssetRecords\.add\(key\)/);
+  assert.match(section,/native\.button\.click\(\)/);
+  assert.match(section,/rows\.length === 1 && rows\[0\]\.status === 'verified'/);
+  assert.doesNotMatch(section,/fetch\(|GM_xmlhttpRequest\(|Submit Inspection/);
 });
