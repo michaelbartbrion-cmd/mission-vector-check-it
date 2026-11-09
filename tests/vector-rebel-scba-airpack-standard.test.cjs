@@ -18,12 +18,16 @@ const locations=[
 test('airpack check is independently available in existing Vector Rebel panel',()=>{
     assert.match(src,/mainAction\('SCBA Airpacks', showStation4ScbaAirpackCheck, false\)/);
     assert.match(src,/mainAction\('My Tour PPE',/);
-    assert.match(src,/^\/\/ @version\s+3\.2\.54/m);
+    assert.match(src,/^\/\/ @version\s+3\.2\.55/m);
     assert.match(src,/const SCBA_AIRPACK_DRAFT_KEY = 'vector-rebel-station4-airpack-draft-v1'/);
     const check=cut('function showStation4ScbaAirpackCheck() {','function installPanel() {');
     assert.match(check,/makeOverlayBox\('830px'\)/);
     assert.match(check,/Find SCBA Airpacks/);
-    assert.match(check,/Open Equipment > Standard/);
+    assert.match(check,/Set Vector Filters/);
+    assert.match(check,/Locations to check today/);
+    assert.match(check,/type='checkbox'/);
+    assert.match(check,/scbaAirpackPendingSelection\(\)/);
+    assert.match(check,/sessionStorage\.setItem\(SCBA_AIRPACK_PENDING_SELECTION_KEY/);
     assert.match(check,/Save Local Draft/);
     assert.match(check,/draftOnly:true/);
     assert.match(check,/No SCBA inspection, inspection signature, or Vector check/);
@@ -60,21 +64,57 @@ test('SCBA mask, loose cylinder and charger are not airpacks',()=>{
         {name:'2001',pool:'Chainsaw'}
     ]) assert.equal(fn(sample),false,JSON.stringify(sample));
 });
-test('native location filters must all be present, missing selections are called out',()=>{
-    const code=cut('function scbaAirpackFilterScope() {',
+test('native filters can be ONE, TWO or THREE of the requested locations, never force all three',()=>{
+    const srcFn=cut('function scbaAirpackFilterScope(requestedIds=[]) {',
         'function isScbaAirpackStandardItem(item) {')+'\nreturn scbaAirpackFilterScope;';
-    const app=documentText=>({querySelectorAll(){return [{
-        innerText:documentText,closest:()=>null
-    }];},body:{innerText:documentText}});
-    const create=new Function('SCBA_AIRPACK_LOCATIONS','document','PANEL_ID','OVERLAY_ID',code);
-    const all='Equipment Standard Search: Filtered To: Station 4 SCBA Supply Room × '+
-        'Truck 504: 63000-13 × Medic 504: 61000-12 × Name Pool Location';
-    const evaluate=text=>create(locations,app(text),'vector-ppe-helper-v23','vector-ppe-overlay-v23')();
-    assert.deepEqual(evaluate(all).selected,['truck504','medic504','station4']);
-    assert.equal(evaluate(all).ready,true);
-    const incomplete=evaluate(all.replace('Medic 504: 61000-12','Medic 506: 61000-16'));
-    assert.equal(incomplete.ready,false);
-    assert.deepEqual(incomplete.missing,['Medic 504: 61000-12']);
+    const app=text=>({querySelectorAll:()=>[{innerText:text,closest:()=>null}],
+        body:{innerText:text}});
+    const factory=new Function('SCBA_AIRPACK_LOCATIONS','document',
+        'PANEL_ID','OVERLAY_ID',srcFn);
+    const evaluate=(text,selected)=>factory(locations,app(
+        'Equipment Standard Filtered To: '+text+' Name Pool Location'
+    ),'vector-ppe-helper-v23','vector-ppe-overlay-v23')(selected);
+    const truck='Truck 504: 63000-13';
+    const medic='Medic 504: 61000-12';
+    const room='Station 4 SCBA Supply Room';
+    assert.equal(evaluate(truck,['truck504']).ready,true);
+    assert.equal(evaluate(room,['station4']).ready,true);
+    assert.equal(evaluate(truck+' × '+medic,['truck504','medic504']).ready,true);
+    assert.equal(evaluate(truck+' × '+medic+' × '+room,
+        ['truck504','medic504','station4']).ready,true);
+    const missing=evaluate(truck,['truck504','medic504']);
+    assert.equal(missing.ready,false);
+    assert.deepEqual(missing.missing,[medic]);
+    const extra=evaluate(truck+' × '+room,['truck504']);
+    assert.equal(extra.ready,false);
+    assert.deepEqual(extra.extra,[room]);
+    assert.equal(evaluate(truck,[]).ready,false,'zero locations always rejected');
+    assert.equal(evaluate('',['truck504']).ready,false,'no native filter chips rejected');
+});
+test('new SCBA check starts with nothing selected, unless resuming brief native-filter setup',()=>{
+    const fnSource=cut('function scbaAirpackPendingSelection() {',
+        'function scbaAirpackFilterScope(requestedIds=[]) {')+
+        '\nreturn scbaAirpackPendingSelection;';
+    const values=new Map();
+    const sessionStorage={
+        getItem:key=>values.get(key)||null,
+        setItem:(key,v)=>values.set(key,v),
+        removeItem:key=>values.delete(key)
+    };
+    const key='scba-location-setup-test';
+    const f=new Function('SCBA_AIRPACK_LOCATIONS','sessionStorage',
+        'SCBA_AIRPACK_PENDING_SELECTION_KEY',fnSource)(
+            locations,sessionStorage,key);
+    assert.deepEqual(f(),[]);
+    sessionStorage.setItem(key,JSON.stringify({
+        ids:['medic504','station4'],savedAt:Date.now()
+    }));
+    assert.deepEqual(f(),['medic504','station4']);
+    sessionStorage.setItem(key,JSON.stringify({
+        ids:['truck504'],savedAt:Date.now()-11*60*1000
+    }));
+    assert.deepEqual(f(),[]);
+    assert.equal(sessionStorage.getItem(key),null);
 });
 test('Standard equipment rows read the native pool and location, not PPE links or title guesses',()=>{
     const srcFn=cut('function scbaAirpackVisibleRows() {','function scbaAirpackRange() {')+
@@ -117,21 +157,21 @@ test('inventory traversal is read-only apart from pagination and validates every
         {scope:'station4',name:'AP-03',pool:'SCBA Air Pack',location:'Station 4 SCBA Supply Room',status:'In Service',href:'/ghi'}
     ];
     const range=()=>({first:page*10+1,last:Math.min(page*10+10,25),total:25});
-    const code=cut('async function scbaAirpackReadInventory(report) {',
+    const code=cut('async function scbaAirpackReadInventory(report, selectedIds) {',
         'function showStation4ScbaAirpackCheck() {')+'\nreturn scbaAirpackReadInventory;';
     const fn=new Function('scbaAirpackBusy','getRun','scbaAirpackFilterScope',
         'scbaAirpackStandardTable','scbaAirpackRange','getPaginationControl',
         'paginationControlEnabled','scbaAirpackNativeSignature',
         'scbaAirpackWaitForPageChange','scbaAirpackVisibleRows',
         'scbaAirpackWaitForCompletePage',code)(
-            false,()=>null,()=>({ready:true,selected:locations.map(x=>x.id)}),
+            false,()=>null,ids=>({ready:true,requested:ids}),
             ()=>({table:{}}),range,
             type=>({disabled: type==='previous'?page===0:page===2,
                 click(){page+=type==='next'?1:-1;}}),
             btn=>!btn.disabled,()=>signatures[page],async()=>range(),
             ()=>[scopes[page]],async()=>true
         );
-    const result=await fn(()=>{});
+    const result=await fn(()=>{},['truck504','medic504','station4']);
     assert.equal(result.complete,true);
     assert.equal(result.pages,3);
     assert.equal(result.totalRows,25);
@@ -140,6 +180,28 @@ test('inventory traversal is read-only apart from pagination and validates every
     assert.doesNotMatch(code,/\bfetch\(|GM_xmlhttpRequest\(|submitInspection\(|\.submit\(/);
 });
 
+test('read-only scan returns only the chosen Truck scope, not Medic or station-room packs',async()=>{
+    const source=cut('async function scbaAirpackReadInventory(report, selectedIds) {',
+        'function showStation4ScbaAirpackCheck() {')+'\nreturn scbaAirpackReadInventory;';
+    const all=[
+        {scope:'truck504',name:'AP-T',pool:'SCBA',location:'Truck 504: 63000-13',status:'In Service',href:'/1'},
+        {scope:'medic504',name:'AP-M',pool:'SCBA',location:'Medic 504: 61000-12',status:'In Service',href:'/2'}
+    ];
+    const fn=new Function('scbaAirpackBusy','getRun','scbaAirpackFilterScope',
+        'scbaAirpackStandardTable','scbaAirpackRange','getPaginationControl',
+        'paginationControlEnabled','scbaAirpackNativeSignature',
+        'scbaAirpackWaitForPageChange','scbaAirpackVisibleRows',
+        'scbaAirpackWaitForCompletePage',source)(
+        false,()=>null,ids=>({ready:true,requested:ids}),
+        ()=>({table:{}}),()=>({first:1,last:2,total:2}),
+        ()=>null,()=>false,()=> 'two',async()=>{},
+        ()=>all,async()=>true
+    );
+    const out=await fn(()=>{},['truck504']);
+    assert.deepEqual(out.items.map(item=>item.name),['AP-T']);
+    assert.deepEqual(out.scope,['truck504']);
+    await assert.rejects(fn(()=>{},[]),/Choose at least one/);
+});
 test('page-readiness guard requires every native Standard row, not only matched airpacks',async()=>{
     const fn=new Function('scbaAirpackStandardTable','scbaAirpackRange',
         'scbaAirpackNativeSignature','clean','sleep',
