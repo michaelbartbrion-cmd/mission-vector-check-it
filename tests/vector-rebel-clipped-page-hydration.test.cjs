@@ -134,3 +134,15 @@ test('read-only Captain uses same identity gate before inspecting history',()=>{
   assert.ok(audit.indexOf('if (!proof)')<audit.indexOf('revealAssetHistory'));
   assert.doesNotMatch(audit,/Submit Inspection|saveRun\(/);
 });
+
+test('release candidate version is consistent across userscript and managed update manifest',()=>{
+  const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'../beta/version.json'),'utf8'));
+  const meta=src.match(/^\/\/ @version\s+(\S+)/m)?.[1];
+  const runtime=src.match(/const VERSION = '([^']+)'/)?.[1];
+  const instance=src.match(/window\.__vectorRebelInstance = \{\s*version: '([^']+)'/)?.[1];
+  assert.equal(meta,'3.2.52');
+  assert.equal(meta,manifest.latestVersion);
+  assert.equal(meta,runtime);
+  assert.equal(meta,instance);
+  assert.match(src,/^\/\/ @updateURL\s+https:\/\/raw\.githubusercontent\.com\/michaelbartbrion-cmd\/mission-vector-check-it\/main\/beta\/vector-rebel\.user\.js/m);
+});
