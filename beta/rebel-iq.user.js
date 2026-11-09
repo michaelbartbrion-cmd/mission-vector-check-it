@@ -554,6 +554,17 @@
 
     addRows();
     const totals = readNativeAssetTotals();
+    const reconciles = () => {
+      const rows = [...collected.values()];
+      const totalUnits = rows.reduce((sum,row) => sum + row.quantity,0);
+      const pendingUnits = rows.filter(row => row.status==='not verified')
+        .reduce((sum,row) => sum + row.quantity,0);
+      return !!totals && totalUnits===totals.total && pendingUnits===totals.required;
+    };
+    // Direct authenticated T504 DOM inspection: 66 native rows represent
+    // 90 equipment units because 12 PAR catalog rows hold 36 units, 24
+    // additional pieces beyond one-per-row. This is NOT 24 missing assets.
+    if (reconciles()) return [...collected.values()];
     for (const container of roots) {
       if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID) break;
       const saved = container.scrollTop;
@@ -572,9 +583,7 @@
       }finally{
         container.scrollTop=saved;
       }
-      if(totals &&
-         [...collected.values()].filter(row=>row.status==='not verified').length >= totals.required &&
-         collected.size >= totals.total) break;
+      if(reconciles()) break;
     }
     return [...collected.values()];
   }
@@ -741,20 +750,22 @@
     const summary = section.querySelector('[data-asset-guide-summary]');
     const coverage = section.querySelector('[data-asset-guide-coverage]');
     const found = assetGuideRows.filter(row => row.status === 'not verified').length;
+    const mapped = assetGuideRows.reduce((sum,row)=>sum+(row.quantity||1),0);
+    const pendingUnits = assetGuideRows.filter(row=>row.status==='not verified')
+      .reduce((sum,row)=>sum+(row.quantity||1),0);
     if (summary) summary.textContent = native
       ? 'Operative IQ: ' + native.required + ' Action Required | ' +
         native.completed + ' Completed'
-      : 'Detected ' + found + ' Not Verified assets';
-    if (coverage) coverage.textContent = native && found < native.required
-      ? 'Found ' + found + ' of ' + native.required +
-        ' Action Required assets. ' + (native.required-found) +
-        ' not loaded or not identifiable. Check those in Operative IQ.'
-      : native && assetGuideRows.length !== native.total
-        ? 'Found ' + found + ' pending. Total visible coverage ' +
-          assetGuideRows.length + '/' + native.total +
-          '. Review unmapped assets in Operative IQ.'
-        : native ? 'All ' + native.total + ' native rows detected.' :
-          'Native totals unavailable. Review asset coverage in Operative IQ.';
+      : 'Detected ' + found + ' Not Verified asset entries';
+    if (coverage) coverage.textContent = native &&
+        mapped===native.total && pendingUnits===native.required
+      ? 'Complete: '+found+' unverified asset entries represent '+
+        pendingUnits+' required pieces (including PAR inventory counts).'
+      : native
+        ? 'Incomplete: '+found+' entries represent '+pendingUnits+'/'+
+          native.required+' required pieces; '+mapped+'/'+native.total+
+          ' total units accounted for. Review the native list.'
+        : 'Native totals unavailable. Review asset coverage in Operative IQ.';
   }
 
   // Prefer the real Present/Verified control on an exact native asset row.
@@ -879,6 +890,12 @@
         tagCounts.set(tag,(tagCounts.get(tag) || 0) + 1);
       titleCounts.set(row.title,(titleCounts.get(row.title) || 0) + 1);
     }
+    if (!rows.every(row => Number.isInteger(row.quantity ?? 1) &&
+        (row.quantity ?? 1) > 0 && (row.quantity ?? 1) <= 100))
+      return {error:'PAR inventory counts are invalid. No verification prepared.'};
+    const mapped = rows.reduce((sum,row)=>sum+(row.quantity||1),0);
+    const pendingUnits = rows.filter(row=>row.status==='not verified')
+      .reduce((sum,row)=>sum+(row.quantity||1),0);
     const items = rows.filter(row => row.status === 'not verified')
       .map((row,index) => {
         const assetTag = clean(row.assetTag).toUpperCase();
@@ -891,13 +908,15 @@
           titleCounts.get(row.title) === 1 &&
           !!findNativeRowVerifyControl(row);
         return {
-          id:index, assetTag,title:row.title,choice:'verified',
-          uniqueTag, uniqueTitle, recordable: uniqueTag || uniqueTitle
+          id:index, assetTag,title:row.title,quantity:row.quantity||1,
+          choice:'verified',uniqueTag, uniqueTitle, recordable: uniqueTag || uniqueTitle
         };
       });
     if (!items.length) return {error:'No unverified T504 items were detected.'};
     return {items, native:totals, route:location.pathname,
-      preparedAt:Date.now(), unmapped:totals.total-rows.length};
+      preparedAt:Date.now(), pendingUnits,
+      unmapped: Math.max(0,totals.total-mapped),
+      pendingUnmapped: Math.max(0,totals.required-pendingUnits)};
   }
 
   function countReviewedAssetChoices(plan) {
@@ -927,10 +946,11 @@
     }
     const c=countReviewedAssetChoices(plan);
     if(countsEl)countsEl.textContent=
-      plan.items.length+' Not Verified | '+c.verified+' proposed Verified | '+
+      plan.items.length+' unverified entries ('+plan.pendingUnits+
+      ' required pieces) | '+c.verified+' proposed Verified | '+
       c.exceptions+' exceptions | '+c.skipped+' skipped | '+
-      c.manual+' manual (ambiguous identity)'+
-      (plan.unmapped>0?' | '+plan.unmapped+' unmapped':'');
+      c.manual+' manual catalog/ambiguous'+
+      (plan.pendingUnmapped>0?' | '+plan.pendingUnmapped+' pieces unaccounted for':'');
     if(record) {
       record.textContent='Record Verified Assets ('+c.recordable+')';
       record.disabled=assetBatchRunning || !attest?.checked || c.recordable===0;
@@ -951,8 +971,10 @@
       const name=document.createElement('div');
       name.style.cssText='min-width:0;overflow-wrap:anywhere;';
       name.textContent=item.title+
-        (item.assetTag?' ['+item.assetTag+']':' [tag unavailable]')+
-        (!item.recordable?' • manual verification required':'');
+        (item.quantity>1?' (PAR '+item.quantity+' required)':'')+
+        (item.assetTag && item.assetTag!=='UNASSIGNED'
+          ?' ['+item.assetTag+']':' [UNASSIGNED]')+
+        (!item.recordable?' • native inventory Check In/manual required':'');
       const choice=document.createElement('select');
       choice.setAttribute('aria-label','Inspection result: '+item.title);
       choice.style.cssText='font:11px Arial,sans-serif;width:116px;' +
