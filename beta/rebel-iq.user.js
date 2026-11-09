@@ -753,6 +753,46 @@
           'Native totals unavailable. Review asset coverage in Operative IQ.';
   }
 
+  // Prefer the real Present/Verified control on an exact native asset row.
+  // Operative IQ's tag scanner is optional; its blue search-icon button is
+  // not consistently exposed as a native <button> in the authenticated page.
+  function findNativeRowVerifyControl(row) {
+    if (!row || row.status !== 'not verified' || !row.element?.isConnected) return null;
+    const card=row.element;
+    const actions=[...card.querySelectorAll(
+      'button,[role="button"],a,input[type="button"],input[type="submit"]')];
+    const good=actions.filter(node=>{
+      if (node.disabled || node.getAttribute('aria-disabled') === 'true') return false;
+      const label=clean([
+        node.getAttribute('aria-label') || '',
+        node.getAttribute('title') || '',
+        node.getAttribute('mattooltip') || '',
+        node.getAttribute('data-tooltip') || '',
+        node.getAttribute('data-testid') || '',
+        node.getAttribute('data-icon') || ''
+      ].join(' '));
+      const icons=[...node.querySelectorAll(
+        'svg,mat-icon,i,[data-icon],[class*="icon"]')]
+        .map(icon=>clean([
+          icon.getAttribute('aria-label') || '',
+          icon.getAttribute('title') || '',
+          icon.getAttribute('data-icon') || '',
+          icon.getAttribute('class') || '',
+          icon.textContent || ''
+        ].join(' '))).join(' ');
+      const words=label+' '+icons;
+      if (/\b(warning|danger|alert|attention|report|missing|damaged|delete|remove|more|menu|dots|edit|failed|cancel)\b/i.test(words))
+        return false;
+      if (!/\b(verify|verified|mark.{0,12}present|mark.{0,12}verified|check.circle|checkmark|task.alt|done)\b/i.test(words) ||
+          /\b(not verified|unverified)\b/i.test(words)) return false;
+      // Avoid a navigation hyperlink pretending to be a presence action.
+      if (node.tagName === 'A' && node.href && !/\b(verify|present)\b/i.test(label))
+        return false;
+      return true;
+    });
+    return good.length === 1 ? good[0] : null;
+  }
+
   function findNativeAssetTagEntry() {
     if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible()) return null;
     const fields = [...document.querySelectorAll('input')]
@@ -765,8 +805,9 @@
     const input = fields[0], rect = input.getBoundingClientRect();
     let container = input.parentElement;
     for (let depth = 0; depth < 5 && container; depth++, container = container.parentElement) {
-      const matches = [...container.querySelectorAll('button')]
-        .filter(button => visible(button) && !button.disabled && button.type !== 'reset')
+      const matches = [...container.querySelectorAll('button,[role="button"],a')]
+        .filter(button => visible(button) && !button.disabled && button.type !== 'reset' &&
+          button.getAttribute('aria-disabled') !== 'true')
         .filter(button => {
           const box = button.getBoundingClientRect();
           const label = clean([
