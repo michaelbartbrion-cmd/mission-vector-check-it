@@ -14,17 +14,18 @@ test('Daily Tour and Assets are separate independent actions',()=>{
   assert.match(begin,/writePending\(\{ kind, unitId: id/);
   assert.doesNotMatch(begin,/assetUrl\(|ASSET_OPEN_KEY|location\.assign\(assetUrl/);
 });
-test('Assets button opens a dedicated full-screen review, not a mini popup',()=>{
+test('Assets button opens compact in-page side panel instead of taking over browser',()=>{
   const begin=cut('  function beginAssets() {','  function begin(kind) {');
   assert.match(begin,/openAssetReviewScreen\(\)/);
   assert.match(begin,/sessionStorage\.setItem\(ASSET_OPEN_KEY/);
   assert.match(begin,/location\.assign\(assetUrl\(id\)\)/);
   assert.match(src,/const ASSET_OPEN_KEY = 'rebelIqT504AssetsOpenOnceV1'/);
   const screen=cut('  function makeAssetReviewScreen() {','  function refreshAssetReviewGuide() {');
-  assert.match(screen,/position:fixed;inset:0/);
-  assert.match(screen,/width:100vw;height:100vh/);
-  assert.match(screen,/← Back to Operative IQ/);
-  assert.match(screen,/Refresh Unverified List/);
+  assert.match(screen,/position:fixed;top:188px;left:16px/);
+  assert.doesNotMatch(screen,/position:fixed;inset:0/);
+  assert.match(screen,/width:min\(460px,calc\(100vw - 32px\)\)/);
+  assert.match(screen,/close.textContent = 'Close'/);
+  assert.match(screen,/load.textContent = 'Refresh'/);
   assert.match(screen,/screen\.style\.display='block'/);
   assert.match(screen,/screen\.style\.display='none'/);
   assert.doesNotMatch(src,/makeAssetReviewSection\(\)/);
