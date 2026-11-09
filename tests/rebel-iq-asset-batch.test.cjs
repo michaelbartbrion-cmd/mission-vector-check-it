@@ -72,7 +72,7 @@ function scenario(options={}){
     }
   };
   const code='let assetGuideLastScan=0,assetBatchPreview=null,'+
-    'assetBatchRunning=false,assetBatchCancel=false,assetAssetScanBusy=false;'+
+    'assetBatchRunning=false,assetBatchCancel=false,assetScanBusy=false;'+
     'const attemptedAssetRecords=new Set();\n'+
     'async function scanAllNativeAssetRows(){return readAssetReviewRows();}\n'+
     logic+'\nreturn {loadAssetChecklist,buildReviewedAssetChecklist,'+
