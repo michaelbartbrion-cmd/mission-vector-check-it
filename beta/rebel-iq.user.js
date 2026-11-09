@@ -678,9 +678,11 @@
 
   function selectOnePendingAssetByTag(assetTag, title) {
     const matching = readAssetReviewRows().filter(row =>
-      row.assetTag === assetTag && row.title === title);
-    return matching.length === 1 && matching[0].status === 'not verified'
-      ? matching[0] : null;
+      row.assetTag === assetTag);
+    // A repeated tag anywhere on this T504 page is ambiguous, even when
+    // one description happens to match. Never act on an ambiguous tag.
+    return matching.length === 1 && matching[0].title === title &&
+      matching[0].status === 'not verified' ? matching[0] : null;
   }
 
   async function recordSelectedAssetPresence() {
@@ -716,7 +718,10 @@
       'Is it PRESENT? If damaged or missing, cancel and report it using Operative IQ.\n\n' +
       'Proceed with ONE native asset-tag verification?')) return;
     // Reread exactly the same item and control after user confirmation.
+    const currentNative = findNativeAssetTagEntry();
     if (!selectOnePendingAssetByTag(assetTag,title) ||
+        !currentNative || currentNative.input !== native.input ||
+        currentNative.button !== native.button ||
         !native.input.isConnected || !native.button.isConnected ||
         !isAssetPage() || inspectionId() !== ASSET_UNIT_ID) {
       fail('Asset changed while confirming; no action taken.');
