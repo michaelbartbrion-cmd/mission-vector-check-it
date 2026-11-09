@@ -510,16 +510,22 @@
     if (!root || !Number.isFinite(root.scrollHeight) || !Number.isFinite(root.clientHeight))
       return readAssetReviewRows();
     const saved = root.scrollTop;
-    const collected = new Map(), unnamed = [];
+    const collected = new Map();
     const addRows = () => {
+      const unnamedCounts = new Map();
       for (const row of readAssetReviewRows()) {
         const tag = clean(row.assetTag).toUpperCase();
-        const key = tag ? 'tag:' + tag + ':' + row.title :
-          'title:' + row.title + ':' + row.status;
-        if (tag) collected.set(key,row);
-        else if (!collected.has(key)) {
-          collected.set(key,row);
-          unnamed.push(key);
+        if (tag) {
+          collected.set('tag:' + tag + ':' + row.title,row);
+        } else {
+          // Preserve visible duplicates with the same description. There
+          // is no durable ID for untagged rows, so count only the greatest
+          // observed number on one native screen slice (no invented rows).
+          const fingerprint = row.title + ':' + row.status;
+          const occurrence = (unnamedCounts.get(fingerprint) || 0) + 1;
+          unnamedCounts.set(fingerprint,occurrence);
+          const key='untagged:' + fingerprint + ':' + occurrence;
+          if (!collected.has(key)) collected.set(key,row);
         }
       }
     };
@@ -687,6 +693,9 @@
     if (!section) return;
     if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible()) {
       section.style.display = 'none';
+      section.setAttribute('aria-hidden','true');
+      const parent=document.getElementById(PANEL);
+      if(parent)parent.style.display='';
       if (assetBatchRunning) assetBatchCancel = true;
       assetBatchPreview = null;
       assetGuideRows = [];
@@ -707,11 +716,16 @@
       ? 'Operative IQ: ' + native.required + ' Action Required | ' +
         native.completed + ' Completed'
       : 'Detected ' + found + ' Not Verified assets';
-    if (coverage) coverage.textContent = native && assetGuideRows.length !== native.total
-      ? 'Rebel IQ can identify ' + assetGuideRows.length + '/' + native.total +
-        ' asset rows. Unmapped equipment must be verified in Operative IQ.'
-      : native ? 'All ' + native.total + ' native rows detected.' :
-        'Native totals unavailable. Review asset coverage in Operative IQ.';
+    if (coverage) coverage.textContent = native && found < native.required
+      ? 'Found ' + found + ' of ' + native.required +
+        ' Action Required assets. ' + (native.required-found) +
+        ' not loaded or not identifiable. Check those in Operative IQ.'
+      : native && assetGuideRows.length !== native.total
+        ? 'Found ' + found + ' pending. Total visible coverage ' +
+          assetGuideRows.length + '/' + native.total +
+          '. Review unmapped assets in Operative IQ.'
+        : native ? 'All ' + native.total + ' native rows detected.' :
+          'Native totals unavailable. Review asset coverage in Operative IQ.';
   }
 
   function findNativeAssetTagEntry() {
