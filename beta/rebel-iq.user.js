@@ -528,9 +528,9 @@
 
     const instructions = document.createElement('div');
     instructions.textContent =
-      'Find Next Unverified scrolls to an item. After physically checking its ' +
-      'identity and presence, Record Present can use the existing Operative IQ ' +
-      'asset-tag entry. Each item requires a separate confirmation.';
+      'Find Next Unverified locates an item. Check its tag and physical presence. ' +
+      'Then tick the confirmation below and Record Present to use the native ' +
+      'Operative IQ asset-tag field. Only one confirmed asset at a time.';
     instructions.style.cssText = 'margin:6px 0;color:#526a78;';
 
     const next = document.createElement('button');
@@ -542,11 +542,26 @@
       'color:#fff;padding:8px 10px;font-weight:bold;cursor:pointer;';
     next.onclick = showNextAssetToReview;
 
+    const presenceLabel = document.createElement('label');
+    presenceLabel.style.cssText = 'display:flex;gap:6px;align-items:start;' +
+      'margin:7px 0;padding:5px 0;cursor:pointer;';
+    const presenceBox = document.createElement('input');
+    presenceBox.type = 'checkbox';
+    presenceBox.setAttribute('data-asset-guide-confirm', '');
+    presenceBox.disabled = true;
+    const presenceText = document.createElement('span');
+    presenceText.textContent =
+      'I physically checked the selected asset and confirm it is PRESENT on Truck 504.';
+    presenceLabel.append(presenceBox, presenceText);
+
     const record = document.createElement('button');
     record.type = 'button';
     record.textContent = 'Record Present (1 asset)';
     record.setAttribute('data-asset-guide-record', '');
     record.disabled = true;
+    presenceBox.onchange = () => {
+      record.disabled = !presenceBox.checked || !selectedAssetReview || assetRecordBusy;
+    };
     record.style.cssText = 'border:1px solid #176b8e;border-radius:5px;' +
       'background:#fff;color:#176b8e;padding:8px 9px;font-weight:bold;' +
       'cursor:pointer;margin-left:4px;';
@@ -558,7 +573,7 @@
     status.style.cssText = 'margin-top:6px;color:#526a78;';
     status.textContent = 'Physically inspect each item; no status is changed automatically.';
 
-    section.append(heading, summary, coverage, instructions, next, record, status);
+    section.append(heading, summary, coverage, instructions, next, presenceLabel, record, status);
     return section;
   }
 
@@ -576,9 +591,12 @@
     }
     assetGuideNext = (assetGuideNext + 1) % pending.length;
     const target = pending[assetGuideNext];
-    selectedAssetReview = target.assetTag ? {title: target.title, assetTag: target.assetTag} : null;
+    selectedAssetReview = target.status === 'not verified' && target.assetTag
+      ? {title: target.title, assetTag: target.assetTag} : null;
+    const checkbox = section?.querySelector('[data-asset-guide-confirm]');
+    if (checkbox) { checkbox.checked = false; checkbox.disabled = !selectedAssetReview; }
     const record = section?.querySelector('[data-asset-guide-record]');
-    if (record) record.disabled = !selectedAssetReview || assetRecordBusy;
+    if (record) record.disabled = true;
     target.element.scrollIntoView({behavior: 'smooth', block: 'center'});
     const previous = target.element.style.outline;
     target.element.style.outline = '3px solid #176b8e';
@@ -587,9 +605,10 @@
     }, 2200);
     if (status) status.textContent =
       'Review ' + (assetGuideNext + 1) + '/' + pending.length + ': ' +
-      target.title + (target.assetTag ? ' (tag ' + target.assetTag + ').' +
-        ' Physically check it, then select Record Present.' :
-        '. No unique asset tag detected. Use the native Operative IQ controls.');
+      target.title + (target.assetTag && target.status === 'not verified'
+        ? ' (tag ' + target.assetTag + '). Physically check it, tick the' +
+          ' confirmation and press Record Present.'
+        : '. Use the native Operative IQ control; automated recording is not available for this item.');
   }
 
   function refreshAssetReviewGuide() {
@@ -601,6 +620,8 @@
       assetGuideRows = [];
       assetGuideNext = -1;
       selectedAssetReview = null;
+      const checkbox = section.querySelector('[data-asset-guide-confirm]');
+      if (checkbox) {checkbox.checked = false; checkbox.disabled = true;}
       const record = section.querySelector('[data-asset-guide-record]');
       if (record) record.disabled = true;
       assetGuideLastScan = 0;
@@ -689,8 +710,10 @@
     const section = document.getElementById(ASSET_GUIDE_ID);
     const status = section?.querySelector('[data-asset-guide-status]');
     const record = section?.querySelector('[data-asset-guide-record]');
+    const checkbox = section?.querySelector('[data-asset-guide-confirm]');
     const fail = message => {if (status) status.textContent = message; };
     if (assetRecordBusy || !section || !selectedAssetReview ||
+        !checkbox || !checkbox.checked || checkbox.disabled ||
         !isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible() ||
         readPending() || readRopes()) {
       fail('Cannot record: select a T504 asset after finishing other draft work.');
@@ -712,12 +735,9 @@
       fail('The native asset-tag scanner/search control is not uniquely identified or contains text. Use the original Operative IQ checkmark or scanner.');
       return;
     }
-    if (!window.confirm(
-      'Confirm you PHYSICALLY inspected this equipment on Truck 504:\n\n' +
-      title + '\nAsset Tag: ' + assetTag + '\n\n' +
-      'Is it PRESENT? If damaged or missing, cancel and report it using Operative IQ.\n\n' +
-      'Proceed with ONE native asset-tag verification?')) return;
-    // Reread exactly the same item and control after user confirmation.
+    // The in-panel checkbox is the operator's explicit confirmation for
+    // THIS selected item. Never pop up another dialog or automate a batch.
+    // Reread the native control and exact asset after this attestation.
     const currentNative = findNativeAssetTagEntry();
     if (!selectOnePendingAssetByTag(assetTag,title) ||
         !currentNative || currentNative.input !== native.input ||
@@ -728,6 +748,8 @@
       return;
     }
     assetRecordBusy = true;
+    checkbox.checked = false;
+    checkbox.disabled = true;
     attemptedAssetRecords.add(key);  // Never auto-repeat a potentially consequential click.
     if (record) record.disabled = true;
     try {
