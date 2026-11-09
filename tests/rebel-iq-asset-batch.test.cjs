@@ -41,7 +41,7 @@ function scenario(options={}){
     ['Thermal Imager','394','verified'],
     ['Safety Line','555','not verified']
   ];
-  const rows=(options.rows||defaults).map(([title,assetTag,status])=>({title,assetTag,status}));
+  const rows=(options.rows||defaults).map(([title,assetTag,status,quantity=1])=>({title,assetTag,status,quantity}));
   const sections=new Map(),node=(key,tag='div')=>{
     const element=new MockElement(tag);sections.set(key,element);return element;};
   const list=node('[data-asset-check-list]');
@@ -221,4 +221,25 @@ test('UNASSIGNED assets can be recorded by a unique native asset row check, neve
   await h.app.recordReviewedAssetChecklist();
   assert.equal(h.clicks(),3);
   assert.match(h.progress.textContent,/3 asset\(s\) confirmed Verified/);
+});
+
+test('real T504 layout has 52 unverified entries representing 76 required units, not 24 missing',async()=>{
+  const pars=[6,4,3,3,2,2,2,4,2,2,2,4];
+  const nativeRows=[
+    ...Array.from({length:40},(_,i)=>['Tagged Asset '+i,'ASSET'+i,'not verified',1]),
+    ...pars.map((quantity,i)=>['Paratech Catalog '+i,'UNASSIGNED','not verified',quantity]),
+    ...Array.from({length:14},(_,i)=>['Completed Asset '+i,'COMP'+i,'verified',1])
+  ];
+  const h=scenario({rows:nativeRows,nativeMissing:true});
+  await h.app.loadAssetChecklist();
+  const p=h.app.getPreview();
+  assert.equal(p.items.length,52);
+  assert.equal(p.pendingUnits,76);
+  assert.equal(p.unmapped,0);
+  assert.equal(p.pendingUnmapped,0);
+  assert.equal(p.items.filter(item=>item.recordable).length,40);
+  assert.equal(p.items.filter(item=>!item.recordable).length,12);
+  assert.match(h.summary.textContent,/52 unverified entries \(76 required pieces\)/);
+  assert.doesNotMatch(h.summary.textContent,/24 pieces unaccounted for/);
+  assert.equal(h.clicks(),0,'reviewing drafts never updates physical equipment');
 });
