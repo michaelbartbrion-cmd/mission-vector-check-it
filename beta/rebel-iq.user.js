@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.16
+// @version      0.1.17
 // @description  Prepare T504 daily, weekly, and Thursday rope drafts. Save In Process only; never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.16' };
+  window.__rebelIqT504 = { version: '0.1.17' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.16';
+  const IQ_VERSION = '0.1.17';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -356,9 +356,9 @@
       'font:700 12px/1.2 Arial,sans-serif;text-decoration:none;' +
       'box-shadow:0 1px 2px rgba(15,43,62,.08);';
     actions.append(
-      button('Daily Tour + Assets', 'daily'),
+      button('Daily Tour', 'daily'),
       button('Weekly Check', 'weekly'),
-      button('Asset Checks', 'assets'),
+      button('Assets', 'assets'),
       button('Rope Checks ×3', 'ropes'),
       update
     );
@@ -381,7 +381,7 @@
       readIqErrors().length + ' error(s) pending delivery' : 'no errors queued');
     statusWrap.append(detail, rcStatusEl);
     // Asset review belongs inside the single expanded Rebel IQ menu.
-    body.append(actions, makeAssetReviewSection(), statusWrap);
+    body.append(actions, statusWrap);
     menu.append(header, body);
 
     const setExpanded = (expanded) => {
@@ -398,7 +398,7 @@
     };
     toggle.onclick = () => setExpanded(!opened);
     root.append(menu, toggle);
-    document.body.appendChild(root);
+    document.body.append(root, makeAssetReviewScreen());
 
     const runningRopes = readRopes();
     const ropeResult = sessionStorage.getItem(ROPE_RESULT);
@@ -417,7 +417,7 @@
   // Never infer that an asset was inspected from its appearance on the page.
   const ASSET_GUIDE_ID = 'rebel-iq-t504-asset-guide';
   let assetGuideRows = [], assetGuideLastScan = 0;
-  let lastAssetChecklistAutoloadRoute = '';
+  let assetReviewOpenRequested = false;
   let assetBatchPreview = null, assetBatchRunning = false;
   let assetBatchCancel = false, assetBatchPilotConfirmed = false;
   const attemptedAssetRecords = new Set();
@@ -511,64 +511,102 @@
   // One inline checklist, following the existing Vector Rebel review pattern.
   // "Verified" is ONLY a proposed answer until the inspector reviews it and
   // explicitly records it. No automatic safety/inspection certifications.
-  function makeAssetReviewSection() {
-    const section = document.createElement('section');
-    section.id = ASSET_GUIDE_ID;
-    section.setAttribute('aria-label', 'T504 asset verification checklist');
-    section.style.cssText =
-      'display:none;margin-top:10px;padding:10px;border:1px solid #d6e2e9;' +
-      'border-left:3px solid #176b8e;border-radius:7px;background:#f7f9fa;' +
-      'font-size:11px;line-height:1.4;';
+  // Dedicated full-viewport asset review screen, not a floating mini-panel.
+  // The main Rebel IQ launcher stays compact and independent of Assets.
+  function makeAssetReviewScreen() {
+    const screen = document.createElement('section');
+    screen.id = ASSET_GUIDE_ID;
+    screen.setAttribute('role', 'dialog');
+    screen.setAttribute('aria-modal', 'true');
+    screen.setAttribute('aria-label', 'Truck 504 asset verification');
+    screen.setAttribute('aria-hidden', 'true');
+    screen.style.cssText =
+      'position:fixed;inset:0;z-index:2147483640;display:none;' +
+      'box-sizing:border-box;width:100vw;height:100vh;' +
+      'height:100dvh;background:#f3f7fa;color:#173448;' +
+      'font:13px/1.4 Arial,sans-serif;overflow:hidden;';
+
+    const header = document.createElement('header');
+    header.style.cssText =
+      'background:#153e5c;color:#fff;padding:12px 20px;' +
+      'min-height:62px;box-sizing:border-box;display:flex;' +
+      'justify-content:space-between;align-items:center;gap:12px;';
     const title = document.createElement('div');
-    title.textContent = 'T504 Asset Check';
-    title.style.cssText = 'font-size:13px;font-weight:700;margin-bottom:5px;';
+    const top = document.createElement('strong');
+    top.textContent = 'Truck 504 • Assets';
+    top.style.cssText = 'font-size:20px;display:block;letter-spacing:.2px;';
+    const subtitle = document.createElement('span');
+    subtitle.textContent = 'Review unverified equipment';
+    subtitle.style.cssText = 'font-size:11px;opacity:.85;';
+    title.append(top,subtitle);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = '← Back to Operative IQ';
+    close.setAttribute('data-asset-check-close','');
+    close.style.cssText = 'background:white;color:#153e5c;border:0;' +
+      'border-radius:7px;padding:10px 12px;font-weight:bold;cursor:pointer;';
+    close.onclick = closeAssetReviewScreen;
+    header.append(title,close);
+
+    const content = document.createElement('div');
+    content.style.cssText =
+      'box-sizing:border-box;margin:0 auto;max-width:1150px;' +
+      'height:calc(100% - 62px);display:flex;flex-direction:column;' +
+      'padding:14px 18px 12px;gap:10px;';
+    const summaryLine = document.createElement('div');
+    summaryLine.style.cssText =
+      'display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;' +
+      'align-items:center;';
     const summary = document.createElement('div');
-    summary.setAttribute('data-asset-guide-summary', '');
-    summary.textContent = 'Reading T504 assets...';
-    const coverage = document.createElement('div');
-    coverage.setAttribute('data-asset-guide-coverage', '');
-    coverage.style.cssText = 'color:#7d5035;margin-top:3px;';
-    const instructions = document.createElement('p');
-    instructions.textContent = 'Load the unverified list, physically check the equipment, ' +
-      'and change any default Verified answers that are not correct. ' +
-      'Only reviewed, present and working assets can be recorded.';
-    instructions.style.cssText = 'margin:6px 0;';
+    summary.setAttribute('data-asset-guide-summary','');
+    summary.style.cssText = 'font-weight:700;font-size:15px;';
+    summary.textContent = 'Reading Operative IQ assets...';
     const load = document.createElement('button');
     load.type = 'button';
-    load.textContent = 'Load Unverified Assets';
+    load.textContent = 'Refresh Unverified List';
     load.setAttribute('data-asset-check-load','');
-    load.style.cssText = 'background:#176b8e;color:#fff;border:0;' +
-      'border-radius:5px;padding:9px 10px;font-weight:bold;cursor:pointer;';
-    load.onclick = loadAssetChecklist;
+    load.style.cssText = 'background:#176b8e;color:white;border:0;' +
+      'border-radius:7px;padding:10px 12px;font-weight:bold;cursor:pointer;';
+    load.onclick = () => { void loadAssetChecklist(); };
+    summaryLine.append(summary,load);
+    const coverage = document.createElement('div');
+    coverage.setAttribute('data-asset-guide-coverage','');
+    coverage.style.cssText = 'color:#90430d;font-size:12px;min-height:18px;';
     const counts = document.createElement('div');
     counts.setAttribute('data-asset-check-counts','');
-    counts.style.cssText = 'margin:7px 0;font-weight:600;';
-    counts.textContent = 'No asset checklist loaded.';
+    counts.style.cssText = 'font-weight:600;font-size:13px;';
+    counts.textContent = 'No list loaded.';
     const list = document.createElement('div');
     list.setAttribute('data-asset-check-list','');
-    list.style.cssText = 'max-height:290px;overflow-y:auto;overscroll-behavior:contain;' +
-      'border:1px solid #d2dfe8;border-radius:5px;background:white;' +
-      'margin:6px 0;';
+    list.style.cssText = 'flex:1;min-height:0;overflow-y:auto;' +
+      'border:1px solid #c9d9e3;border-radius:9px;' +
+      'background:white;box-shadow:0 3px 14px rgba(10,35,51,.05);';
+
+    const footer = document.createElement('div');
+    footer.style.cssText = 'flex:none;background:white;border:1px solid #d5e0e7;' +
+      'border-radius:9px;padding:11px 14px;box-shadow:0 2px 8px rgba(10,35,51,.05);';
     const attestLabel = document.createElement('label');
-    attestLabel.style.cssText = 'display:none;gap:7px;margin:8px 0;align-items:start;' +
-      'cursor:pointer;font-weight:600;';
+    attestLabel.style.cssText =
+      'display:none;gap:9px;margin-bottom:8px;cursor:pointer;font-weight:600;';
     attestLabel.setAttribute('data-asset-check-attest-wrap','');
     const attest = document.createElement('input');
     attest.type = 'checkbox';
     attest.disabled = true;
     attest.setAttribute('data-asset-check-attest','');
     attest.onchange = updateAssetChecklistActions;
-    const attestCopy = document.createElement('span');
-    attestCopy.textContent = 'I physically checked the assets marked Verified. ' +
-      'They are present and working. Exceptions have been changed below.';
-    attestLabel.append(attest,attestCopy);
+    const attestText = document.createElement('span');
+    attestText.textContent =
+      'I physically checked the assets left as Verified and confirm they are present and working.';
+    attestLabel.append(attest,attestText);
+    const bottom = document.createElement('div');
+    bottom.style.cssText = 'display:flex;align-items:center;gap:9px;flex-wrap:wrap;';
     const record = document.createElement('button');
     record.type = 'button';
     record.textContent = 'Record Verified Assets';
     record.disabled = true;
     record.setAttribute('data-asset-check-record','');
     record.style.cssText = 'background:#176b8e;color:#fff;border:0;' +
-      'border-radius:5px;padding:9px 11px;font-weight:bold;cursor:pointer;';
+      'border-radius:7px;padding:11px 14px;font-weight:700;cursor:pointer;';
     record.onclick = () => { void recordReviewedAssetChecklist(); };
     const stop = document.createElement('button');
     stop.type = 'button';
@@ -576,18 +614,41 @@
     stop.disabled = true;
     stop.setAttribute('data-asset-check-stop','');
     stop.style.cssText = 'background:white;border:1px solid #b8c8d6;' +
-      'border-radius:5px;padding:9px;margin-left:6px;cursor:pointer;';
+      'border-radius:7px;padding:11px;cursor:pointer;';
     stop.onclick = () => { assetBatchCancel = true; };
     const progress = document.createElement('div');
     progress.setAttribute('data-asset-check-progress','');
     progress.setAttribute('role','status');
-    progress.style.cssText = 'margin-top:7px;color:#536b79;';
-    progress.textContent = 'Nothing recorded yet.';
-    const actions = document.createElement('div');
-    actions.append(record,stop);
-    section.append(title,summary,coverage,instructions,load,counts,list,
-      attestLabel,actions,progress);
-    return section;
+    progress.style.cssText = 'font-size:12px;color:#526b7a;flex:1;';
+    progress.textContent = 'Draft answers are not yet recorded in Operative IQ.';
+    bottom.append(record,stop,progress);
+    footer.append(attestLabel,bottom);
+    content.append(summaryLine,coverage,counts,list,footer);
+    screen.append(header,content);
+    return screen;
+  }
+
+  function openAssetReviewScreen() {
+    if (!isAssetPage() || inspectionId() !== ASSET_UNIT_ID || !t504Visible()) return false;
+    const screen=document.getElementById(ASSET_GUIDE_ID);
+    if(!screen)return false;
+    screen.style.display='block';
+    screen.setAttribute('aria-hidden','false');
+    const parent=document.getElementById(PANEL);
+    if(parent)parent.style.display='none';
+    void loadAssetChecklist();
+    return true;
+  }
+
+  function closeAssetReviewScreen() {
+    if(assetBatchRunning){assetBatchCancel=true;return;}
+    const screen=document.getElementById(ASSET_GUIDE_ID);
+    if(screen){
+      screen.style.display='none';
+      screen.setAttribute('aria-hidden','true');
+    }
+    const parent=document.getElementById(PANEL);
+    if(parent)parent.style.display='';
   }
 
   function refreshAssetReviewGuide() {
@@ -599,12 +660,11 @@
       assetBatchPreview = null;
       assetGuideRows = [];
       assetGuideLastScan = 0;
-      lastAssetChecklistAutoloadRoute = '';
       const record = section.querySelector('[data-asset-check-record]');
       if (record) record.disabled = true;
       return;
     }
-    section.style.display = 'block';
+    if (section.style.display !== 'block') return;
     if (now() - assetGuideLastScan < 2500) return;
     assetGuideLastScan = now();
     assetGuideRows = readAssetReviewRows();
@@ -621,13 +681,6 @@
         ' asset rows. Unmapped equipment must be verified in Operative IQ.'
       : native ? 'All ' + native.total + ' native rows detected.' :
         'Native totals unavailable. Review asset coverage in Operative IQ.';
-    // Draft only: prefill the checklist once when the asset page is ready.
-    // Loading proposed Verified choices NEVER changes Operative IQ.
-    if (native && assetGuideRows.length && !assetBatchPreview &&
-        !assetBatchRunning && lastAssetChecklistAutoloadRoute !== location.pathname) {
-      lastAssetChecklistAutoloadRoute = location.pathname;
-      loadAssetChecklist();
-    }
   }
 
   function findNativeAssetTagEntry() {
