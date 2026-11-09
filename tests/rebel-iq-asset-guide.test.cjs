@@ -44,11 +44,11 @@ test('other units or non-asset pages never expose an asset review',()=>{
   assert.deepEqual(harness([['Some Gear','Not Verified']],{onT504:false})(),[]);
   assert.deepEqual(harness([['Some Gear','Not Verified']],{onAssetPage:false})(),[]);
 });
-test('asset guide scrolls to the next item but does not certify any equipment',()=>{
+test('asset guide reads native statuses; inspection batch requires attended action',()=>{
   const block=src.slice(start,src.indexOf('  // An attended, one-item-only native Operative IQ operation.',start));
-  assert.match(block,/scrollIntoView\(\{behavior: 'smooth', block: 'center'\}\)/);
-  assert.match(block,/Next Unverified/);
-  assert.match(block,/No asset has been marked checked|no status is changed automatically/i);
+  assert.match(block,/Preview Inspected Assets/);
+  assert.match(block,/Exceptions \/ asset tags/);
+  assert.match(block,/data-asset-batch-attest/);
   assert.doesNotMatch(block,/\.click\(|\.dispatchEvent\(|fetch\(|GM_xmlhttpRequest\(|Submit Inspection/);
 });
 test('asset review remains a separate phase after confirmed saved Tour draft',()=>{
