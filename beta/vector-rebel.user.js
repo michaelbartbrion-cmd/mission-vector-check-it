@@ -11910,7 +11910,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             '[class*="paginator"],[class*="pagination"],[aria-label*="pagination" i]')]
             .filter(el=>visible(el) && !el.closest('#' + PANEL_ID + ',#' + OVERLAY_ID))
             .map(el=>clean(el.innerText || el.textContent || ''));
-        pagination.push(clean(document.body.innerText || '').slice(-900));
+        // The SCBA review overlay is appended after native content. Do not
+        // look only at the last 900 characters, which can omit the native
+        // paginator beneath the review overlay.
+        pagination.push(clean(document.body.innerText || '').slice(0,12000));
         for(const line of pagination){
             const match=line.match(/\b(\d+)\s*[-–]\s*(\d+)\s+of\s+(\d+)\b/i);
             if(!match)continue;
