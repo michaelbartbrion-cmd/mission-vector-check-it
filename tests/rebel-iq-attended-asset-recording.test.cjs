@@ -40,3 +40,14 @@ test('recording is physical presence and operation, unrelated to scheduled maint
   assert.doesNotMatch(section,/maintenanceBlocked|blocked\.maintenance/);
   assert.match(src,/^\/\/ @version\s+0\.1\.16/m);
 });
+
+test('opening T504 Assets loads a draft list automatically without recording an asset',()=>{
+  assert.match(src,/lastAssetChecklistAutoloadRoute !== location.pathname/);
+  assert.match(src,/lastAssetChecklistAutoloadRoute = location.pathname/);
+  assert.match(src,/if \(isAssetPage\(\)\) \{ loadAssetChecklist\(\); return; \}/);
+  const start=src.indexOf('  function loadAssetChecklist() {');
+  const end=src.indexOf('  async function recordReviewedAssetChecklist() {',start);
+  const draft=src.slice(start,end);
+  assert.match(draft,/buildReviewedAssetChecklist\(\)/);
+  assert.doesNotMatch(draft,/native\.button\.click\(\)|\.submit\(|\bfetch\(/);
+});
