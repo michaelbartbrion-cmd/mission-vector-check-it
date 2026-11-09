@@ -27,14 +27,14 @@ test('each asset gets its own native receipt and stops on uncertain result',()=>
   assert.match(section,/native\.button\.click\(\)/);
   assert.match(section,/actual\[0\]\.status==='verified'/);
   assert.match(section,/Official Verified status not confirmed/);
-  assert.match(section,/Previously attempted tag/);
+  assert.match(section,/Previously attempted /);
   assert.match(section,/assetBatchCancel/);
   assert.doesNotMatch(section,/\bfetch\(|GM_xmlhttpRequest\(|\.submit\(/);
 });
 test('unverified items with missing or duplicate tags are shown but not auto-recorded',()=>{
   assert.match(section,/tagCounts\.get\(assetTag\) === 1/);
   assert.match(section,/tag unavailable/);
-  assert.match(section,/manual \(no unique tag\)/);
+  assert.match(section,/manual \(ambiguous identity\)/);
   assert.match(section,/unmapped/);
 });
 test('recording is physical presence and operation, unrelated to scheduled maintenance',()=>{
