@@ -56,8 +56,8 @@ test('asset review remains a separate phase after confirmed saved Tour draft',()
   assert.match(src,/Asset Checks/);
   assert.match(src,/const assetFollowup = readAssetFollowup\(\)/);
   assert.match(src,/location\.assign\(assetUrl\(followup\.unitId\)\)/);
-  assert.match(src,/const IQ_VERSION = '0\.1\.13'/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.13/m);
+  assert.match(src,/const IQ_VERSION = '0\.1\.14'/);
+  assert.match(src,/^\/\/ @version\s+0\.1\.14/m);
 });
 
 test('full 90-item T504 list includes 24 cards lacking location and tag metadata',()=>{
@@ -106,18 +106,21 @@ test('unmatched asset coverage is visibly disclosed and native counts are author
   assert.doesNotMatch(block,/\.click\(|Submit Inspection/);
 });
 
-test('read-only scanner cannot record any item without a unique asset tag and physical confirmation',()=>{
+test('single-item UI replaced by exception-first inspected batch preview',()=>{
   const section=src.slice(src.indexOf('  function makeAssetReviewSection() {'),
     src.indexOf('  function beginAssets() {'));
-  assert.match(section,/Record Present \(1 asset\)/);
-  assert.match(section,/record\.disabled = true/);
-  assert.match(section,/presenceBox.type = 'checkbox'/);
-  assert.match(section,/data-asset-guide-confirm/);
+  assert.match(section,/Preview Inspected Assets/);
+  assert.match(section,/Exceptions \/ asset tags/);
+  assert.match(section,/Verify Inspected Assets/);
+  assert.match(section,/data-asset-batch-attest/);
+  assert.match(section,/action.disabled = true/);
+  assert.match(section,/attest.type = 'checkbox'/);
+  assert.match(section,/data-asset-batch-exceptions/);
   assert.doesNotMatch(section,/window\.confirm\(/);
-  assert.match(section,/readPending\(\) \|\| readRopes\(\)/);
-  assert.match(section,/selectOnePendingAssetByTag\(assetTag,title\)/);
+  assert.match(section,/assetBatchRunning/);
+  assert.match(section,/buildAssetBatchPlan/);
   assert.match(section,/attemptedAssetRecords\.add\(key\)/);
   assert.match(section,/native\.button\.click\(\)/);
-  assert.match(section,/rows\.length === 1 && rows\[0\]\.status === 'verified'/);
+  assert.match(section,/again.length === 1 && again\[0\].title === item.title/);
   assert.doesNotMatch(section,/fetch\(|GM_xmlhttpRequest\(|Submit Inspection/);
 });
