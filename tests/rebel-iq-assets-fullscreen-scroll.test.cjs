@@ -21,9 +21,9 @@ test('all 76 pending assets are collected from 52 initial and 24 lower virtual s
     return root.scrollTop>=1850 ? [...later,...complete] : [...first,...complete];
   };
   const run=new Function('isAssetPage','inspectionId','ASSET_UNIT_ID',
-    't504Visible','document','readAssetReviewRows','clean','setTimeout',code)(
-      ()=>true,()=> '60443','60443',()=>true,{scrollingElement:root},readRows,
-      x=>String(x??'').replace(/\s+/g,' ').trim(),cb=>cb()
+    't504Visible','document','readAssetReviewRows','clean','setTimeout','readNativeAssetTotals','visible','getComputedStyle','PANEL','ASSET_GUIDE_ID',code)(
+      ()=>true,()=> '60443','60443',()=>true,{scrollingElement:root,querySelectorAll:()=>[]},readRows,
+      x=>String(x??'').replace(/\s+/g,' ').trim(),cb=>cb(),()=>({total:90,required:76}),()=>true,()=>({overflowY:'auto'}),'rebel-iq-t504-panel','rebel-iq-t504-asset-guide'
     );
   const all=await run();
   assert.equal(all.length,90);
@@ -36,9 +36,9 @@ test('no scan is attempted off T504 Asset Requirements route',async()=>{
   const run=new Function('isAssetPage','inspectionId','ASSET_UNIT_ID',
     't504Visible','document','readAssetReviewRows','clean','setTimeout',code)(
       ()=>false,()=> '60443','60443',()=>true,
-      {scrollingElement:{scrollHeight:4000,clientHeight:800,scrollTop:0}},
+      {scrollingElement:{scrollHeight:4000,clientHeight:800,scrollTop:0},querySelectorAll:()=>[]},
       ()=>{throw Error('should never read off-route')},
-      x=>String(x??'').trim(),cb=>cb()
+      x=>String(x??'').trim(),cb=>cb(),()=>({total:90,required:76}),()=>true,()=>({overflowY:'auto'}),'rebel-iq-t504-panel','rebel-iq-t504-asset-guide'
     );
   assert.deepEqual(await run(),[]);
 });
@@ -47,7 +47,7 @@ test('unscannable native page degrades to currently visible rows without claimin
   const run=new Function('isAssetPage','inspectionId','ASSET_UNIT_ID',
     't504Visible','document','readAssetReviewRows','clean','setTimeout',code)(
       ()=>true,()=> '60443','60443',()=>true,
-      {},()=>[single],x=>String(x??'').trim(),cb=>cb()
+      {querySelectorAll:()=>[]},()=>[single],x=>String(x??'').trim(),cb=>cb()
     );
   assert.equal((await run()).length,1);
   assert.match(src,/not loaded or not identifiable/);
@@ -60,5 +60,5 @@ test('the Assets button opens one full-screen overlay while Daily Tour stays ind
   assert.match(src,/screen\.style\.display='none'/);
   assert.match(src,/position:fixed;inset:0/);
   assert.doesNotMatch(src,/Daily Tour \+ Assets|readAssetFollowup/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.17/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.18/m);
 });
