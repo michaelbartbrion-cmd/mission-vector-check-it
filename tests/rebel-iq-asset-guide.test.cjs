@@ -56,8 +56,8 @@ test('asset review remains a separate phase after confirmed saved Tour draft',()
   assert.match(src,/Asset Checks/);
   assert.match(src,/const assetFollowup = readAssetFollowup\(\)/);
   assert.match(src,/location\.assign\(assetUrl\(followup\.unitId\)\)/);
-  assert.match(src,/const IQ_VERSION = '0\.1\.14'/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.14/m);
+  assert.match(src,/const IQ_VERSION = '0\.1\.15'/);
+  assert.match(src,/^\/\/ @version\s+0\.1\.15/m);
 });
 
 test('full 90-item T504 list includes 24 cards lacking location and tag metadata',()=>{
@@ -102,7 +102,7 @@ test('unmatched asset coverage is visibly disclosed and native counts are author
   assert.match(block,/readNativeAssetTotals\(\)/);
   assert.match(block,/not mapped: use the native list for these/);
   assert.match(block,/guide detects|Guide detects/);
-  assert.match(block,/Maintenance Due/);
+  assert.doesNotMatch(block,/Maintenance Due/);
   assert.doesNotMatch(block,/\.click\(|Submit Inspection/);
 });
 
@@ -125,7 +125,7 @@ test('single-item UI replaced by exception-first inspected batch preview',()=>{
   assert.doesNotMatch(section,/fetch\(|GM_xmlhttpRequest\(|Submit Inspection/);
 });
 
-test('maintenance-due past and unknown dates are not eligible for the present batch',()=>{
+test('maintenance-due dates do not change asset inspection eligibility',()=>{
   const at = date => [date.getMonth()+1,date.getDate(),date.getFullYear()]
     .map((value,i)=>i<2?String(value).padStart(2,'0'):String(value))
     .join('/');
@@ -136,5 +136,7 @@ test('maintenance-due past and unknown dates are not eligible for the present ba
     ['Not Yet Due','Not Verified',true,at(later)],
     ['No Date','Not Verified',true,'unparseable']
   ])();
-  assert.deepEqual(rows.map(row=>row.maintenanceBlocked),[true,false,true]);
+  assert.ok(rows.every(row => row.status === 'not verified'));
+  assert.ok(rows.every(row => !('maintenanceBlocked' in row)));
+  assert.deepEqual(rows.map(row => row.title), ['Due Maintenance','Not Yet Due','No Date']);
 });
