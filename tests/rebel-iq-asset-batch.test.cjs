@@ -2,7 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path');
 const src=fs.readFileSync(path.join(__dirname,'../beta/rebel-iq.user.js'),'utf8');
-const begin=src.indexOf('  function buildReviewedAssetChecklist() {');
+const begin=src.indexOf('  function buildReviewedAssetChecklist(rowsOverride) {');
 const end=src.indexOf('  function beginAssets() {',begin);
 assert.ok(begin>0&&end>begin,'Vector-style reviewed asset checklist present');
 const logic=src.slice(begin,end);
@@ -53,7 +53,7 @@ function scenario(options={}){
   const stop=node('[data-asset-check-stop]','button');
   const load=node('[data-asset-check-load]','button');
   const wrap=node('[data-asset-check-attest-wrap]');
-  const section={querySelector:key=>sections.get(key)||null};
+  const section={style:{display:'block'},querySelector:key=>sections.get(key)||null};
   const document={
     createElement:tag=>new MockElement(tag),
     getElementById:()=>section
@@ -72,11 +72,12 @@ function scenario(options={}){
     }
   };
   const code='let assetGuideLastScan=0,assetBatchPreview=null,'+
-    'assetBatchRunning=false,assetBatchCancel=false,'+
-    'assetBatchPilotConfirmed=false;const attemptedAssetRecords=new Set();\n'+
+    'assetBatchRunning=false,assetBatchCancel=false,assetScanBusy=false;'+
+    'const attemptedAssetRecords=new Set();\n'+
+    'async function scanAllNativeAssetRows(){return readAssetReviewRows();}\n'+
     logic+'\nreturn {loadAssetChecklist,buildReviewedAssetChecklist,'+
     'recordReviewedAssetChecklist,countReviewedAssetChoices,'+
-    'getPreview:()=>assetBatchPreview,getPilot:()=>assetBatchPilotConfirmed,'+
+    'getPreview:()=>assetBatchPreview,'+
     'getAttempts:()=>attemptedAssetRecords};';
   const create=new Function('document','isAssetPage','inspectionId',
     'ASSET_UNIT_ID','t504Visible','readPending','readRopes',
@@ -98,9 +99,9 @@ function scenario(options={}){
     }
   };
 }
-test('Load finds every Not Verified row and defaults answers to Verified without writing',()=>{
+test('Load finds every Not Verified row and defaults answers to Verified without writing',async()=>{
   const h=scenario();
-  h.app.loadAssetChecklist();
+  await h.app.loadAssetChecklist();
   const p=h.app.getPreview();
   assert.equal(p.items.length,7);
   assert.ok(p.items.every(item=>item.choice==='verified'));
@@ -112,8 +113,8 @@ test('Load finds every Not Verified row and defaults answers to Verified without
   assert.equal(p.items.filter(item=>item.recordable).length,4);
   assert.equal(p.unmapped,82);
 });
-test('the inspector can change individual defaults to Missing, Not Working, Damaged and Skip',()=>{
-  const h=scenario();h.app.loadAssetChecklist();
+test('the inspector can change individual defaults to Missing, Not Working, Damaged and Skip',async()=>{
+  const h=scenario();await h.app.loadAssetChecklist();
   h.attest.checked=true;
   h.choice(0,'missing');h.choice(1,'not_working');
   h.choice(2,'damaged');h.choice(3,'skip');
@@ -127,55 +128,47 @@ test('the inspector can change individual defaults to Missing, Not Working, Dama
 });
 test('no native actions occur before review and explicit inspected/present/working attestation',async()=>{
   const h=scenario();
-  h.app.loadAssetChecklist();
+  await h.app.loadAssetChecklist();
   await h.app.recordReviewedAssetChecklist();
   assert.equal(h.clicks(),0);
   assert.match(h.progress.textContent,/Not ready/);
   assert.equal(h.rows[0].status,'not verified');
 });
-test('first field test is one asset; second action preserves exception edits and records the rest',async()=>{
-  const h=scenario();h.app.loadAssetChecklist();
+test('one reviewed action records all present and working choices but not exceptions',async()=>{
+  const h=scenario();await h.app.loadAssetChecklist();
   h.choice(2,'missing');h.choice(3,'skip');
   h.attest.checked=true;
   await h.app.recordReviewedAssetChecklist();
-  assert.equal(h.clicks(),1);
-  assert.equal(h.app.getPilot(),true);
+  assert.equal(h.clicks(),3,'213, EFS-2001 and 555 recorded sequentially');
   assert.equal(h.rows[0].status,'verified');
-  assert.equal(h.rows[1].status,'not verified');
-  assert.equal(h.app.getPreview().items.find(x=>x.assetTag==='CM2328').choice,'missing');
-  assert.equal(h.attest.checked,false);
-  assert.match(h.progress.textContent,/Test asset confirmed VERIFIED/);
-  h.attest.checked=true;
-  await h.app.recordReviewedAssetChecklist();
-  assert.equal(h.clicks(),3,'only EFS-2001 and 555 followed confirmed pilot');
-  assert.equal(h.rows.find(x=>x.assetTag==='EFS-2001').status,'verified');
+  assert.equal(h.rows[1].status,'verified');
   assert.equal(h.rows.find(x=>x.assetTag==='555').status,'verified');
   assert.equal(h.rows.find(x=>x.assetTag==='CM2328').status,'not verified');
   assert.equal(h.rows.find(x=>x.assetTag==='DUP').status,'not verified');
   assert.equal(h.app.getPreview(),null);
+  assert.match(h.progress.textContent,/3 asset\(s\) confirmed Verified/);
 });
 test('nonconfirming native attempt stops and never claims Verified, even after retry',async()=>{
-  const h=scenario({neverConfirm:true});h.app.loadAssetChecklist();
+  const h=scenario({neverConfirm:true});await h.app.loadAssetChecklist();
   h.attest.checked=true;
   await h.app.recordReviewedAssetChecklist();
   assert.equal(h.clicks(),1);
   assert.match(h.progress.textContent,/Official Verified status not confirmed/);
-  assert.equal(h.app.getPilot(),false);
   assert.equal(h.app.getAttempts().size,1);
-  h.app.loadAssetChecklist();h.attest.checked=true;
+  await h.app.loadAssetChecklist();h.attest.checked=true;
   await h.app.recordReviewedAssetChecklist();
   assert.equal(h.clicks(),1,'already attempted tag is not retried automatically');
 });
-test('unreadable/duplicate tags are displayed in the review but not silently certified',()=>{
-  const h=scenario();h.app.loadAssetChecklist();
+test('unreadable/duplicate tags are displayed in the review but not silently certified',async()=>{
+  const h=scenario();await h.app.loadAssetChecklist();
   const p=h.app.getPreview();
   assert.equal(p.items.filter(x=>!x.recordable).length,3);
   assert.match(h.summary.textContent,/3 manual \(no unique tag\)/);
-  assert.match(h.progress.textContent,/without unique tags must use Operative IQ manually/);
+  assert.match(h.summary.textContent,/manual \(no unique tag\)/);
 });
 test('wrong T504 unit, wrong route or unavailable native totals never allow recording',async()=>{
   for(const options of [{wrongUnit:true},{wrongRoute:true},{nativeNull:true},{activeDraft:true}]){
-    const h=scenario(options);h.app.loadAssetChecklist();
+    const h=scenario(options);await h.app.loadAssetChecklist();
     assert.equal(h.app.getPreview(),null,JSON.stringify(options));
     h.attest.checked=true;
     await h.app.recordReviewedAssetChecklist();
@@ -183,18 +176,19 @@ test('wrong T504 unit, wrong route or unavailable native totals never allow reco
   }
 });
 test('native button missing or unavailable stops before any asset is recorded',async()=>{
-  const h=scenario({nativeMissing:true});h.app.loadAssetChecklist();
+  const h=scenario({nativeMissing:true});await h.app.loadAssetChecklist();
   h.attest.checked=true;
   await h.app.recordReviewedAssetChecklist();
   assert.equal(h.clicks(),0);
   assert.match(h.progress.textContent,/Native Operative IQ tag control unavailable/);
 });
-test('no direct API writes, no unchecked bulk PASS, no modal and no extra popup',()=>{
+test('no direct API writes, no unchecked bulk PASS, no modal and no extra popup',async()=>{
   assert.match(logic,/attest\.checked/);
   assert.match(logic,/attemptedAssetRecords\.add\(key\)/);
   assert.match(logic,/native\.button\.click\(\)/);
   assert.match(logic,/actual.length===1 && actual\[0\].title===item.title/);
-  assert.match(logic,/assetBatchPilotConfirmed\?chosen.length:1/);
+  assert.match(logic,/const maximum=chosen.length/);
+  assert.doesNotMatch(logic,/assetBatchPilotConfirmed/);
   assert.doesNotMatch(logic,/\bfetch\(|GM_xmlhttpRequest\(|\.submit\(|window\.confirm\(/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.16/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.17/m);
 });

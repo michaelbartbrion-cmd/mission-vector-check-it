@@ -46,18 +46,17 @@ test('other units or non-asset pages never expose an asset review',()=>{
 });
 test('asset guide reads native statuses; inspection batch requires attended action',()=>{
   const block=src.slice(start,src.indexOf('  function findNativeAssetTagEntry() {',start));
-  assert.match(block,/Load Unverified Assets/);
+  assert.match(block,/Refresh Unverified List/);
   assert.match(block,/Record Verified Assets/);
   assert.match(block,/data-asset-check-attest/);
   assert.doesNotMatch(block,/\.click\(|\.dispatchEvent\(|fetch\(|GM_xmlhttpRequest\(|Submit Inspection/);
 });
-test('asset review remains a separate phase after confirmed saved Tour draft',()=>{
-  assert.match(src,/Daily Tour \+ Assets/);
-  assert.match(src,/Asset Checks/);
-  assert.match(src,/const assetFollowup = readAssetFollowup\(\)/);
-  assert.match(src,/location\.assign\(assetUrl\(followup\.unitId\)\)/);
-  assert.match(src,/const IQ_VERSION = '0\.1\.16'/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.16/m);
+test('asset review is independent from Daily Tour',()=>{
+  assert.match(src,/button\('Daily Tour', 'daily'\)/);
+  assert.match(src,/button\('Assets', 'assets'\)/);
+  assert.match(src,/openAssetReviewScreen\(\)/);
+  assert.match(src,/const IQ_VERSION = '0\.1\.17'/);
+  assert.match(src,/^\/\/ @version\s+0\.1\.17/m);
 });
 
 test('full 90-item T504 list includes 24 cards lacking location and tag metadata',()=>{
@@ -100,16 +99,16 @@ test('unmatched asset coverage is visibly disclosed and native counts are author
   const block=src.slice(src.indexOf('  function refreshAssetReviewGuide() {'),
     src.indexOf('  function findNativeAssetTagEntry() {'));
   assert.match(block,/readNativeAssetTotals\(\)/);
-  assert.match(block,/Unmapped equipment must be verified in Operative IQ/);
-  assert.match(block,/Rebel IQ can identify/);
+  assert.match(block,/not loaded or not identifiable/);
+  assert.match(block,/Found /);
   assert.doesNotMatch(block,/Maintenance Due/);
   assert.doesNotMatch(block,/\.click\(|Submit Inspection/);
 });
 
 test('asset checklist defaults to verified draft and permits exceptions before a human record action',()=>{
-  const section=src.slice(src.indexOf('  function makeAssetReviewSection() {'),
+  const section=src.slice(src.indexOf('  function makeAssetReviewScreen() {'),
     src.indexOf('  function beginAssets() {'));
-  assert.match(section,/Load Unverified Assets/);
+  assert.match(section,/Refresh Unverified List/);
   assert.match(section,/Record Verified Assets/);
   assert.match(section,/\['verified','Verified'\]/);
   assert.match(section,/\['missing','Missing'\]/);
