@@ -92,12 +92,11 @@ function scenario(config={}) {
     clicks:()=>clicks};
 }
 
-test('batch plan excludes exceptions, maintenance due, no tags and duplicate tags',()=>{
+test('batch excludes exceptions, no tags and duplicates but NOT maintenance due',()=>{
   const {app}=scenario();
   const p=app.buildAssetBatchPlan('CM2328');
-  assert.deepEqual(p.items.map(x=>x.assetTag),['213','555']);
+  assert.deepEqual(p.items.map(x=>x.assetTag),['213','EFS-2001','555']);
   assert.equal(p.blocked.exception,1);
-  assert.equal(p.blocked.maintenance,1);
   assert.equal(p.blocked.untagged,1);
   assert.equal(p.blocked.duplicate,2);
   assert.equal(p.blocked.otherStatus,1);
@@ -113,7 +112,7 @@ test('mistyped exception, unavailable native totals, wrong unit and other draft 
 test('preview prepares a disclosed batch but cannot certify until physical attestation',async()=>{
   const h=scenario();
   h.app.prepareAssetBatchPreview();
-  assert.equal(h.app.getPreview().items.length,2);
+  assert.equal(h.app.getPreview().items.length,3);
   assert.match(h.plan.textContent,/Safety pilot/);
   assert.match(h.plan.textContent,/not mapped/);
   assert.match(h.action.textContent,/Pilot/);
@@ -133,13 +132,14 @@ test('single-item field pilot verifies only one and requires another preview for
   assert.equal(h.app.isPilotConfirmed(),true);
   assert.match(h.progress.textContent,/Pilot confirmed/);
   h.app.prepareAssetBatchPreview();
-  assert.equal(h.app.getPreview().items.length,1);
-  assert.match(h.action.textContent,/Verify Inspected Assets \(1\)/);
+  assert.equal(h.app.getPreview().items.length,2);
+  assert.match(h.action.textContent,/Verify Inspected Assets \(2\)/);
   h.attest.checked=true;
   await h.app.runInspectedAssetBatch();
-  assert.equal(h.clicks(),2);
+  assert.equal(h.clicks(),3);
+  assert.equal(h.rows.find(row=>row.assetTag==='EFS-2001').status,'verified');
   assert.equal(h.rows.find(row=>row.assetTag==='555').status,'verified');
-  assert.match(h.progress.textContent,/Verified 1\/1/);
+  assert.match(h.progress.textContent,/Verified 2\/2/);
 });
 test('native verification uncertainty stops after one click and does not unlock bulk',async()=>{
   const h=scenario({update:false});
@@ -168,5 +168,16 @@ test('all asset writes are sequential native UI with exact receipt and abort on 
   assert.match(block,/assetBatchCancel/);
   assert.match(block,/Date\.now\(\) - plan\.preparedAt > 10\*60\*1000/);
   assert.doesNotMatch(block,/\bfetch\(|GM_xmlhttpRequest\(|\.submit\(/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.14/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.15/m);
+});
+
+test('separate Maintenance Due flag does not block presence-and-working checks',()=>{
+  const h=scenario();
+  const p=h.app.buildAssetBatchPlan('CM2328');
+  const due=p.items.find(x=>x.assetTag==='EFS-2001');
+  assert.ok(due,'maintenance-due asset is included when not excepted');
+  assert.equal(h.rows.find(x=>x.assetTag==='EFS-2001').maintenanceBlocked,true);
+  assert.doesNotMatch(block,/row\\.maintenanceBlocked|blocked\\.maintenance/);
+  assert.match(src,/PRESENT and WORKING/);
+  assert.doesNotMatch(src,/No maintenance-due or exception assets are included/);
 });

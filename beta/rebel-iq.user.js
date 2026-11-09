@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.14
+// @version      0.1.15
 // @description  Prepare T504 daily, weekly, and Thursday rope drafts. Save In Process only; never submit.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.14' };
+  window.__rebelIqT504 = { version: '0.1.15' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.14';
+  const IQ_VERSION = '0.1.15';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -487,19 +487,10 @@
         // A tag differentiates assets with the same visible description.
         // Do not infer identity from position, description or a fake serial.
         const tag = text.match(/\bAsset\s*Tag\s*:\s*([A-Za-z0-9._-]{1,80})/i)?.[1] || '';
-        // A current or unparseable maintenance-due requirement requires
-        // individual attention and is not safe for present-batch recording.
-        const due = text.match(/Maintenance\s+Due\s*:\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/i);
-        let maintenanceBlocked = /Maintenance\s+Due\s*:/i.test(text) && !due;
-        if (due) {
-          const m = Number(due[1]), d = Number(due[2]), y = Number(due[3]);
-          const at = new Date(y,m-1,d);
-          const today = new Date(); today.setHours(0,0,0,0);
-          maintenanceBlocked = at.getFullYear() !== y || at.getMonth() !== m-1 ||
-            at.getDate() !== d || at <= today;
-        }
+        // Maintenance is handled by another department, and never gates
+        // this crew's verification of presence and working condition.
         const row = {element: card, title: title.slice(0, 110), status,
-          assetTag: tag.trim(), maintenanceBlocked};
+          assetTag: tag.trim()};
         const hasMetadata = /\b(?:Location|Asset Tag|Asset Type|Asset Class|Part|Qty|Quantity)\s*:/i.test(text);
         if (hasMetadata) {
           fallback = row;
@@ -542,8 +533,9 @@
 
     const instructions = document.createElement('div');
     instructions.textContent = 'Physically inspect the T504 assets first. ' +
-      'List any missing, damaged or unserviceable tags below. ' +
-      'Rebel IQ will leave those and maintenance-due items for manual attention.';
+      'List any missing, damaged or nonworking tags below. ' +
+      'Maintenance Due belongs to another department and does not stop ' +
+      'confirmation that an asset is present and working.';
     instructions.style.cssText = 'margin:6px 0;color:#526a78;';
 
     const excludedLabel = document.createElement('label');
@@ -688,9 +680,7 @@
     if (summary) summary.textContent = native
       ? 'Operative IQ: ' + native.total + ' Assets | ' +
         native.required + ' Action Required | ' +
-        native.completed + ' Completed' +
-        (Number.isInteger(native.maintenance)
-          ? ' | ' + native.maintenance + ' Maintenance Due' : '')
+        native.completed + ' Completed'
       : 'Detected only: ' + counts.not + ' Not Verified | ' +
         counts.verified + ' Verified | ' + counts.attention + ' Attention';
     if (coverage) {
@@ -871,7 +861,7 @@
       return {error: 'Exception tag not found in the current T504 list: ' +
         unknownExceptions.slice(0,4).join(', ') + '. No batch prepared.'};
     const exceptions = new Set(excludedTags);
-    const blocked = {exception:0, maintenance:0, untagged:0,
+    const blocked = {exception:0, untagged:0,
       duplicate:0, otherStatus:0};
     const items = [];
     for (const row of rows) {
@@ -881,7 +871,6 @@
       }
       const tag = clean(row.assetTag).toUpperCase();
       if (exceptions.has(tag)) {blocked.exception++;continue;}
-      if (row.maintenanceBlocked) {blocked.maintenance++;continue;}
       if (!tag || !/^[A-Z0-9._-]{1,80}$/.test(tag)) {blocked.untagged++;continue;}
       if (tagCounts.get(tag) !== 1) {blocked.duplicate++;continue;}
       items.push({assetTag:tag, title:row.title});
@@ -922,7 +911,7 @@
       return;
     }
     assetBatchPreview = proposed;
-    const remaining = proposed.blocked.maintenance + proposed.blocked.untagged +
+    const remaining = proposed.blocked.untagged +
       proposed.blocked.duplicate + proposed.blocked.exception;
     const limit = assetBatchPilotConfirmed ? proposed.items.length : 1;
     output.textContent = proposed.items.length + ' uniquely identified candidate(s) | ' +
@@ -930,7 +919,8 @@
       proposed.unmapped + ' native row(s) not mapped. ' +
       (assetBatchPilotConfirmed ? 'Ready to record selected inspected assets.' :
         'Safety pilot: the first run records ONE asset and checks the native result.') +
-      ' No maintenance-due or exception assets are included.';
+      ' Known missing, damaged or nonworking assets are excluded. ' +
+      'Maintenance stays with its responsible department.';
     const details = document.createElement('details');
     details.style.cssText = 'margin-top:4px;';
     const sum = document.createElement('summary');
@@ -946,8 +936,8 @@
     const wording = section.querySelector('[data-asset-batch-attest-text]');
     if (wording) wording.textContent =
       'I physically inspected all ' + proposed.items.length +
-      ' included T504 assets, confirmed they are present and serviceable, ' +
-      'and excluded every known missing/damaged item.';
+      ' included T504 assets, confirmed they are PRESENT and WORKING, ' +
+      'and excluded every known missing, damaged or nonworking item.';
     if (attest) {attest.checked = false;attest.disabled = false;}
     const button = section.querySelector('[data-asset-batch-run]');
     if (button) {
@@ -1010,7 +1000,7 @@
       const rows = readAssetReviewRows().filter(row =>
         clean(row.assetTag).toUpperCase() === item.assetTag);
       if (rows.length !== 1 || rows[0].title !== item.title ||
-          rows[0].status !== 'not verified' || rows[0].maintenanceBlocked) {
+          rows[0].status !== 'not verified') {
         failed = 'Asset identity/status changed for tag ' + item.assetTag + '.';break;
       }
       const native = findNativeAssetTagEntry();
@@ -1079,7 +1069,8 @@
         'Preview again to record the remaining inspected assets together.');
     else output('Verified ' + confirmed + '/' + maximum +
       ' selected assets in Operative IQ. ' +
-      'Inspect excluded, maintenance-due, and unmapped items separately.');
+      'Inspect excluded and unmapped assets separately. ' +
+      'Maintenance remains with the responsible department.');
   }
 
   function beginAssets() {
