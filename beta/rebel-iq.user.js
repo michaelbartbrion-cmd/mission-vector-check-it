@@ -1074,7 +1074,8 @@
           if(assetBatchCancel || !isAssetPage() ||
               inspectionId()!==ASSET_UNIT_ID || location.pathname!==plan.route)break;
           const actual=readAssetReviewRows().filter(row=>
-            clean(row.assetTag).toUpperCase()===item.assetTag);
+            item.uniqueTag ? clean(row.assetTag).toUpperCase()===item.assetTag :
+              row.title===item.title);
           if(actual.length===1 && actual[0].title===item.title &&
               actual[0].status==='verified'){verified=true;break;}
         }
