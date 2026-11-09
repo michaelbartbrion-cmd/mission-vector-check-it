@@ -72,7 +72,7 @@ test('unscannable native page degrades to currently visible rows without claimin
       {querySelectorAll:()=>[]},()=>[single],x=>String(x??'').trim(),cb=>cb(),()=>null,()=>true,()=>({overflowY:'auto'}),'rebel-iq-t504-panel','rebel-iq-t504-asset-guide'
     );
   assert.equal((await run()).length,1);
-  assert.match(src,/Incomplete:/);
+  assert.match(src,/Native asset coverage incomplete/);
 });
 test('the Assets button opens one full-screen overlay while Daily Tour stays independent',()=>{
   assert.match(src,/button\('Daily Tour', 'daily'\)/);
@@ -82,5 +82,5 @@ test('the Assets button opens one full-screen overlay while Daily Tour stays ind
   assert.match(src,/screen\.style\.display='none'/);
   assert.match(src,/position:fixed;inset:0/);
   assert.doesNotMatch(src,/Daily Tour \+ Assets|readAssetFollowup/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.19/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.20/m);
 });

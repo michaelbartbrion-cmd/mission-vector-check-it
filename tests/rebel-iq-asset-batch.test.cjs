@@ -79,6 +79,7 @@ function scenario(options={}){
     'assetBatchRunning=false,assetBatchCancel=false,assetScanBusy=false;'+
     'const attemptedAssetRecords=new Set();\n'+
     'async function scanAllNativeAssetRows(){return readAssetReviewRows();}\n'+
+    'const isExcludedAsset=row=>/^Paratech\\b/i.test(clean(row?.title||\'\'));\n'+
     logic+'\nreturn {loadAssetChecklist,buildReviewedAssetChecklist,'+
     'recordReviewedAssetChecklist,countReviewedAssetChoices,'+
     'getPreview:()=>assetBatchPreview,'+
@@ -167,8 +168,8 @@ test('unreadable/duplicate tags are displayed in the review but not silently cer
   const h=scenario();await h.app.loadAssetChecklist();
   const p=h.app.getPreview();
   assert.equal(p.items.filter(x=>!x.recordable).length,3);
-  assert.match(h.summary.textContent,/3 manual catalog\/ambiguous/);
-  assert.match(h.summary.textContent,/manual catalog\/ambiguous/);
+  assert.match(h.summary.textContent,/3 manual\/ambiguous/);
+  assert.match(h.summary.textContent,/manual\/ambiguous/);
 });
 test('wrong T504 unit, wrong route or unavailable native totals never allow recording',async()=>{
   for(const options of [{wrongUnit:true},{wrongRoute:true},{nativeNull:true},{activeDraft:true}]){
@@ -194,7 +195,7 @@ test('no direct API writes, no unchecked bulk PASS, no modal and no extra popup'
   assert.match(logic,/const maximum=chosen.length/);
   assert.doesNotMatch(logic,/assetBatchPilotConfirmed/);
   assert.doesNotMatch(logic,/\bfetch\(|GM_xmlhttpRequest\(|\.submit\(|window\.confirm\(/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.19/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.20/m);
 });
 
 test('native row check control records present even when tag scanner cannot be found',async()=>{
@@ -206,23 +207,20 @@ test('native row check control records present even when tag scanner cannot be f
   assert.equal(h.clicks(),5,'each uniquely identified pending row gets its native check');
   assert.match(h.progress.textContent,/5 asset\(s\) confirmed Verified/);
 });
-test('UNASSIGNED assets can be recorded by a unique native asset row check, never by fake tags',async()=>{
+test('Paratech alone is outside the crew check, never offered or recorded',async()=>{
   const h=scenario({rowControls:true,nativeMissing:true,rows:[
-    ['Paratech Base Plate','UNASSIGNED','not verified'],
-    ['Paratech Contour Base','UNASSIGNED','not verified'],
-    ['Paratech Extension','UNASSIGNED','not verified'],
-    ['Already Checked','UNASSIGNED','verified']
+    ['Paratech Base Plate','UNASSIGNED','not verified',6],
+    ['Paratech Contour Base','UNASSIGNED','not verified',4],
+    ['Paratech Extension','UNASSIGNED','not verified',3],
+    ['Already Checked','COMP1','verified',1]
   ]});
   await h.app.loadAssetChecklist();
-  const p=h.app.getPreview();
-  assert.equal(p.items.length,3);
-  assert.ok(p.items.every(x=>x.recordable && x.uniqueTitle && !x.uniqueTag));
+  assert.equal(h.app.getPreview(),null);
+  assert.match(h.progress.textContent,/No unverified crew assets/);
   h.attest.checked=true;
   await h.app.recordReviewedAssetChecklist();
-  assert.equal(h.clicks(),3);
-  assert.match(h.progress.textContent,/3 asset\(s\) confirmed Verified/);
+  assert.equal(h.clicks(),0);
 });
-
 test('real T504 layout has 52 unverified entries representing 76 required units, not 24 missing',async()=>{
   const pars=[6,4,3,3,2,2,2,4,2,2,2,4];
   const nativeRows=[
@@ -233,13 +231,17 @@ test('real T504 layout has 52 unverified entries representing 76 required units,
   const h=scenario({rows:nativeRows,nativeMissing:true});
   await h.app.loadAssetChecklist();
   const p=h.app.getPreview();
-  assert.equal(p.items.length,52);
-  assert.equal(p.pendingUnits,76);
+  assert.equal(p.items.length,40);
+  assert.equal(p.pendingUnits,40);
+  assert.equal(p.excludedCount,12);
+  assert.equal(p.excludedUnits,36);
   assert.equal(p.unmapped,0);
   assert.equal(p.pendingUnmapped,0);
   assert.equal(p.items.filter(item=>item.recordable).length,40);
-  assert.equal(p.items.filter(item=>!item.recordable).length,12);
-  assert.match(h.summary.textContent,/52 unverified entries \(76 required pieces\)/);
+  assert.equal(p.items.filter(item=>!item.recordable).length,0);
+  assert.match(h.summary.textContent,/40 unverified entries \(40 required pieces\)/);
   assert.doesNotMatch(h.summary.textContent,/24 pieces unaccounted for/);
   assert.equal(h.clicks(),0,'reviewing drafts never updates physical equipment');
+  assert.ok(p.items.every(item=>!item.title.startsWith('Paratech')));
+  assert.match(h.summary.textContent,/Paratech excluded \(12 entries, 36 pieces\)/);
 });

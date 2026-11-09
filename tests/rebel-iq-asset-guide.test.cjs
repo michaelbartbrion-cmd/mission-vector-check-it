@@ -63,8 +63,8 @@ test('asset review is independent from Daily Tour',()=>{
   assert.match(src,/button\('Daily Tour', 'daily'\)/);
   assert.match(src,/button\('Assets', 'assets'\)/);
   assert.match(src,/openAssetReviewScreen\(\)/);
-  assert.match(src,/const IQ_VERSION = '0\.1\.19'/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.19/m);
+  assert.match(src,/const IQ_VERSION = '0\.1\.20'/);
+  assert.match(src,/^\/\/ @version\s+0\.1\.20/m);
 });
 
 test('full 90-item T504 list includes 24 cards lacking location and tag metadata',()=>{
@@ -107,8 +107,8 @@ test('unmatched asset coverage is visibly disclosed and native counts are author
   const block=src.slice(src.indexOf('  function refreshAssetReviewGuide() {'),
     src.indexOf('  function findNativeAssetTagEntry() {'));
   assert.match(block,/readNativeAssetTotals\(\)/);
-  assert.match(block,/Incomplete:/);
-  assert.match(block,/Complete:/);
+  assert.match(block,/Native asset coverage incomplete/);
+  assert.match(block,/Paratech excluded:/);
   assert.doesNotMatch(block,/Maintenance Due/);
   assert.doesNotMatch(block,/\.click\(|Submit Inspection/);
 });
