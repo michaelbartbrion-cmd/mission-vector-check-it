@@ -556,9 +556,9 @@
     const totals = readNativeAssetTotals();
     const reconciles = () => {
       const rows = [...collected.values()];
-      const totalUnits = rows.reduce((sum,row) => sum + row.quantity,0);
+      const totalUnits = rows.reduce((sum,row) => sum + (row.quantity||1),0);
       const pendingUnits = rows.filter(row => row.status==='not verified')
-        .reduce((sum,row) => sum + row.quantity,0);
+        .reduce((sum,row) => sum + (row.quantity||1),0);
       return !!totals && totalUnits===totals.total && pendingUnits===totals.required;
     };
     // Direct authenticated T504 DOM inspection: 66 native rows represent
