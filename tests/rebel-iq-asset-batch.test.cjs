@@ -60,6 +60,10 @@ function scenario(options={}){
   };
   const input=new FakeInput();
   let clicks=0;
+  const nativeRowControl=row=>!options.rowControls?null:{
+    isConnected:true,
+    click(){clicks++;if(!options.neverConfirm)row.status='verified';}
+  };
   const native=()=>options.nativeMissing?null:{
     input,button:{
       isConnected:true,
@@ -82,14 +86,14 @@ function scenario(options={}){
   const create=new Function('document','isAssetPage','inspectionId',
     'ASSET_UNIT_ID','t504Visible','readPending','readRopes',
     'readNativeAssetTotals','readAssetReviewRows','clean',
-    'location','findNativeAssetTagEntry','HTMLInputElement',
+    'location','findNativeAssetTagEntry','findNativeRowVerifyControl','HTMLInputElement',
     'Event','setTimeout','refreshAssetReviewGuide','ASSET_GUIDE_ID',code);
   const app=create(document,()=>options.wrongRoute!==true,
     ()=>options.wrongUnit?'9999':'60443','60443',()=>true,
     ()=>options.activeDraft?{}:null,()=>null,
     ()=>options.nativeNull?null:{total:90,required:76,completed:14,maintenance:16},
     ()=>rows,clean,{pathname:'/inspections/60443/assets/group/-1'},
-    native,FakeInput,class Event{constructor(t){this.type=t;}},
+    native,nativeRowControl,FakeInput,class Event{constructor(t){this.type=t;}},
     fn=>fn(),()=>{},'rebel-iq-t504-asset-guide');
   return {app,rows,list,attest,record,summary,progress,load,stop,input,
     clicks:()=>clicks,
@@ -163,7 +167,7 @@ test('unreadable/duplicate tags are displayed in the review but not silently cer
   const h=scenario();await h.app.loadAssetChecklist();
   const p=h.app.getPreview();
   assert.equal(p.items.filter(x=>!x.recordable).length,3);
-  assert.match(h.summary.textContent,/3 manual \(no unique tag\)/);
+  assert.match(h.summary.textContent,/3 manual \(ambiguous identity\)/);
   assert.match(h.summary.textContent,/manual \(no unique tag\)/);
 });
 test('wrong T504 unit, wrong route or unavailable native totals never allow recording',async()=>{
@@ -180,7 +184,7 @@ test('native button missing or unavailable stops before any asset is recorded',a
   h.attest.checked=true;
   await h.app.recordReviewedAssetChecklist();
   assert.equal(h.clicks(),0);
-  assert.match(h.progress.textContent,/Native Operative IQ tag control unavailable/);
+  assert.match(h.progress.textContent,/Cannot identify the native Present\/Verified control/);
 });
 test('no direct API writes, no unchecked bulk PASS, no modal and no extra popup',async()=>{
   assert.match(logic,/attest\.checked/);
@@ -190,5 +194,31 @@ test('no direct API writes, no unchecked bulk PASS, no modal and no extra popup'
   assert.match(logic,/const maximum=chosen.length/);
   assert.doesNotMatch(logic,/assetBatchPilotConfirmed/);
   assert.doesNotMatch(logic,/\bfetch\(|GM_xmlhttpRequest\(|\.submit\(|window\.confirm\(/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.17/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.18/m);
+});
+
+test('native row check control records present even when tag scanner cannot be found',async()=>{
+  const h=scenario({rowControls:true,nativeMissing:true});
+  await h.app.loadAssetChecklist();
+  h.attest.checked=true;
+  await h.app.recordReviewedAssetChecklist();
+  assert.equal(h.rows.filter(x=>x.status==='verified').length,8);
+  assert.equal(h.clicks(),7,'each of the seven pending rows gets its own native row check');
+  assert.match(h.progress.textContent,/7 asset\(s\) confirmed Verified/);
+});
+test('UNASSIGNED assets can be recorded by a unique native asset row check, never by fake tags',async()=>{
+  const h=scenario({rowControls:true,nativeMissing:true,rows:[
+    ['Paratech Base Plate','UNASSIGNED','not verified'],
+    ['Paratech Contour Base','UNASSIGNED','not verified'],
+    ['Paratech Extension','UNASSIGNED','not verified'],
+    ['Already Checked','UNASSIGNED','verified']
+  ]});
+  await h.app.loadAssetChecklist();
+  const p=h.app.getPreview();
+  assert.equal(p.items.length,3);
+  assert.ok(p.items.every(x=>x.recordable && x.uniqueTitle && !x.uniqueTag));
+  h.attest.checked=true;
+  await h.app.recordReviewedAssetChecklist();
+  assert.equal(h.clicks(),3);
+  assert.match(h.progress.textContent,/3 asset\(s\) confirmed Verified/);
 });
