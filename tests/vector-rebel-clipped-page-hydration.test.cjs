@@ -141,7 +141,7 @@ test('release candidate version is consistent across userscript and managed upda
   const meta=src.match(/^\/\/ @version\s+(\S+)/m)?.[1];
   const runtime=src.match(/const VERSION = '([^']+)'/)?.[1];
   const instance=src.match(/window\.__vectorRebelInstance = \{\s*version: '([^']+)'/)?.[1];
-  assert.equal(meta,'3.2.53');
+  assert.equal(meta,'3.2.54');
   assert.equal(meta,manifest.latestVersion);
   assert.equal(meta,runtime);
   assert.equal(meta,instance);
