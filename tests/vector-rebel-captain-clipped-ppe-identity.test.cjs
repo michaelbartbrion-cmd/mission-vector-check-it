@@ -7,13 +7,16 @@ assert.ok(a>0&&b>a);
 const code=src.slice(a,b)+'\nreturn readCaptainComplianceHistory;';
 function harness({recovered='BALDREE-3290326-BU',accepted=true}={}){
  const calls=[];
- const run=new Function('getMode','isAssetPageFor','resolveClippedPpeNameFromVerifiedDetail',
-  'verifyExpectedAssetPage','revealAssetHistory','readModeCompletionHistory',
+ const run=new Function('getMode','isAssetPageFor','verifyPpeDetailIdentity',
+  'revealAssetHistory','readModeCompletionHistory',
   'SCBA_FACE_MASK_POOL',code)(
   mode=>({title:mode+' mode',short:mode,templates:{299900:'T1'}}),
   ()=>true,
-  ()=>recovered,
-  async item=>{calls.push(['verify',item.assetId]);return accepted},
+  async item=>{
+   calls.push(['verify',recovered||item.assetId]);
+   return accepted ? {verifiedItem:recovered?{...item,assetId:recovered}:item,
+    restoredName:recovered} : null;
+  },
   async(item,title)=>{calls.push(['reveal',item.assetId,title])},
   async(item,mode)=>{calls.push(['read',item.assetId,mode]);return {mode,dates:[]}},
   '9999'
@@ -41,6 +44,6 @@ test('Captain audit without a clipped name continues strict original verificatio
 });
 test('Audit repair is read-only and cannot change the PPE inventory or submit inspections',()=>{
  const audit=src.slice(a,b);
- assert.match(audit,/resolveClippedPpeNameFromVerifiedDetail/);
+ assert.match(audit,/verifyPpeDetailIdentity/);
  assert.doesNotMatch(audit,/item\.assetId\s*=|Submit Inspection|\.click\(/);
 });
