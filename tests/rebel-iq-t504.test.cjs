@@ -10,7 +10,7 @@ test('Rebel IQ is limited to the authorized Operative IQ site and T504',()=>{
   assert.match(src, /inspectionId\(\) !== pending\.unitId/);
 });
 test('Both actions save in process without submission',()=>{
-  assert.match(src, /button\('Daily Tour \+ Assets'/);
+  assert.match(src, /button\('Daily Tour'/);
   assert.match(src, /button\('Weekly Check'/);
   assert.match(src, /clean\(button\.textContent\) === 'Save In Process'/);
   assert.match(src, /verified\.save\.click\(\)/);
