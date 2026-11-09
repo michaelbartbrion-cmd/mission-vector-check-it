@@ -11880,17 +11880,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             if(cells.length < labels.length) continue; // transient partial rendering
             const name=clean(cells[indexes.name]?.innerText || cells[indexes.name]?.textContent || '');
             const pool=clean(cells[indexes.pool]?.innerText || cells[indexes.pool]?.textContent || '');
-            const location=clean(cells[indexes.location]?.innerText || cells[indexes.location]?.textContent || '');
+            const itemLocation=clean(cells[indexes.location]?.innerText || cells[indexes.location]?.textContent || '');
             const status=clean(cells[indexes['item status']]?.innerText ||
                 cells[indexes['item status']]?.textContent || '');
             const anchor=cells[indexes.name]?.querySelector('a[href]');
             const href=anchor?.getAttribute('href') || '';
-            const url=href ? new URL(href,location.href) : null;
-            const safeHref=url && url.origin === location.origin &&
+            let url=null;
+            try {if(href)url=new URL(href,window.location.href);} catch {}
+            const safeHref=url && url.origin === window.location.origin &&
                 url.pathname !== '/main/asset-manager' && !/^javascript:/i.test(href)
                 ? url.href : '';
-            if(!name || !pool || !location || !status) continue;
-            const item={name,pool,location,status,href:safeHref};
+            if(!name || !pool || !itemLocation || !status) continue;
+            const item={name,pool,location:itemLocation,status,href:safeHref};
             const scope=scbaAirpackLocation(item);
             if(scope && isScbaAirpackStandardItem(item)) {
                 item.scope=scope.id;
