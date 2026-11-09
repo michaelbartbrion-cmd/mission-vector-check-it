@@ -1088,6 +1088,7 @@
     attest.checked=false;attest.disabled=true;
     assetBatchRunning=true;assetBatchCancel=false;
     let attempted=0,confirmed=0,failed='';
+    const confirmedNames=[];
     for(const item of chosen.slice(0,maximum)) {
       if(assetBatchCancel){failed='Stopped by inspector.';break;}
       if(!isAssetPage() || inspectionId()!==ASSET_UNIT_ID ||
@@ -1151,6 +1152,7 @@
         if(!verified)throw Error('Official Verified status not confirmed');
         confirmed++;
         item.recorded=true;
+        confirmedNames.push(item.title + (item.uniqueTag?' ['+item.assetTag+']':''));
         if(native.mode==='tag') {
           // Do not overwrite independent data entered by the operator.
           const current=clean(native.input.value);
@@ -1175,8 +1177,12 @@
       assetBatchPreview=null;
       if(record)record.disabled=true;
       if(attest)attest.disabled=true;
-      report('Confirmed '+confirmed+'/'+attempted+' attempts. '+failed+
-        ' Remaining equipment unchanged.');
+      report('Operative IQ Verified: '+confirmed+'/'+attempted+
+        ' attempted. '+(confirmedNames.length
+          ? 'Confirmed: '+confirmedNames.slice(0,2).join(', ')+
+            (confirmedNames.length>2?' +'+(confirmedNames.length-2)+' more. ':' ')
+          : 'No native Verified confirmations. ')+
+        'Stopped: '+failed);
       return;
     }
     assetBatchPreview=null;
@@ -1184,8 +1190,12 @@
     const wrap=section.querySelector('[data-asset-check-attest-wrap]');
     if(wrap)wrap.style.display='none';
     if(record)record.disabled=true;
-    report(confirmed+' asset(s) confirmed Verified by Operative IQ. '+
-      'Exceptions and unmapped/untagged assets remain for separate review.');
+    report('Operative IQ confirmed Verified: '+confirmed+'/'+maximum+
+      ' selected assets. '+(confirmedNames.length
+        ? 'Confirmed: '+confirmedNames.slice(0,2).join(', ')+
+          (confirmedNames.length>2?' +'+(confirmedNames.length-2)+' more. ':' ')
+        : 'No native Verified confirmations. ')+
+      'Excluded items remain untouched.');
     assetGuideLastScan=0;refreshAssetReviewGuide();
   }
 
