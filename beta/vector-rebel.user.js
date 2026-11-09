@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.53
+// @version      3.2.54
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.53',
+        version: '3.2.54',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.53';
+    const VERSION = '3.2.54';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -11798,6 +11798,347 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         };
     }
 
+    // ============================================================
+    // STATION 4 SCBA AIRPACKS — STANDARD EQUIPMENT (NOT PPE MASKS)
+    // ============================================================
+    // This is an attended discovery/review draft for self-contained
+    // breathing apparatus assigned to THREE exact native locations.
+    // Neither a PPE-mask inspection nor an official Vector inspection
+    // is inferred from a row appearing on the Standard equipment list.
+    const SCBA_AIRPACK_DRAFT_KEY = 'vector-rebel-station4-airpack-draft-v1';
+    const SCBA_AIRPACK_LOCATIONS = Object.freeze([
+        { id: 'truck504', label: 'Truck 504', location: 'Truck 504: 63000-13',
+          exact: /^Truck 504\s*:\s*63000-13$/i },
+        { id: 'medic504', label: 'Medic 504', location: 'Medic 504: 61000-12',
+          exact: /^Medic 504\s*:\s*61000-12$/i },
+        { id: 'station4', label: 'Station 4 SCBA Room',
+          location: 'Station 4 SCBA Supply Room',
+          exact: /^Station 4 SCBA Supply Room$/i }
+    ]);
+    let scbaAirpackBusy = false;
+
+    function scbaAirpackStandardTable() {
+        if (!/\/main\/asset-manager\/?$/i.test(location.pathname)) return null;
+        const standard = findVectorNavigationTarget('Standard');
+        const ppe = findVectorNavigationTarget('PPE');
+        if (!standard || !ppe || !vectorControlLooksActive(standard)) return null;
+        for (const table of document.querySelectorAll('table,[role="table"]')) {
+            if (!visible(table) || table.closest('#' + PANEL_ID + ',#' + OVERLAY_ID)) continue;
+            const labels = [...table.querySelectorAll('thead th,[role="columnheader"]')]
+                .map(cell => clean(cell.textContent || '').toLowerCase());
+            if (['name','pool','location','item status'].every(name => labels.includes(name))) {
+                return { table, labels };
+            }
+        }
+        return null;
+    }
+
+    function scbaAirpackFilterScope() {
+        // Require the three native filter chips seen on Equipment > Standard.
+        // Matching location names in our own panel is not evidence of an
+        // applied server-side filter.
+        const content = [...document.querySelectorAll(
+            'main,[role="main"],.main-content,.asset-manager,[class*="asset-manager"]')]
+            .filter(el => !el.closest('#' + PANEL_ID + ',#' + OVERLAY_ID))
+            .map(el => el.innerText || '').find(t => /Filtered To\s*:/i.test(t)) ||
+            (document.body.innerText || '');
+        const match = content.match(/Filtered To\s*:\s*([\s\S]{0,340})/i);
+        const band = match ? match[1].split(/(?:Search:|Name\s+Pool\s+Location|Responsible Party|Items per page)/i)[0] : '';
+        const selected = SCBA_AIRPACK_LOCATIONS.filter(loc =>
+            band.toLowerCase().includes(loc.location.toLowerCase()));
+        return {
+            ready: selected.length === SCBA_AIRPACK_LOCATIONS.length,
+            selected: selected.map(loc => loc.id),
+            missing: SCBA_AIRPACK_LOCATIONS.filter(loc => !selected.includes(loc))
+                .map(loc => loc.location)
+        };
+    }
+
+    function isScbaAirpackStandardItem(item) {
+        // SCBA location text on its own is not proof of an airpack.
+        const type = clean(item.name + ' ' + item.pool).toLowerCase();
+        if (/\b(face\s*mask|mask|cylinder|bottle|spare\s*air|battery|charger|hose|regulator\s*only)\b/i.test(type))
+            return false;
+        return /\b(?:air\s?packs?|scba(?:\s*(?:air\s?pack|pack|frame|harness|backpack))?|self[-\s]*contained\s+breathing\s+apparatus)\b/i.test(type);
+    }
+
+    function scbaAirpackLocation(item) {
+        return SCBA_AIRPACK_LOCATIONS.find(loc => loc.exact.test(clean(item.location))) || null;
+    }
+
+    function scbaAirpackVisibleRows() {
+        const target = scbaAirpackStandardTable();
+        if (!target) throw new Error('Open Equipment > Standard before looking for SCBA airpacks.');
+        const {table,labels} = target;
+        const indexes = Object.fromEntries(
+            ['name','pool','location','item status'].map(name=>[name,labels.indexOf(name)])
+        );
+        const rows = [...table.querySelectorAll('tbody tr,[role="rowgroup"] [role="row"]')];
+        const result=[];
+        for(const row of rows){
+            const cells=[...row.querySelectorAll(':scope > td,:scope > [role="cell"]')];
+            if(cells.length < labels.length) continue; // transient partial rendering
+            const name=clean(cells[indexes.name]?.innerText || cells[indexes.name]?.textContent || '');
+            const pool=clean(cells[indexes.pool]?.innerText || cells[indexes.pool]?.textContent || '');
+            const location=clean(cells[indexes.location]?.innerText || cells[indexes.location]?.textContent || '');
+            const status=clean(cells[indexes['item status']]?.innerText ||
+                cells[indexes['item status']]?.textContent || '');
+            const anchor=cells[indexes.name]?.querySelector('a[href]');
+            const href=anchor?.getAttribute('href') || '';
+            const url=href ? new URL(href,location.href) : null;
+            const safeHref=url && url.origin === location.origin &&
+                url.pathname !== '/main/asset-manager' && !/^javascript:/i.test(href)
+                ? url.href : '';
+            if(!name || !pool || !location || !status) continue;
+            const item={name,pool,location,status,href:safeHref};
+            const scope=scbaAirpackLocation(item);
+            if(scope && isScbaAirpackStandardItem(item)) {
+                item.scope=scope.id;
+                result.push(item);
+            }
+        }
+        return result;
+    }
+
+    function scbaAirpackRange() {
+        const table=scbaAirpackStandardTable()?.table;
+        if(!table)return null;
+        // Read the native paginator. Do not derive a total from the number of
+        // visible items (Vector defaults to ten per page).
+        const pagination=[...document.querySelectorAll(
+            '[class*="paginator"],[class*="pagination"],[aria-label*="pagination" i]')]
+            .filter(el=>visible(el) && !el.closest('#' + PANEL_ID + ',#' + OVERLAY_ID))
+            .map(el=>clean(el.innerText || el.textContent || ''));
+        pagination.push(clean(document.body.innerText || '').slice(-900));
+        for(const line of pagination){
+            const match=line.match(/\b(\d+)\s*[-–]\s*(\d+)\s+of\s+(\d+)\b/i);
+            if(!match)continue;
+            const first=Number(match[1]),last=Number(match[2]),total=Number(match[3]);
+            if(first>=1&&last>=first&&total>=last&&total<=1000&&last-first<200)
+                return {first,last,total};
+        }
+        return null;
+    }
+
+    function scbaAirpackNativeSignature() {
+        const target=scbaAirpackStandardTable();
+        if(!target)return '';
+        return [...target.table.querySelectorAll('tbody tr,[role="rowgroup"] [role="row"]')]
+            .map(row => clean(row.innerText || row.textContent || '').slice(0,150))
+            .join('|');
+    }
+
+    async function scbaAirpackWaitForPageChange(oldSignature,oldRange,ms=13000) {
+        const begun=Date.now();let stableAt=0,last='',range=null;
+        while(Date.now()-begun<ms){
+            const target=scbaAirpackStandardTable();
+            range=scbaAirpackRange();
+            const signature=scbaAirpackNativeSignature();
+            const changed=target&&range&&signature &&
+                signature!==oldSignature && range.first!==oldRange.first;
+            if(changed){
+                const fingerprint=range.first+'-'+range.last+'|'+signature;
+                if(fingerprint!==last){last=fingerprint;stableAt=Date.now();}
+                if(Date.now()-stableAt>550)return range;
+            } else {stableAt=0;last='';}
+            await sleep(150);
+        }
+        throw new Error('Standard equipment page did not settle after pagination. No SCBA check was submitted.');
+    }
+
+    async function scbaAirpackReadInventory(report) {
+        if(scbaAirpackBusy)throw new Error('An SCBA airpack search is already running.');
+        if(getRun())throw new Error('An existing PPE inspection is active. Finish it first.');
+        const scope=scbaAirpackFilterScope();
+        if(!scope.ready)throw new Error('Select exactly these three Equipment > Standard filters: '+
+            scope.missing.join('; ')+'. Then search again.');
+        if(!scbaAirpackStandardTable())throw new Error('Equipment > Standard inventory is not ready.');
+        const seen=new Map();
+        const original=scbaAirpackRange();
+        if(!original)throw new Error('Native Standard equipment paginator is unavailable. Cannot claim a full inventory.');
+        scbaAirpackBusy=true;
+        let pages=0,range=original;
+        try {
+            // First page ensures no rows from a prior portion of the list are omitted.
+            for(let guard=0;range.first>1&&guard<120;guard++){
+                const button=getPaginationControl('previous');
+                if(!paginationControlEnabled(button))
+                    throw new Error('Cannot reach the first Standard equipment page.');
+                const before=scbaAirpackNativeSignature(),prior=range;
+                button.click();range=await scbaAirpackWaitForPageChange(before,prior);
+            }
+            if(range.first!==1)throw new Error('Could not reach the first Standard equipment page.');
+            for(let guard=0;guard<120;guard++){
+                const current=scbaAirpackRange();
+                if(!current||current.total!==original.total||current.first!==range.first)
+                    throw new Error('Standard equipment totals or active page changed during scan.');
+                const entries=scbaAirpackVisibleRows();
+                for(const item of entries){
+                    const key=item.href || [item.scope,item.pool,item.name].join('|');
+                    if(seen.has(key)){
+                        const other=seen.get(key);
+                        if(other.location!==item.location||other.pool!==item.pool)
+                            throw new Error('Conflicting SCBA inventory identity. Stop and inspect in Vector.');
+                    }else seen.set(key,item);
+                }
+                pages++;
+                if(report)report('Scanning Equipment > Standard: page '+pages+
+                    ' of about '+Math.ceil(current.total/(current.last-current.first+1))+
+                    ', '+seen.size+' SCBA candidates...');
+                if(current.last>=current.total)break;
+                const button=getPaginationControl('next');
+                if(!paginationControlEnabled(button))
+                    throw new Error('Standard equipment has more pages but Next is unavailable.');
+                const old=scbaAirpackNativeSignature();
+                button.click();
+                range=await scbaAirpackWaitForPageChange(old,current);
+            }
+            if(!range||range.last!==original.total)
+                throw new Error('SCBA inventory search ended before the last Standard equipment page.');
+            if(!seen.size)throw new Error('No airpacks matched the three locations. Inspect the actual Pool names; no equipment was guessed.');
+            return {items:[...seen.values()],pages,totalRows:original.total,scope:scope.selected,
+                capturedAt:new Date().toISOString(),complete:true};
+        } finally {
+            scbaAirpackBusy=false;
+            // Vector's page view has changed but no record was edited.
+            // Deliberately leave the native list on its last scanned page,
+            // rather than performing unverified extra clicks to restore it.
+        }
+    }
+
+    function showStation4ScbaAirpackCheck() {
+        const {box,overlay}=makeOverlayBox('830px');
+        box.style.padding='0';
+        const header=document.createElement('div');
+        header.style.cssText='padding:14px 18px;background:#153e5c;color:white;' +
+            'display:flex;justify-content:space-between;align-items:center;gap:10px;';
+        const heading=document.createElement('div');
+        heading.innerHTML='<b style="font-size:18px">Station 4 SCBA Airpacks</b>'+
+            '<div style="font-size:11px;opacity:.85">Truck 504 · Medic 504 · Station 4 SCBA Supply Room</div>';
+        const close=makeButton('Close');
+        close.onclick=()=>overlay.remove();
+        header.append(heading,close);
+        const body=document.createElement('div');
+        body.style.cssText='padding:14px 18px 18px;';
+        const instructions=document.createElement('p');
+        instructions.style.cssText='font-size:12px;line-height:1.5;margin:0 0 9px;';
+        instructions.textContent='Reads the Standard equipment list under the three location filters. '+
+            'SCBA face masks, spare cylinders and other PPE are not airpacks. '+
+            'This is an inspection draft until the official Vector airpack template is verified.';
+        const status=document.createElement('div');
+        status.setAttribute('role','status');
+        status.style.cssText='font-size:12px;color:#516a7a;white-space:pre-wrap;margin:7px 0;';
+        status.textContent='Ready to look for SCBA airpacks.';
+        const controls=document.createElement('div');
+        controls.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
+        const find=makeButton('Find SCBA Airpacks');
+        const native=makeButton('Open Equipment > Standard');
+        native.onclick=()=>{
+            if(getRun()){status.textContent='Finish the active PPE run before navigating.';return;}
+            location.assign('/main/asset-manager');
+        };
+        const save=makeButton('Save Local Draft');
+        save.disabled=true;
+        controls.append(find,native,save);
+        const coverage=document.createElement('div');
+        coverage.style.cssText='font-size:12px;font-weight:700;margin:10px 0 6px;';
+        const list=document.createElement('div');
+        list.style.cssText='max-height:48vh;overflow:auto;border:1px solid #d8e3e9;' +
+            'border-radius:7px;background:#fff;';
+        const footer=document.createElement('p');
+        footer.style.cssText='font-size:11px;line-height:1.45;color:#855623;margin:10px 0 0;';
+        footer.textContent='Draft only. No SCBA inspection, inspection signature, or Vector check '+
+            'has been created or submitted by this feature. Physically inspect each airpack '+
+            'and open its native Vector item to confirm the applicable inspection checklist.';
+        let scan=null;
+        find.onclick=async()=>{
+            if(scbaAirpackBusy)return;
+            find.disabled=true;save.disabled=true;list.replaceChildren();
+            status.textContent='Reading the current Standard equipment filters...';
+            try {
+                scan=await scbaAirpackReadInventory(message=>{status.textContent=message;});
+                const groups=SCBA_AIRPACK_LOCATIONS.map(loc=>({
+                    ...loc, items:scan.items.filter(item=>item.scope===loc.id)
+                }));
+                coverage.textContent=scan.items.length+' matching airpack(s) across '+
+                    scan.pages+' inventory pages. '+
+                    groups.map(g=>g.label+': '+g.items.length).join(' | ');
+                for(const group of groups){
+                    const title=document.createElement('div');
+                    title.textContent=group.label+' ('+group.items.length+')';
+                    title.style.cssText='font-weight:bold;padding:9px 10px;' +
+                        'background:#e7f0f5;border-bottom:1px solid #d4e1ea;';
+                    list.append(title);
+                    for(const item of group.items){
+                        const line=document.createElement('div');
+                        line.style.cssText='display:grid;grid-template-columns:minmax(0,1fr) 135px auto;' +
+                            'align-items:center;gap:7px;padding:7px 10px;' +
+                            'border-bottom:1px solid #edf2f5;font-size:12px;';
+                        const name=document.createElement('div');
+                        const strong=document.createElement('b');
+                        strong.textContent=item.name;
+                        const detail=document.createElement('div');
+                        detail.textContent=item.pool+' · '+item.status;
+                        detail.style.cssText='font-size:10px;color:#597184;';
+                        name.append(strong,detail);
+                        const select=document.createElement('select');
+                        select.setAttribute('aria-label','Physical review of '+item.name);
+                        for(const [value,label] of [
+                            ['not_checked','Not checked'],
+                            ['present_working','Present / Working'],
+                            ['issue','Issue'],
+                            ['missing','Missing']
+                        ]) {
+                            const option=document.createElement('option');
+                            option.value=value;option.textContent=label;select.append(option);
+                        }
+                        select.value='not_checked';
+                        select.onchange=()=>{item.draftResult=select.value;};
+                        item.draftResult='not_checked';
+                        const open=document.createElement('button');
+                        open.type='button';
+                        open.textContent='Open item';
+                        open.disabled=!item.href;
+                        open.style.cssText='padding:6px;border:1px solid #b4c9d5;' +
+                            'background:#fff;border-radius:5px;cursor:pointer;';
+                        open.onclick=()=>{
+                            try {
+                                GM_setValue(SCBA_AIRPACK_DRAFT_KEY,{
+                                    ...scan,savedAt:new Date().toISOString(),draftOnly:true
+                                });
+                                if(item.href)location.assign(item.href);
+                            }catch(error){status.textContent='Local draft save failed: '+error.message;}
+                        };
+                        line.append(name,select,open);
+                        list.append(line);
+                    }
+                }
+                status.textContent='Found candidate airpacks from confirmed native filters. '+
+                    'No Vector checks were made. Inspect the listed airpacks before recording results.';
+                save.disabled=false;
+            }catch(error){
+                scan=null;
+                coverage.textContent='';
+                status.textContent='Airpack search stopped: '+(error?.message || String(error))+
+                    '\nNo equipment check was submitted.';
+            }finally{find.disabled=false;}
+        };
+        save.onclick=()=>{
+            if(!scan)return;
+            try{
+                const reviewed=scan.items.filter(item=>item.draftResult!=='not_checked').length;
+                GM_setValue(SCBA_AIRPACK_DRAFT_KEY,{
+                    ...scan,savedAt:new Date().toISOString(),draftOnly:true
+                });
+                status.textContent='Saved LOCAL draft for '+scan.items.length+
+                    ' airpacks ('+reviewed+' physically reviewed). '+
+                    'Official Vector inspection status has NOT been changed.';
+            }catch(error){status.textContent='Cannot save local draft: '+error.message;}
+        };
+        body.append(instructions,controls,status,coverage,list,footer);
+        box.append(header,body);
+    }
+
     function installPanel() {
         if (document.getElementById(PANEL_ID)) return;
 
@@ -11878,6 +12219,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         actions.append(
             mainAction('My Tour PPE', () => launchMyInspectionFromAnywhere('tour')),
+            mainAction('SCBA Airpacks', showStation4ScbaAirpackCheck, false),
             mainAction('My After-Fire', () => launchMyInspectionFromAnywhere('afterFire')),
             mainAction("Captain's Monthly", launchCaptainInspectionFromAnywhere),
             mainAction('Daily Captain Check', launchCaptainDailyCheckFromAnywhere, false),
