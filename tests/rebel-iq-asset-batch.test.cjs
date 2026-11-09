@@ -73,11 +73,11 @@ function scenario(options={}){
   };
   const code='let assetGuideLastScan=0,assetBatchPreview=null,'+
     'assetBatchRunning=false,assetBatchCancel=false,assetAssetScanBusy=false,'+
-    'assetBatchPilotConfirmed=false;const attemptedAssetRecords=new Set();\n'+
+    'const attemptedAssetRecords=new Set();\n'+
     'async function scanAllNativeAssetRows(){return readAssetReviewRows();}\n'+
     logic+'\nreturn {loadAssetChecklist,buildReviewedAssetChecklist,'+
     'recordReviewedAssetChecklist,countReviewedAssetChoices,'+
-    'getPreview:()=>assetBatchPreview,getPilot:()=>assetBatchPilotConfirmed,'+
+    'getPreview:()=>assetBatchPreview,'+
     'getAttempts:()=>attemptedAssetRecords};';
   const create=new Function('document','isAssetPage','inspectionId',
     'ASSET_UNIT_ID','t504Visible','readPending','readRopes',
@@ -134,26 +134,19 @@ test('no native actions occur before review and explicit inspected/present/worki
   assert.match(h.progress.textContent,/Not ready/);
   assert.equal(h.rows[0].status,'not verified');
 });
-test('first field test is one asset; second action preserves exception edits and records the rest',async()=>{
+test('one reviewed action records all present and working choices but not exceptions',async()=>{
   const h=scenario();await h.app.loadAssetChecklist();
   h.choice(2,'missing');h.choice(3,'skip');
   h.attest.checked=true;
   await h.app.recordReviewedAssetChecklist();
-  assert.equal(h.clicks(),1);
-  assert.equal(h.app.getPilot(),true);
+  assert.equal(h.clicks(),3,'213, EFS-2001 and 555 recorded sequentially');
   assert.equal(h.rows[0].status,'verified');
-  assert.equal(h.rows[1].status,'not verified');
-  assert.equal(h.app.getPreview().items.find(x=>x.assetTag==='CM2328').choice,'missing');
-  assert.equal(h.attest.checked,false);
-  assert.match(h.progress.textContent,/Test asset confirmed VERIFIED/);
-  h.attest.checked=true;
-  await h.app.recordReviewedAssetChecklist();
-  assert.equal(h.clicks(),3,'only EFS-2001 and 555 followed confirmed pilot');
-  assert.equal(h.rows.find(x=>x.assetTag==='EFS-2001').status,'verified');
+  assert.equal(h.rows[1].status,'verified');
   assert.equal(h.rows.find(x=>x.assetTag==='555').status,'verified');
   assert.equal(h.rows.find(x=>x.assetTag==='CM2328').status,'not verified');
   assert.equal(h.rows.find(x=>x.assetTag==='DUP').status,'not verified');
   assert.equal(h.app.getPreview(),null);
+  assert.match(h.progress.textContent,/3 asset\(s\) confirmed Verified/);
 });
 test('nonconfirming native attempt stops and never claims Verified, even after retry',async()=>{
   const h=scenario({neverConfirm:true});await h.app.loadAssetChecklist();
@@ -161,7 +154,6 @@ test('nonconfirming native attempt stops and never claims Verified, even after r
   await h.app.recordReviewedAssetChecklist();
   assert.equal(h.clicks(),1);
   assert.match(h.progress.textContent,/Official Verified status not confirmed/);
-  assert.equal(h.app.getPilot(),false);
   assert.equal(h.app.getAttempts().size,1);
   await h.app.loadAssetChecklist();h.attest.checked=true;
   await h.app.recordReviewedAssetChecklist();
@@ -195,7 +187,8 @@ test('no direct API writes, no unchecked bulk PASS, no modal and no extra popup'
   assert.match(logic,/attemptedAssetRecords\.add\(key\)/);
   assert.match(logic,/native\.button\.click\(\)/);
   assert.match(logic,/actual.length===1 && actual\[0\].title===item.title/);
-  assert.match(logic,/assetBatchPilotConfirmed\?chosen.length:1/);
+  assert.match(logic,/const maximum=chosen.length/);
+  assert.doesNotMatch(logic,/assetBatchPilotConfirmed/);
   assert.doesNotMatch(logic,/\bfetch\(|GM_xmlhttpRequest\(|\.submit\(|window\.confirm\(/);
   assert.match(src,/^\/\/ @version\s+0\.1\.17/m);
 });
