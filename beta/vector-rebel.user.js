@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.54
+// @version      3.2.55
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.54',
+        version: '3.2.55',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.54';
+    const VERSION = '3.2.55';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -12088,9 +12088,38 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         body.style.cssText='padding:14px 18px 18px;';
         const instructions=document.createElement('p');
         instructions.style.cssText='font-size:12px;line-height:1.5;margin:0 0 9px;';
-        instructions.textContent='Reads the Standard equipment list under the three location filters. '+
-            'SCBA face masks, spare cylinders and other PPE are not airpacks. '+
-            'This is an inspection draft until the official Vector airpack template is verified.';
+        instructions.textContent='Choose which locations you need today. The same '+
+            'locations must be selected in Vector Equipment > Standard > Filters. '+
+            'SCBA masks and loose cylinders are not airpacks. This is a draft '+
+            'until the official Vector airpack inspection form is verified.';
+        const chooser=document.createElement('fieldset');
+        chooser.style.cssText='border:1px solid #c7d9e5;border-radius:8px;' +
+            'padding:8px 12px 10px;margin:0 0 10px;';
+        const legend=document.createElement('legend');
+        legend.textContent='Locations to check today';
+        legend.style.cssText='font-size:13px;font-weight:bold;color:#153e5c;padding:0 5px;';
+        chooser.append(legend);
+        const choices=new Map(),pending=scbaAirpackPendingSelection();
+        for(const loc of SCBA_AIRPACK_LOCATIONS){
+            const label=document.createElement('label');
+            label.style.cssText='display:flex;gap:8px;align-items:center;' +
+                'padding:5px 0;font-size:13px;cursor:pointer;';
+            const input=document.createElement('input');
+            input.type='checkbox';
+            input.value=loc.id;
+            input.checked=pending.includes(loc.id);
+            input.setAttribute('aria-label','Check '+loc.label);
+            choices.set(loc.id,input);
+            const caption=document.createElement('span');
+            caption.textContent=loc.label;
+            label.append(input,caption);chooser.append(label);
+        }
+        const selectedIds=()=>SCBA_AIRPACK_LOCATIONS
+            .filter(loc=>choices.get(loc.id)?.checked).map(loc=>loc.id);
+        const helper=document.createElement('div');
+        helper.style.cssText='margin-top:6px;font-size:11px;color:#526b7a;';
+        helper.textContent='Choose one, two, or all three. New checks start with none selected.';
+        chooser.append(helper);
         const status=document.createElement('div');
         status.setAttribute('role','status');
         status.style.cssText='font-size:12px;color:#516a7a;white-space:pre-wrap;margin:7px 0;';
@@ -12098,10 +12127,34 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const controls=document.createElement('div');
         controls.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
         const find=makeButton('Find SCBA Airpacks');
-        const native=makeButton('Open Equipment > Standard');
+        const native=makeButton('Set Vector Filters');
         native.onclick=()=>{
-            if(getRun()){status.textContent='Finish the active PPE run before navigating.';return;}
-            location.assign('/main/asset-manager');
+            const chosen=selectedIds();
+            if(!chosen.length){
+                status.textContent='Choose at least one location to check above.';
+                return;
+            }
+            if(getRun()){
+                status.textContent='Finish the active PPE run before changing Vector filters.';
+                return;
+            }
+            sessionStorage.setItem(SCBA_AIRPACK_PENDING_SELECTION_KEY,
+                JSON.stringify({ids:chosen,savedAt:Date.now()}));
+            if(!scbaAirpackStandardTable()){
+                overlay.remove();
+                location.assign('/main/asset-manager');
+                return;
+            }
+            const filters=findVectorNavigationTarget('Filters');
+            if(!filters){
+                status.textContent='Vector Filters control not found. '+
+                    'Open Equipment > Standard > Filters manually.';
+                return;
+            }
+            overlay.remove();
+            // Only open the native filters. Inspector applies precise
+            // options there; never guess at hidden location selection IDs.
+            filters.click();
         };
         const save=makeButton('Save Local Draft');
         save.disabled=true;
@@ -12120,10 +12173,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         find.onclick=async()=>{
             if(scbaAirpackBusy)return;
             find.disabled=true;save.disabled=true;list.replaceChildren();
-            status.textContent='Reading the current Standard equipment filters...';
+            const chosen=selectedIds();
+            status.textContent='Checking selected Standard equipment locations...';
             try {
-                scan=await scbaAirpackReadInventory(message=>{status.textContent=message;});
-                const groups=SCBA_AIRPACK_LOCATIONS.map(loc=>({
+                if(!chosen.length)throw new Error('Choose at least one location to check.');
+                scan=await scbaAirpackReadInventory(message=>{status.textContent=message;},chosen);
+                sessionStorage.removeItem(SCBA_AIRPACK_PENDING_SELECTION_KEY);
+                const groups=SCBA_AIRPACK_LOCATIONS.filter(loc=>chosen.includes(loc.id))
+                    .map(loc=>({
                     ...loc, items:scan.items.filter(item=>item.scope===loc.id)
                 }));
                 coverage.textContent=scan.items.length+' matching airpack(s) across '+
@@ -12201,7 +12258,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     'Official Vector inspection status has NOT been changed.';
             }catch(error){status.textContent='Cannot save local draft: '+error.message;}
         };
-        body.append(instructions,controls,status,coverage,list,footer);
+        body.append(instructions,chooser,controls,status,coverage,list,footer);
         box.append(header,body);
     }
 
