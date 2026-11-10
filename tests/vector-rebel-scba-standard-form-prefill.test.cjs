@@ -22,7 +22,7 @@ function harness({result='present_working',template='113271',count=11,
     questionAnswers=null,comment=''}={}){
     let times=0,phaseWritten='',status='',submits=0,remaining=count;
     const selections=[];
-    const queue={inspectionVersion:'3.2.60',phase,
+    const queue={inspectionVersion:'3.2.61',phase,
         openedAt:Date.now()-500,items:[{name:'AP-04',result,questionAnswers,comment}],index:0};
     const answers=Array.from({length:count},()=>({click(){
         times++;remaining--;selections.push('pass');
@@ -115,7 +115,7 @@ test('Issue fills a specific mix of Pass and Fail and preserves the equipment co
     assert.equal(await h.run(),true);
     assert.deepEqual(h.stats().selections,answerPlan);
     assert.equal(h.stats().times,11);
-    assert.match(h.stats().status,/comment is saved in Rebel/);
+    assert.match(h.stats().status,/Rebel will populate its note/);
 });
 test('Missing item with unperformed questions is never automatically marked Passed',async()=>{
     const partial=['fail',...Array(10).fill('')];

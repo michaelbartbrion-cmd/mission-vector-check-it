@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.60
+// @version      3.2.61
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.60',
+        version: '3.2.61',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.60';
+    const VERSION = '3.2.61';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -11809,7 +11809,6 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     const SCBA_AIRPACK_PENDING_SELECTION_KEY = 'vector-rebel-scba-airpack-location-setup-v1';
     const SCBA_AIRPACK_NATIVE_HANDOFF_KEY = 'vector-rebel-scba-airpack-native-check-v1';
     const SCBA_AIRPACK_NATIVE_BANNER_ID = 'vector-rebel-scba-native-check-banner';
-    const SCBA_AIRPACK_EXCEPTION_NOTE_ID = 'vector-rebel-scba-exception-note';
     // Confirmed from live authenticated Vector Standard SCBA Frame AP-04:
     // equipment pool 299946, official 'SCBA Inspection' template 113271.
     // The separate SCBA Face Mask Tour PPE form is template 119122 (7 items).
@@ -12342,7 +12341,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.60'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.61'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -12425,7 +12424,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || queue.inspectionVersion!=='3.2.60' ||
+        if(!queue || queue.inspectionVersion!=='3.2.61' ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>30000 || Date.now()<queue.openedAt)return false;
@@ -12499,8 +12498,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 JSON.stringify({...queue,phase:'form_prefilled',
                     formTemplate:inspection.template,formInstance:inspection.instance}));
             setStatus('SCBA '+item.name+': all 11 reviewed Pass/Fail selections entered '+
-                'into official template 113271. Review the form before clicking Submit. '+
-                (item.comment?'Exception comment is saved in Rebel, not yet in Vector. ':'')+
+                'into official template 113271. Review the form, then click Submit. '+
+                (item.comment?'If Vector opens FAILURE DETAILS, Rebel will populate its note. ':'')+
                 'No inspection was submitted by Rebel.');
             return true;
         } catch(error) {
@@ -12510,53 +12509,70 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         } finally {scbaAirpackFormBusy=false;}
     }
 
-    function scbaAirpackShowNativeExceptionNote() {
+    // Verified against live Vector SCBA Inspection failure modal on Voyager:
+    //   .modal.fade.in > "FAILURE DETAILS", selectable SCBA item row,
+    //   "Failure Notes(*)" text area, and a SECOND Submit Inspection.
+    // Filling the note is reversible; the operator still submits the form.
+    function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['native_form_opened','form_prefilled'].includes(queue.phase))
-            return false;
+        if(!queue || queue.inspectionVersion!=='3.2.61' ||
+            !['form_prefilled','native_form_opened'].includes(queue.phase) ||
+            getRun())return false;
         const item=queue.items[queue.index];
         if(!item || !['issue','missing'].includes(item.result) ||
-           !clean(item.comment || ''))return false;
-        const form=currentInspection();
-        if(!form || form.template!==SCBA_FRAME_INSPECTION_TEMPLATE)return false;
-        if(queue.formInstance && queue.formInstance!==form.instance)return false;
-        if(!queue.formInstance && (
-            !Number.isFinite(queue.openedAt) ||
-            Date.now()-queue.openedAt>30000 ||
-            Date.now()<queue.openedAt
-        ))return false;
-        if(document.getElementById(SCBA_AIRPACK_EXCEPTION_NOTE_ID))return true;
-        const note=document.createElement('div');
-        note.id=SCBA_AIRPACK_EXCEPTION_NOTE_ID;
-        note.setAttribute('role','note');
-        note.style.cssText='position:fixed;right:12px;bottom:12px;'+
-            'width:310px;max-width:calc(100vw - 24px);z-index:2147483646;'+
-            'padding:10px;background:#fff9eb;border:2px solid #ad7445;'+
-            'border-radius:8px;color:#573821;font:12px/1.4 Arial,sans-serif;'+
-            'box-shadow:0 4px 12px #0003;';
-        const title=document.createElement('strong');
-        title.textContent=item.name+' inspection exception';
-        const value=document.createElement('div');
-        value.style.cssText='margin:8px 0;white-space:pre-wrap;max-height:140px;overflow:auto;';
-        value.textContent=item.comment;
-        const hint=document.createElement('div');
-        hint.style.cssText='font-size:11px;line-height:1.3;';
-        hint.textContent='Comment saved in Rebel locally. This native SCBA '+
-            'inspection has no visible comment field, so the comment is '+
-            'not attached to the official Vector inspection.';
-        const copy=document.createElement('button');
-        copy.type='button';copy.textContent='Copy comment';
-        copy.style.cssText='margin-top:7px;padding:6px;';
-        copy.onclick=async()=>{
-            try {
-                await navigator.clipboard.writeText(item.comment);
-                copy.textContent='Copied';
-            } catch {
-                copy.textContent='Select comment above to copy';
-            }
-        };
-        note.append(title,value,hint,copy);
-        document.body.append(note);
+            !clean(item.comment||''))return false;
+        const inspection=currentInspection();
+        if(!inspection || inspection.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
+            (queue.formInstance && inspection.instance!==queue.formInstance) ||
+            (!queue.formInstance &&
+              (!Number.isFinite(queue.openedAt) ||
+               Date.now()-queue.openedAt>30000 ||
+               Date.now()<queue.openedAt)))return false;
+        const dialogs=[...document.querySelectorAll('.modal.fade.in,[role="dialog"]')]
+            .filter(node=>visible(node) &&
+                uiIncludes(node.innerText||node.textContent||'','FAILURE DETAILS') &&
+                uiIncludes(node.innerText||node.textContent||'','SELECT FAILING ITEMS') &&
+                uiIncludes(node.innerText||node.textContent||'','Failure Notes'));
+        if(dialogs.length!==1)return false;
+        const modal=dialogs[0];
+        const inputs=[...modal.querySelectorAll('textarea,input[placeholder]')]
+            .filter(input=>visible(input) &&
+                uiEquals(clean(input.getAttribute('placeholder')||''),
+                    'Add a note for the failure'));
+        const rows=[...modal.querySelectorAll('.equipment-items__item-list')]
+            .filter(row=>visible(row) &&
+                [...row.querySelectorAll('*')].some(el=>
+                    el.children.length===0 && uiEquals(
+                        clean(el.innerText||el.textContent||''),item.name)));
+        if(inputs.length!==1 || rows.length!==1)return false;
+        const input=inputs[0],row=rows[0];
+        const note=clean(item.comment||'');
+        if(note.length<1 || note.length>1000)return false;
+        if(clean(input.value||'') && clean(input.value)!==note) {
+            // Never overwrite a newer note the inspector typed directly.
+            return false;
+        }
+        // Reopening a modal must not cause duplicate clicks or overwrite.
+        if(queue.failureNotePreparedFor===inspection.instance)return true;
+        if(queue.failureNoteAttemptedFor===inspection.instance)return false;
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+            ...queue,failureNoteAttemptedFor:inspection.instance
+        }));
+        if(!row.classList?.contains('selected')) {
+            row.click();
+            if(!row.classList?.contains('selected'))
+                throw new Error('Vector did not select the exact failing SCBA item.');
+        }
+        if(clean(input.value||'')!==note)nativeSetInput(input,note);
+        if(clean(input.value||'')!==note)
+            throw new Error('Native Vector Failure Notes did not retain the supplied comment.');
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+            ...queue,failureNoteAttemptedFor:inspection.instance,
+            failureNotePreparedFor:inspection.instance
+        }));
+        setStatus('SCBA '+item.name+': native FAILURE DETAILS item selected and '+
+            'Failure Notes entered. Review the note, then click Vector Submit Inspection. '+
+            'Nothing was submitted by Rebel.');
         return true;
     }
 
@@ -12765,8 +12781,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         footer.style.cssText='font-size:11px;line-height:1.45;color:#855623;margin:10px 0 0;';
         footer.textContent='Pass / Fail selections are proposals until the matching '+
             'official Vector SCBA inspection is submitted. Rebel never submits automatically. '+
-            'Exception comments are saved locally because the observed native '+
-            'SCBA form has no comment field.';
+            'On failed inspections, Vector opens FAILURE DETAILS. Rebel copies your comment '+
+            'into its required native Failure Notes field and selects the failing airpack.';
         const physicalLabel=document.createElement('label');
         physicalLabel.style.cssText='display:flex;align-items:flex-start;gap:8px;'+
             'padding:9px 0;font-size:12px;line-height:1.4;';
@@ -13131,11 +13147,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         void scbaAirpackPrefillVerifiedForm().catch(error=>
             setStatus('SCBA form prefill stopped: '+error.message,false));
         try {
-            const showed=scbaAirpackShowNativeExceptionNote();
-            const note=document.getElementById(SCBA_AIRPACK_EXCEPTION_NOTE_ID);
-            if(note && !showed)note.remove();
+            scbaAirpackFillNativeFailureDetails();
         } catch(error) {
-            setStatus('SCBA exception note display stopped: '+error.message,false);
+            setStatus('SCBA native failure note stopped: '+error.message+
+                '. Complete the existing Vector failure modal manually.',false);
         }
     },950);
     // Vector can navigate inside the existing tab without a full reload.
