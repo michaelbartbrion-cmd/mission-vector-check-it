@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.57
+// @version      3.2.58
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.57',
+        version: '3.2.58',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.57';
+    const VERSION = '3.2.58';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -11807,6 +11807,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // is inferred from a row appearing on the Standard equipment list.
     const SCBA_AIRPACK_DRAFT_KEY = 'vector-rebel-station4-airpack-draft-v1';
     const SCBA_AIRPACK_PENDING_SELECTION_KEY = 'vector-rebel-scba-airpack-location-setup-v1';
+    const SCBA_AIRPACK_NATIVE_HANDOFF_KEY = 'vector-rebel-scba-airpack-native-check-v1';
+    const SCBA_AIRPACK_NATIVE_BANNER_ID = 'vector-rebel-scba-native-check-banner';
     const SCBA_AIRPACK_LOCATIONS = Object.freeze([
         { id: 'truck504', label: 'Truck 504', location: 'Truck 504: 63000-13',
           exact: /^Truck 504\s*:\s*63000-13$/i },
@@ -12240,6 +12242,227 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
     }
 
+
+    // SCBA Frame is Standard equipment. This operator-reviewed handoff uses
+    // the REAL item's Vector checklist. It does not assert the unknown native
+    // template, sign, submit, or claim an inspection from this local draft.
+    function scbaAirpackNativeQueue(scan) {
+        if(!scan?.complete || !Array.isArray(scan.items) || !scan.items.length)
+            throw new Error('Find the complete SCBA inventory before starting checks.');
+        const items=scan.items.map(item=>{
+            if(!SCBA_AIRPACK_LOCATIONS.some(loc=>loc.id===item.scope))
+                throw new Error('SCBA asset location is outside the selected sites.');
+            if(!['present_working','issue','missing'].includes(item.draftResult))
+                throw new Error('Review each SCBA result before starting native checks.');
+            let url;
+            try {url=new URL(item.href,location.href);}catch {}
+            if(!url || url.origin!==location.origin ||
+                !/\/main\/[^?#]+/i.test(url.pathname) ||
+                url.pathname==='/main/asset-manager')
+                throw new Error('Vector has no safe native equipment link for '+item.name+'.');
+            return {
+                name:item.name,scope:item.scope,location:item.location,
+                pool:item.pool,href:url.href,result:item.draftResult
+            };
+        });
+        if(new Set(items.map(item=>item.href)).size!==items.length)
+            throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true};
+    }
+
+    function scbaAirpackReadNativeQueue() {
+        let entry=null;
+        try {entry=JSON.parse(sessionStorage.getItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY)||'null');}
+        catch {}
+        if(!entry || !Array.isArray(entry.items) ||
+            !Number.isInteger(entry.index) || entry.index<0 ||
+            entry.index>=entry.items.length ||
+            Date.now()-entry.createdAt>12*60*60*1000) {
+            sessionStorage.removeItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY);
+            return null;
+        }
+        return entry;
+    }
+
+    function scbaAirpackBeginNativeChecks(scan,physicallyConfirmed) {
+        if(!physicallyConfirmed)
+            throw new Error('Confirm that you physically checked the selected airpacks and marked exceptions.');
+        if(getRun())
+            throw new Error('Finish the active PPE inspection before starting SCBA checks.');
+        const queue=scbaAirpackNativeQueue(scan);
+        // Save first, navigate second, and never create an official record by
+        // assuming that a local select value is a completed inspection.
+        GM_setValue(SCBA_AIRPACK_DRAFT_KEY,{
+            ...scan,savedAt:new Date().toISOString(),draftOnly:true,
+            nativeCheckStarted:true
+        });
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify(queue));
+        location.assign(queue.items[0].href);
+        return queue;
+    }
+
+    function scbaAirpackAdvanceNativeQueue(queue,confirmed) {
+        if(!confirmed)throw new Error('Confirm the official native Vector inspection was submitted first.');
+        if(!queue || queue.phase!=='native_form_opened')
+            throw new Error('This airpack inspection has not been opened in Vector.');
+        const item=queue.items[queue.index];
+        const page=new URL(location.href),target=new URL(item.href);
+        if(page.origin!==target.origin || page.pathname!==target.pathname)
+            throw new Error('Return to the exact SCBA asset page before advancing.');
+        if(typeof findChooserRoot==='function' && findChooserRoot())
+            throw new Error('Close or complete the native inspection chooser before advancing.');
+        const confirmedItems=[...(queue.operatorConfirmed||[]),{
+            name:item.name,href:item.href,requestedResult:item.result,
+            operatorConfirmedAt:new Date().toISOString(),officialReceiptVerified:false
+        }];
+        if(queue.index+1>=queue.items.length) {
+            sessionStorage.removeItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY);
+            GM_setValue(SCBA_AIRPACK_DRAFT_KEY+'-handoff',{
+                items:confirmedItems,finishedAt:new Date().toISOString(),
+                officialReceiptVerified:false,operatorReportedOnly:true
+            });
+            return {done:true,count:confirmedItems.length};
+        }
+        const next={...queue,index:queue.index+1,phase:'open_item',
+            operatorConfirmed:confirmedItems};
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify(next));
+        location.assign(next.items[next.index].href);
+        return {done:false,index:next.index,count:confirmedItems.length};
+    }
+
+    async function scbaAirpackShowNativeHandoff() {
+        const queue=scbaAirpackReadNativeQueue();
+        if(!queue || !document.body)return false;
+        const item=queue.items[queue.index];
+        // Start Inspection is a one-time native navigation per item.
+        // Returning from the completed form shows "Next", never starts twice.
+        if(!['open_item','native_form_opened'].includes(queue.phase))return false;
+        const page=new URL(location.href);
+        const expected=new URL(item.href);
+        if(page.origin!==expected.origin || page.pathname!==expected.pathname) {
+            if(queue.phase!=='native_form_opened' || currentInspection())return false;
+            // Once the native form is finished, Vector may return to an
+            // equipment list instead of the original asset detail.
+        }
+        if(document.getElementById(SCBA_AIRPACK_NATIVE_BANNER_ID))return true;
+        const banner=document.createElement('div');
+        banner.id=SCBA_AIRPACK_NATIVE_BANNER_ID;
+        banner.setAttribute('data-scba-phase',queue.phase);
+        banner.setAttribute('data-scba-item',item.href);
+        banner.setAttribute('data-scba-path',page.pathname);
+        banner.style.cssText='position:fixed;left:14px;bottom:16px;width:330px;'+
+            'max-width:calc(100vw - 28px);z-index:2147483645;'+
+            'background:white;border:2px solid #176b8e;border-radius:10px;'+
+            'padding:12px;color:#153e5c;font:12px/1.4 Arial,sans-serif;'+
+            'box-shadow:0 4px 18px #0003;';
+        const title=document.createElement('b');
+        title.textContent='SCBA native check '+(queue.index+1)+'/'+queue.items.length+
+            ': '+item.name;
+        const status=document.createElement('div');
+        status.style.cssText='margin-top:6px;';
+        status.textContent='Opening the original Vector checklist. Proposed '+
+            (item.result==='present_working'?'Present / Working':item.result)+
+            ' is not a submitted inspection.';
+        const stop=document.createElement('button');
+        stop.textContent='Close handoff';
+        stop.type='button';
+        stop.style.cssText='margin-top:8px;padding:5px 8px;';
+        stop.onclick=()=>{
+            sessionStorage.removeItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY);
+            banner.remove();
+        };
+        banner.append(title,status,stop);
+        document.body.append(banner);
+        if(getRun()){
+            status.textContent='A PPE inspection is already active. No SCBA form was opened.';
+            return true;
+        }
+        if(queue.phase==='native_form_opened') {
+            // Do not guess which Standard SCBA template/answers to submit.
+            // The operator completes THIS item's official Vector form.
+            const isItemPage=page.pathname===expected.pathname;
+            if(!isItemPage){
+                status.textContent='Finish the official inspection for '+item.name+
+                    ', then return to this item to proceed. No result was assumed.';
+                const back=document.createElement('button');
+                back.type='button';
+                back.textContent='Return to '+item.name;
+                back.style.cssText='margin:8px 5px 0 0;padding:6px;';
+                back.onclick=()=>location.assign(item.href);
+                banner.append(back);
+                return true;
+            }
+            status.textContent='Complete and submit the official Vector SCBA inspection '+
+                'for '+item.name+'. After Vector returns to the item page, '+
+                'confirm the submission to continue to the next airpack.';
+            const next=document.createElement('button');
+            next.type='button';
+            next.textContent=queue.index+1===queue.items.length?
+                'I submitted this inspection • Finish':'I submitted this inspection • Next';
+            next.style.cssText='margin:8px 5px 0 0;padding:6px;background:#176b8e;color:white;';
+            next.onclick=()=>{
+                if(!confirm('Did you complete and submit the official Vector inspection for '+
+                    item.name+'? This handoff cannot yet verify the official receipt.'))return;
+                try {
+                    const result=scbaAirpackAdvanceNativeQueue(queue,true);
+                    if(result.done){
+                        status.textContent='All '+result.count+' SCBA assets were handed off. '+
+                            'Operator reported submitting each native inspection; official '+
+                            'Vector completion receipts have not been independently verified.';
+                        next.disabled=true;
+                    } else {
+                        status.textContent='Opening the next SCBA item ('+
+                            (result.index+1)+'/'+queue.items.length+')...';
+                    }
+                } catch(error) {
+                    status.textContent='Cannot advance SCBA checks: '+error.message;
+                }
+            };
+            banner.append(next);
+            return true;
+        }
+        let start=null;
+        for(let attempt=0;attempt<35;attempt++){
+            const pageText=[...document.querySelectorAll('h1,h2,h3,h4')]
+                .filter(el=>visible(el) && !el.closest('#'+PANEL_ID+',#'+OVERLAY_ID))
+                .map(el=>clean(el.innerText||el.textContent||''));
+            const identity=pageText.some(value=>value===item.name ||
+                value.startsWith(item.name+' '));
+            const candidates=[...document.querySelectorAll('button,[role="button"]')]
+                .filter(el=>visible(el) && !el.closest('#'+PANEL_ID+',#'+OVERLAY_ID) &&
+                    uiEquals(el.innerText||el.textContent||'','Start Inspection') &&
+                    !el.disabled && el.getAttribute('aria-disabled')!=='true');
+            if(identity && candidates.length===1){start=candidates[0];break;}
+            await sleep(180);
+        }
+        if(!start) {
+            status.textContent='Could not verify this asset heading and a unique Start Inspection control. '+
+                'No official SCBA inspection was started. Review this native item in Vector.';
+            return true;
+        }
+        // The Start Inspection control opens the *native* checklist picker.
+        // Never infer which template to choose or automatically submit it.
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
+            JSON.stringify({...queue,phase:'native_form_opened'}));
+        start.click();
+        status.textContent='Opened Vector Start Inspection for '+item.name+
+            '. The official SCBA template must be identified before automatic '+
+            'answering, signing, or submission can be enabled. No check was submitted.';
+        // Show the native chooser titles in the handoff so the real template
+        // can be mapped without guessing a pool/template ID. Read-only.
+        for(let attempt=0;attempt<18;attempt++){
+            const chooser=typeof findChooserRoot==='function' ? findChooserRoot() : null;
+            if(chooser && visible(chooser)){
+                status.textContent='Native Vector inspection options: '+
+                    clean(chooser.innerText||chooser.textContent||'').slice(0,360)+
+                    '\nNo inspection has been submitted.';
+                break;
+            }
+            await sleep(150);
+        }
+        return true;
+    }
+
     function showStation4ScbaAirpackCheck() {
         const {box,overlay}=makeOverlayBox('830px');
         box.style.padding='0';
@@ -12294,9 +12517,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const controls=document.createElement('div');
         controls.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
         const find=makeButton('Find SCBA Airpacks');
+        const startNative=makeButton('Start SCBA Checks');
+        startNative.disabled=true;
         const save=makeButton('Save Local Draft');
         save.disabled=true;
-        controls.append(find,save);
+        controls.append(find,startNative,save);
         const coverage=document.createElement('div');
         coverage.style.cssText='font-size:12px;font-weight:700;margin:10px 0 6px;';
         const list=document.createElement('div');
@@ -12307,10 +12532,21 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         footer.textContent='Draft only. No SCBA inspection, inspection signature, or Vector check '+
             'has been created or submitted by this feature. Physically inspect each airpack '+
             'and open its native Vector item to confirm the applicable inspection checklist.';
+        const physicalLabel=document.createElement('label');
+        physicalLabel.style.cssText='display:flex;align-items:flex-start;gap:8px;'+
+            'padding:9px 0;font-size:12px;line-height:1.4;';
+        const physical=document.createElement('input');
+        physical.type='checkbox';
+        physical.setAttribute('aria-label','I physically inspected these SCBA airpacks');
+        const physicalText=document.createElement('span');
+        physicalText.textContent='I physically inspected the selected SCBA airpacks and '+
+            'marked any missing or damaged equipment above.';
+        physicalLabel.append(physical,physicalText);
         let scan=null;
         find.onclick=async()=>{
             if(scbaAirpackBusy)return;
-            find.disabled=true;save.disabled=true;list.replaceChildren();
+            find.disabled=true;save.disabled=true;startNative.disabled=true;
+            physical.checked=false;list.replaceChildren();
             const chosen=selectedIds();
             status.textContent='Checking selected Standard equipment locations...';
             try {
@@ -12354,9 +12590,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             const option=document.createElement('option');
                             option.value=value;option.textContent=label;select.append(option);
                         }
-                        select.value='not_checked';
-                        select.onchange=()=>{item.draftResult=select.value;};
-                        item.draftResult='not_checked';
+                        // Preselect the *proposed* normal condition. This is
+                        // not an official PASS or completed physical inspection.
+                        select.value='present_working';
+                        select.onchange=()=>{
+                            item.draftResult=select.value;
+                            physical.checked=false;
+                        };
+                        item.draftResult='present_working';
                         const open=document.createElement('button');
                         open.type='button';
                         open.textContent='Open item';
@@ -12378,12 +12619,22 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 status.textContent='Found candidate airpacks from confirmed native filters. '+
                     'No Vector checks were made. Inspect the listed airpacks before recording results.';
                 save.disabled=false;
+                startNative.disabled=false;
             }catch(error){
                 scan=null;
                 coverage.textContent='';
                 status.textContent='Airpack search stopped: '+(error?.message || String(error))+
                     '\nNo equipment check was submitted.';
             }finally{find.disabled=false;}
+        };
+        startNative.onclick=()=>{
+            try {
+                if(!scan)throw new Error('Find SCBA airpacks first.');
+                scbaAirpackBeginNativeChecks(scan,physical.checked);
+            } catch(error) {
+                status.textContent='SCBA check handoff stopped: '+error.message+
+                    '\nNo official inspection was submitted.';
+            }
         };
         save.onclick=()=>{
             if(!scan)return;
@@ -12392,12 +12643,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 GM_setValue(SCBA_AIRPACK_DRAFT_KEY,{
                     ...scan,savedAt:new Date().toISOString(),draftOnly:true
                 });
-                status.textContent='Saved LOCAL draft for '+scan.items.length+
-                    ' airpacks ('+reviewed+' physically reviewed). '+
+                status.textContent='Saved LOCAL proposed results for '+scan.items.length+
+                    ' airpacks ('+reviewed+' marked, not yet officially recorded). '+
                     'Official Vector inspection status has NOT been changed.';
             }catch(error){status.textContent='Cannot save local draft: '+error.message;}
         };
-        body.append(instructions,chooser,controls,status,coverage,list,footer);
+        body.append(instructions,chooser,controls,physicalLabel,status,coverage,list,footer);
         box.append(header,body);
     }
 
@@ -12564,6 +12815,23 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     migrateLegacySignature();
     migrateLegacyRunHistory();
     installPanel();
+    setTimeout(()=>{void scbaAirpackShowNativeHandoff().catch(error=>
+        setStatus('SCBA native handoff stopped: '+error.message,false));},1100);
+    // Vector can navigate inside the existing tab without a full reload.
+    // Refresh only a pending SCBA handoff banner when route or phase changes.
+    setInterval(()=>{
+        const queue=scbaAirpackReadNativeQueue();
+        if(!queue)return;
+        const banner=document.getElementById(SCBA_AIRPACK_NATIVE_BANNER_ID);
+        if(banner && (
+            banner.getAttribute('data-scba-phase')!==queue.phase ||
+            banner.getAttribute('data-scba-item')!==queue.items[queue.index].href ||
+            banner.getAttribute('data-scba-path')!==location.pathname
+        ))banner.remove();
+        if(!document.getElementById(SCBA_AIRPACK_NATIVE_BANNER_ID))
+            void scbaAirpackShowNativeHandoff().catch(error=>
+                setStatus('SCBA native handoff stopped: '+error.message,false));
+    },1700);
     dismissObsoleteRecoveryToast();
     setTimeout(repairCaptureVisibleItemPage,1200);
     ensureRebelCommandEnrollment(true).finally(() => {
