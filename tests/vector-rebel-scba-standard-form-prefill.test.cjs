@@ -7,19 +7,29 @@ const src=fs.readFileSync(path.join(__dirname,'../beta/vector-rebel.user.js'),'u
 const a=src.indexOf('    async function scbaAirpackPrefillVerifiedForm() {');
 const b=src.indexOf('    async function scbaAirpackShowNativeHandoff() {',a);
 assert.ok(a>=0&&b>a);
-const code=src.slice(a,b)+'\nreturn scbaAirpackPrefillVerifiedForm;';
+const helperStart=src.indexOf('    function scbaAirpackReadyNativeAnswers(item) {');
+const helperEnd=src.indexOf('    function scbaAirpackNativeQueue(scan) {',helperStart);
+assert.ok(helperStart>=0&&helperEnd>helperStart);
+const code=src.slice(helperStart,helperEnd)+src.slice(a,b)+
+    '\nreturn scbaAirpackPrefillVerifiedForm;' ;
 const qs=src.match(/const SCBA_FRAME_INSPECTION_QUESTIONS = Object.freeze\(\[([\s\S]*?)\]\);/);
 assert.ok(qs,'actual Standard SCBA question list is declared');
 const questions=(new Function('return ['+qs[1]+']'))();
 assert.equal(questions.length,11);
 const clean=s=>String(s??'').replace(/\s+/g,' ').trim();
 function harness({result='present_working',template='113271',count=11,
-    questionList=questions,physical=true,phase='native_form_opened',activePpe=false}={}){
-    let times=0,phaseWritten='',status='',submits=0;
-    const queue={inspectionVersion:'3.2.59',phase,
-        openedAt:Date.now()-500,items:[{name:'AP-04',result}],index:0};
-    const answers=Array.from({length:count},(_,i)=>({click(){times++;}}));
-    const failed=Array.from({length:count},()=>({click(){throw Error('unexpected FAIL clicked');}}));
+    questionList=questions,physical=true,phase='native_form_opened',activePpe=false,
+    questionAnswers=null,comment=''}={}){
+    let times=0,phaseWritten='',status='',submits=0,remaining=count;
+    const selections=[];
+    const queue={inspectionVersion:'3.2.60',phase,
+        openedAt:Date.now()-500,items:[{name:'AP-04',result,questionAnswers,comment}],index:0};
+    const answers=Array.from({length:count},()=>({click(){
+        times++;remaining--;selections.push('pass');
+    }}));
+    const failed=Array.from({length:count},()=>({click(){
+        times++;remaining--;selections.push('fail');
+    }}));
     const doc={body:{innerText:'SCBA Inspection\n'+questionList.join('\n')},
         querySelectorAll:()=>[]};
     const store={setItem(_k,s){phaseWritten=JSON.parse(s).phase;
@@ -28,15 +38,16 @@ function harness({result='present_working',template='113271',count=11,
         'currentInspection','SCBA_FRAME_INSPECTION_TEMPLATE','SCBA_FRAME_INSPECTION_TITLE',
         'isLiveInspectionPage','exactButtons','scbaAirpackNativeResponseButtons',
         'isCompletedInspectionView','uiIncludes','exactButton','document','uiText',
-        'SCBA_FRAME_INSPECTION_QUESTIONS','visible','enabledButton','sessionStorage',
+        'SCBA_FRAME_INSPECTION_QUESTIONS','clean','visible','enabledButton','sessionStorage',
         'SCBA_AIRPACK_NATIVE_HANDOFF_KEY','setStatus','sleep',code);
     const run=fn(false,()=>queue,()=>activePpe?{}:null,
         ()=>({template,instance:'9560020'}),'113271','SCBA Inspection',
-        ()=>true,()=>[],label=>label==='Passed'?answers:label==='Failed'?failed:[],
+        ()=>true,()=>[],label=>label==='Passed'?answers.slice(0,remaining):
+            label==='Failed'?failed.slice(0,remaining):[],
         ()=>false,(text,label)=>String(text).includes(label),()=>({}),
-        doc,clean,questions,()=>true,()=>null,store,'key',
+        doc,clean,questions,clean,()=>true,()=>null,store,'key',
         text=>{status=text},async()=>{});
-    return {run,queue,stats:()=>({times,phaseWritten,status,submits})};
+    return {run,queue,stats:()=>({times,phaseWritten,status,submits,selections})};
 }
 test('Official Standard SCBA form is explicitly mapped, never the seven-question SCBA PPE mask',()=>{
     assert.match(src,/const SCBA_FRAME_POOL = '299946'/);
@@ -50,7 +61,7 @@ test('One-time prefill enters all 11 Passed answers on exact verified Standard f
     assert.equal(await h.run(),true);
     assert.equal(h.stats().times,11);
     assert.equal(h.stats().phaseWritten,'form_prefilled');
-    assert.match(h.stats().status,/Review the live form/);
+    assert.match(h.stats().status,/Review the form/);
     assert.doesNotMatch(code,/enabledButton\('Submit Inspection'\)\.click|submit\.click\(\)|mainSubmit\.click/);
     assert.equal(await h.run(),false);
     assert.equal(h.stats().times,11,'new calls must not re-toggle responses');
@@ -95,4 +106,38 @@ test('SCBA response control lookup tolerates native checkmark icons without matc
         (a,b)=>String(a).toLowerCase()===String(b).toLowerCase(),clean);
     assert.equal(f('Passed').length,2);
     assert.equal(f('Failed').length,1);
+});
+
+test('Issue fills a specific mix of Pass and Fail and preserves the equipment comment',async()=>{
+    const answerPlan=questions.map((_,i)=>i===3||i===6?'fail':'pass');
+    const h=harness({result:'issue',questionAnswers:answerPlan,
+        comment:'Cylinder bracket damaged and regulator bypass not functioning.'});
+    assert.equal(await h.run(),true);
+    assert.deepEqual(h.stats().selections,answerPlan);
+    assert.equal(h.stats().times,11);
+    assert.match(h.stats().status,/comment is saved in Rebel/);
+});
+test('Missing item with unperformed questions is never automatically marked Passed',async()=>{
+    const partial=['fail',...Array(10).fill('')];
+    const h=harness({result:'missing',questionAnswers:partial,
+        comment:'AP-45 missing from Medic 504 mounting position.'});
+    assert.equal(await h.run(),false);
+    assert.equal(h.stats().times,0);
+    const reviewed=['fail',...Array(10).fill('fail')];
+    const checked=harness({result:'missing',questionAnswers:reviewed,
+        comment:'Missing airpack, failed equipment inventory and associated questions.'});
+    assert.equal(await checked.run(),true);
+    assert.deepEqual(checked.stats().selections,reviewed);
+});
+test('Issue with no stated failed question, no comment, or incomplete answers cannot be prefilled',async()=>{
+    const noFail=harness({result:'issue',questionAnswers:Array(11).fill('pass'),
+        comment:'Problem unknown'});
+    assert.equal(await noFail.run(),false);
+    const noComment=harness({result:'issue',questionAnswers:['fail',...Array(10).fill('pass')],
+        comment:''});
+    assert.equal(await noComment.run(),false);
+    const incomplete=harness({result:'issue',
+        questionAnswers:['fail',...Array(9).fill('pass'),''],
+        comment:'Fault found'});
+    assert.equal(await incomplete.run(),false);
 });

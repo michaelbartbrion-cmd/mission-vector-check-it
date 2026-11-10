@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const src=fs.readFileSync(path.join(__dirname,'../beta/vector-rebel.user.js'),'utf8');
-const start=src.indexOf('    function scbaAirpackNativeQueue(scan) {');
+const start=src.indexOf('    function scbaAirpackBeginExceptionReview(item,kind) {');
 const end=src.indexOf('    function showStation4ScbaAirpackCheck() {',start);
 assert.ok(start>=0&&end>start);
 const code=src.slice(start,end)+'\nreturn {queue:scbaAirpackNativeQueue,'+
@@ -20,7 +20,10 @@ const key='scba-native-handoff-test', draft='scba-draft-test';
 const item=(name,scope,result='present_working',i=12)=>({
     name,scope,result,location:'Truck 504: 63000-13',pool:'SCBA Frame',
     href:'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/'+i+'/item',
-    draftResult:result
+    draftResult:result,
+    comment:result==='present_working'?'':'Physical exception recorded in test',
+    questionAnswers:result==='issue'?['fail',...Array(10).fill('pass')]:
+        result==='missing'?['fail',...Array(10).fill('pass')]:null
 });
 function harness({items=[item('AP-04','truck504')],header='AP-04',
     url='https://app.vectorcheckit.us/main/asset-manager',activePpe=false}={}){
@@ -58,13 +61,14 @@ function harness({items=[item('AP-04','truck504')],header='AP-04',
         'GM_setValue','sessionStorage','SCBA_AIRPACK_NATIVE_HANDOFF_KEY',
         'SCBA_AIRPACK_DRAFT_KEY','document','SCBA_AIRPACK_NATIVE_BANNER_ID',
         'visible','uiEquals','clean','sleep','setStatus','PANEL_ID',
-        'OVERLAY_ID','SCBA_FRAME_POOL',code);
+        'OVERLAY_ID','SCBA_FRAME_POOL','SCBA_FRAME_INSPECTION_QUESTIONS',code);
     const x=fn(defs,location,()=>activePpe?{}:null,
         (k,v)=>{if(k===draft)saved=v;else if(k===draft+'-handoff')summary=v;else assert.fail('wrong draft key');},
         sessionStorage,key,draft,document,'native-banner-test',
         ()=>true,(a,b)=>String(a).toLowerCase()===String(b).toLowerCase(),
         v=>String(v||'').replace(/\s+/g,' ').trim(),
-        async()=>{},()=>{},'rebel-panel','rebel-overlay','299946');
+        async()=>{},()=>{},'rebel-panel','rebel-overlay','299946',
+        Array.from({length:11},(_,i)=>'Question '+(i+1)));
     return {...x,location,sessionStorage,scan:{complete:true,items},
         get:()=>({navigated,nativeStarts,saved,summary,attached,stored:state.get(key)})};
 }
@@ -73,8 +77,11 @@ test('all SCBA physical-review dropdowns default to proposed Present / Working',
         src.indexOf('    function installPanel() {'));
     assert.match(ui,/select\.value='present_working'/);
     assert.match(ui,/item\.draftResult='present_working'/);
-    assert.match(ui,/\['issue','Issue'\]/);
+    assert.match(ui,/\['issue','Fail \/ Issue'\]/);
     assert.match(ui,/\['missing','Missing'\]/);
+    assert.match(ui,/document\.createElement\('details'\)/);
+    assert.match(ui,/document\.createElement\('textarea'\)/);
+    assert.match(ui,/SCBA_FRAME_INSPECTION_QUESTIONS\.length/);
     assert.match(ui,/physical\.checked=false/);
     assert.match(ui,/scbaAirpackBeginNativeChecks\(scan,physical\.checked\)/);
 });

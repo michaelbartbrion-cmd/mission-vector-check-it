@@ -18,7 +18,7 @@ const locations=[
 test('airpack check is independently available in existing Vector Rebel panel',()=>{
     assert.match(src,/mainAction\('SCBA Airpacks', showStation4ScbaAirpackCheck, false\)/);
     assert.match(src,/mainAction\('My Tour PPE',/);
-    assert.match(src,/^\/\/ @version\s+3\.2\.59/m);
+    assert.match(src,/^\/\/ @version\s+3\.2\.60/m);
     assert.match(src,/const SCBA_AIRPACK_DRAFT_KEY = 'vector-rebel-station4-airpack-draft-v1'/);
     const check=cut('function showStation4ScbaAirpackCheck() {','function installPanel() {');
     assert.match(check,/makeOverlayBox\('830px'\)/);
@@ -35,7 +35,8 @@ test('airpack check is independently available in existing Vector Rebel panel',(
     assert.match(check,/scbaAirpackBeginNativeChecks\(scan,physical\.checked\)/);
     assert.match(check,/select\.value='present_working'/);
     assert.match(check,/draftOnly:true/);
-    assert.match(check,/No SCBA inspection, inspection signature, or Vector check/);
+    assert.match(check,/Rebel never submits automatically/);
+    assert.match(check,/Exception comments are saved locally/);
     assert.doesNotMatch(check,/submitInspection\(|saveInspection\(|\.submit\(/);
 });
 test('only Truck 504, Medic 504 and Station 4 SCBA Supply Room are in scope',()=>{
