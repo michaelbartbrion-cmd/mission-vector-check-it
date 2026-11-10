@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.63
+// @version      3.2.64
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.63',
+        version: '3.2.64',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.63';
+    const VERSION = '3.2.64';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -12189,7 +12189,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.63'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.64'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -12272,7 +12272,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || queue.inspectionVersion!=='3.2.63' ||
+        if(!queue || queue.inspectionVersion!=='3.2.64' ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>30000 || Date.now()<queue.openedAt)return false;
@@ -12363,7 +12363,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // Filling the note is reversible; the operator still submits the form.
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || queue.inspectionVersion!=='3.2.63' ||
+        if(!queue || queue.inspectionVersion!=='3.2.64' ||
             !['form_prefilled','native_form_opened'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -12606,26 +12606,37 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return localHistoryDateKey(timestamp - (hasTime ? 7*60*60*1000 : 0));
     }
 
+    // Individual-airpack status is the single source for the group summary
+    // and the expanded per-airpack grid. A positive mark requires an exact
+    // native COMPLETED SCBA Inspection record in the relevant duty window.
+    function apparatusItemTourStatus(group, tour, item) {
+        const required = group==='station4' ? !!tour.stationMonday : true;
+        const due = group==='station4' ? !!tour.stationDue : !!tour.due;
+        if(!required)return {code:'na',date:''};
+        if(!due)return {code:'future',date:''};
+        const eligible = group==='station4'
+            ? [tour.stationMonday] : [tour.startDate,tour.endDate];
+        const completed = item?.readable && (item.dates||[])
+            .find(day=>eligible.includes(day));
+        if(completed)return {code:'done',date:completed};
+        if(item?.readable && item?.exhaustive)return {code:'missing',date:''};
+        return {code:'unknown',date:'',error:item?.error||'Item Log coverage not confirmed'};
+    }
+
     function apparatusStatusForTour(group, tour, items) {
-        const required = group === 'station4'
-            ? !!tour.stationMonday : true;
-        const due = group === 'station4' ? !!tour.stationDue : !!tour.due;
-        if (!required) return {code:'na',required:false,missing:[],unknown:[]};
-        if (!due) return {code:'future',required:true,missing:[],unknown:[]};
-        const selected = (items || []).filter(item => item.scope === group);
-        if (!selected.length)
+        const required = group==='station4' ? !!tour.stationMonday : true;
+        const due = group==='station4' ? !!tour.stationDue : !!tour.due;
+        if(!required)return {code:'na',required:false,missing:[],unknown:[]};
+        if(!due)return {code:'future',required:true,missing:[],unknown:[]};
+        const selected = (items||[]).filter(item=>item.scope===group);
+        if(!selected.length)
             return {code:'unknown',required:true,missing:[],unknown:['No identified SCBA assets']};
-        const eligible = group === 'station4' ?
-            [tour.stationMonday] : [tour.startDate,tour.endDate];
-        const missing = [],unknown = [],passed = [];
-        for (const item of selected) {
-            if ((item.dates || []).some(day => eligible.includes(day))) {
-                passed.push(item.name);
-            } else if (item.readable && item.exhaustive) {
-                missing.push(item.name);
-            } else {
-                unknown.push(item.name+': '+(item.error || 'history coverage not confirmed'));
-            }
+        const missing=[],unknown=[],passed=[];
+        for(const item of selected){
+            const result=apparatusItemTourStatus(group,tour,item);
+            if(result.code==='done')passed.push(item.name);
+            else if(result.code==='missing')missing.push(item.name);
+            else unknown.push(item.name+': '+(result.error||'history not confirmed'));
         }
         return {code:unknown.length?'unknown':missing.length?'missing':'done',
             required:true,missing,unknown,passed,expected:selected.length};
@@ -12883,7 +12894,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         heading.textContent='Apparatus Check';
         const intro=document.createElement('p');
         intro.style.cssText='font-size:12px;line-height:1.5;color:#5b7486;margin:0 0 12px;';
-        intro.textContent='Read only. Truck 504 and Medic 504 SCBA inspections are due every '+
+        intro.textContent='Every identified SCBA is shown beneath its assigned location. '+
+            'Read only. Truck 504 and Medic 504 SCBA inspections are due every '+
             'two-day C-shift tour. Station 4 SCBA Room is due only on C-shift Mondays. '+
             'Green = completed for every currently assigned airpack; red = due and missing; '+
             '? = native history not fully verified; blank = not yet due; dash = not scheduled. '+
@@ -12919,40 +12931,72 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
         head.append(tr);table.append(head);
         const body=document.createElement('tbody');
-        for(const [group,name] of [
+        const allAirpacks=Array.isArray(report.items)?report.items:[];
+        const displayGroups=[
             ['truck504','Truck 504'],['medic504','Medic 504'],
             ['station4','Station 4 SCBA Room']
-        ]){
+        ];
+        const statusSymbol={
+            done:'✓',missing:'✕',unknown:'?',future:'',na:'—'
+        };
+        const statusColors={
+            done:['#e4f5e9','#216a37'],
+            missing:['#ffe4e4','#b42318'],
+            unknown:['#fff4d5','#875700'],
+            future:['#fff','#ccc'],
+            na:['#f5f7f8','#a9b4bb']
+        };
+        const statusCell=(state,group,tour,label,isAirpack=false)=>{
+            const cell=document.createElement('td');
+            cell.textContent=statusSymbol[state.code]||'';
+            const color=statusColors[state.code]||statusColors.unknown;
+            cell.style.cssText='height:'+(isAirpack?'30':'36')+
+                'px;text-align:center;font-size:'+(isAirpack?'17':'20')+
+                'px;font-weight:bold;border-bottom:1px solid #e2e9ed;'+
+                'border-left:1px solid #e2e9ed;background:'+color[0]+
+                ';color:'+color[1]+';';
+            cell.title=label+' | '+tour.startDate+' + '+tour.endDate+
+                (group==='station4'?' | Monday '+(tour.stationMonday||'not scheduled'):'')+
+                ' | '+state.code.toUpperCase()+
+                (state.date?' | Native completed, duty date: '+state.date:'')+
+                (state.missing?.length?' | Missing: '+state.missing.join(', '):'')+
+                (state.unknown?.length?' | Unverified: '+state.unknown.join('; '):'')+
+                (state.error?' | '+state.error:'');
+            return cell;
+        };
+        for(const [group,name] of displayGroups){
+            const airpacks=allAirpacks.filter(item=>item.scope===group)
+                .sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),undefined,
+                    {numeric:true,sensitivity:'base'}));
             const row=document.createElement('tr');
             const title=document.createElement('th');
-            title.textContent=name;
-            title.style.cssText='position:sticky;left:0;z-index:2;background:#f1f6f8;'+
-                'padding:12px;text-align:left;white-space:nowrap;border-bottom:1px solid #ccdbe4;';
+            title.style.cssText='position:sticky;left:0;z-index:2;background:#dfedf4;'+
+                'padding:10px 12px;text-align:left;white-space:nowrap;'+
+                'border-top:2px solid #9ebacb;border-bottom:1px solid #bfd1dc;';
+            title.textContent=name+' ('+airpacks.length+' SCBA'+(airpacks.length===1?'':'s')+')';
             row.append(title);
             for(const tour of periods){
-                const state=apparatusStatusForTour(group,tour,report.items||[]);
-                const value={done:'✓',missing:'✕',unknown:'?',future:'',na:'—'}[state.code];
-                const cell=document.createElement('td');
-                cell.textContent=value;
-                const colors={
-                    done:['#e4f5e9','#216a37'],
-                    missing:['#ffe4e4','#b42318'],
-                    unknown:['#fff4d5','#875700'],
-                    future:['#fff','#ccc'],
-                    na:['#f5f7f8','#a9b4bb']
-                };
-                const colorsHere=colors[state.code];
-                cell.style.cssText='height:36px;text-align:center;font-size:20px;font-weight:bold;'+
-                    'border-bottom:1px solid #e2e9ed;border-left:1px solid #e2e9ed;'+
-                    'background:'+colorsHere[0]+';color:'+colorsHere[1]+';';
-                cell.title=name+' | '+tour.startDate+' + '+tour.endDate+
-                    (group==='station4'?' | Monday '+(tour.stationMonday||'not scheduled'):'')+
-                    ' | '+state.code.toUpperCase()+
-                    (state.missing.length?' | Missing: '+state.missing.join(', '):'')+
-                    (state.unknown.length?' | Unverified: '+state.unknown.join('; '):'');
-                row.append(cell);
+                const state=apparatusStatusForTour(group,tour,allAirpacks);
+                row.append(statusCell(state,group,tour,name));
             }
             body.append(row);
+            for(const item of airpacks){
+                const subrow=document.createElement('tr');
+                subrow.setAttribute('data-apparatus-scba-item',item.name);
+                const itemTitle=document.createElement('th');
+                itemTitle.textContent='↳ '+item.name;
+                itemTitle.title=item.name+' | '+name+' | native SCBA Inspection history';
+                itemTitle.style.cssText='position:sticky;left:0;z-index:1;'+
+                    'padding:7px 12px 7px 24px;text-align:left;white-space:nowrap;'+
+                    'font-size:12px;font-weight:600;color:#2f566d;background:#f9fcfd;'+
+                    'border-bottom:1px solid #dce7ed;';
+                subrow.append(itemTitle);
+                for(const tour of periods){
+                    const state=apparatusItemTourStatus(group,tour,item);
+                    subrow.append(statusCell(state,group,tour,item.name,true));
+                }
+                body.append(subrow);
+            }
         }
         table.append(body);scroll.append(table);box.append(scroll);
         const details=document.createElement('details');
