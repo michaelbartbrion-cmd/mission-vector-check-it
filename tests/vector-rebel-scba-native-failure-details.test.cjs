@@ -30,7 +30,7 @@ function harness({show=true,itemName='AP-45',rowName='AP-45',
             selector==='.equipment-items__item-list'?[row]:[]
     };
     const doc={querySelectorAll:()=>show?[modal]:[]};
-    const queue={inspectionVersion:'3.2.62',phase,index:0,
+    const queue={inspectionVersion:'3.2.63',phase,index:0,
         createdAt:Date.now(),openedAt:Date.now()-600,
         items:[{name:itemName,result:'issue',comment}]};
     const storage={setItem(_k,v){mutations++;Object.assign(queue,JSON.parse(v));}};

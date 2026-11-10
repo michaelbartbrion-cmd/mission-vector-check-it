@@ -28,13 +28,14 @@ function reachable(entry){
 const actions=[
  ['My Tour PPE','launchMyInspectionFromAnywhere'],
  ['My After-Fire','launchMyInspectionFromAnywhere'],
- ["Captain's Monthly",'launchCaptainInspectionFromAnywhere'],
+ ['Apparatus Check','showApparatusCheck'],
  ['Daily Captain Check','launchCaptainDailyCheckFromAnywhere']
 ];
 test('All four visible action buttons have the expected entrypoint',()=>{
  assert.match(script,/mainAction\('My Tour PPE', \(\) => launchMyInspectionFromAnywhere\('tour'\)\)/);
  assert.match(script,/mainAction\('My After-Fire', \(\) => launchMyInspectionFromAnywhere\('afterFire'\)\)/);
- assert.match(script,/mainAction\("Captain's Monthly", launchCaptainInspectionFromAnywhere\)/);
+ assert.doesNotMatch(script,/mainAction\("Captain's Monthly",/);
+ assert.match(script,/mainAction\('Apparatus Check', showApparatusCheck, false\)/);
  assert.match(script,/mainAction\('Daily Captain Check', launchCaptainDailyCheckFromAnywhere, false\)/);
 });
 test('No inspection/audit button can reach a full department PPE crawl',()=>{

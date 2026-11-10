@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.62
+// @version      3.2.63
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.62',
+        version: '3.2.63',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.62';
+    const VERSION = '3.2.63';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -5293,60 +5293,36 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     async function readCaptainComplianceHistory(item) {
-        const captainMode = getMode('captain');
-        if (!captainMode) throw new Error('Captain inspection mode is unavailable.');
-        if (!isAssetPageFor(item)) throw new Error(`${item.assetId}: wrong PPE asset page.`);
-        // Share the same delayed identity check as Tour PPE, without
-        // changing Captain audit's original inventory or writing to Vector.
+        if (!isAssetPageFor(item)) throw new Error(item.assetId + ': wrong PPE asset page.');
         const proof = await verifyPpeDetailIdentity(item);
-        if (!proof) {
-            throw new Error(`${item.assetId}: asset identity could not be verified.`);
-        }
-        const { verifiedItem } = proof;
-
-        if (item.inspectionModeKey === 'scbaTour') {
-            const scbaMode = getMode('scbaTour');
-            if (!scbaMode || item.pool !== SCBA_FACE_MASK_POOL ||
-                item.template !== scbaMode.templates[item.pool]) {
-                throw new Error(item.assetId + ': SCBA pool/template mismatch; history not trusted.');
-            }
-            await revealAssetHistory(verifiedItem, scbaMode.title, 600);
-            const tour = await readModeCompletionHistory(verifiedItem, 'scbaTour');
-            return {
-                captain: { dates: [], latestDate: '', notApplicable: true },
-                tour
-            };
-        }
-        await revealAssetHistory(verifiedItem, captainMode.title, 600);
-        const captain = await readModeCompletionHistory(verifiedItem, 'captain');
-        const tour = await readModeCompletionHistory(verifiedItem, 'tour');
-        return { captain, tour };
+        if (!proof) throw new Error(item.assetId + ': asset identity could not be verified.');
+        const {verifiedItem} = proof;
+        const modeKey = item.inspectionModeKey === 'scbaTour' ? 'scbaTour' : 'tour';
+        const mode = getMode(modeKey);
+        if (!mode) throw new Error(modeKey + ': Tour inspection mode unavailable.');
+        if (modeKey === 'scbaTour' &&
+            (item.pool !== SCBA_FACE_MASK_POOL ||
+             item.template !== mode.templates[item.pool]))
+            throw new Error(item.assetId + ': SCBA Tour pool/template mismatch.');
+        await revealAssetHistory(verifiedItem, mode.title, 600);
+        const tour = await readModeCompletionHistory(verifiedItem, modeKey);
+        return {tour};
     }
 
     function buildCaptainDailyReport(check) {
         const window = captainAuditWindow(check.auditAsOfDate || localTodayKey());
-        const monthKeys = window.months;
-        const tourWindows = window.tours;
-        const dueTourWindows = tourWindows.filter(tourWindow => tourWindow.due === true);
-
+        const dueTourWindows = window.tours.filter(tourWindow => tourWindow.due === true);
         const owners = (check.owners || []).map(owner => {
             const items = (check.items || []).filter(item => item.ownerPrefix === owner.prefix);
             const results = (check.results || []).filter(result => result.ownerPrefix === owner.prefix);
             const byAsset = new Map(results.map(result => [result.assetId, result]));
             const itemRows = items.map(item => {
                 const result = byAsset.get(item.assetId);
-                const captainDates = Array.isArray(result?.captain?.dates) ? result.captain.dates : [];
-                const tourHistoryDates = Array.isArray(result?.tour?.dates) ? result.tour.dates : [];
+                const tourDates = Array.isArray(result?.tour?.dates) ? result.tour.dates : [];
                 const readable = result?.status === 'ok';
-                const captainApplicable = item.inspectionModeKey !== 'scbaTour';
-                const monthlyChecks = monthKeys.map(month => {
-                    if (!captainApplicable) return { month, date: '', ok: true, applicable: false };
-                    const date = captainDates.find(value => value.startsWith(`${month}-`) && value <= window.asOfDate) || '';
-                    return { month, date, ok: readable && !!date, applicable: true };
-                });
-                const tourChecks = tourWindows.map(tourWindow => {
+                const tourChecks = window.tours.map(tourWindow => {
                     const eligible = new Set(tourWindow.eligibleDates || []);
-                    const date = tourHistoryDates.find(value => eligible.has(value)) || '';
+                    const date = tourDates.find(value => eligible.has(value)) || '';
                     return {
                         month: tourWindow.month || tourWindow.startDate.slice(0, 7),
                         startDate: tourWindow.startDate,
@@ -5357,47 +5333,36 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         ok: readable && !!date
                     };
                 });
-                const monthlyOk = readable && monthlyChecks.every(checkRow => checkRow.ok);
-                const toursOk = readable && tourChecks.filter(checkRow => checkRow.due).every(checkRow => checkRow.ok);
+                const toursOk = readable && tourChecks.filter(row => row.due)
+                    .every(row => row.ok);
                 return {
                     assetId: item.assetId,
                     type: item.type,
-                    inspectionModeKey: item.inspectionModeKey || 'captain',
+                    inspectionModeKey: item.inspectionModeKey || 'tour',
                     status: result?.status || 'missing',
-                    latestCaptainDate: result?.captain?.latestDate || '',
-                    captainDates,
                     latestTourDate: result?.tour?.latestDate || '',
-                    tourDates: tourHistoryDates,
-                    monthlyChecks,
+                    tourDates,
                     tourChecks,
-                    captainMonthlyOk: monthlyOk,
                     tourCheckOk: toursOk,
-                    compliant: readable && monthlyOk && toursOk,
+                    compliant: toursOk,
                     error: result?.error || ''
                 };
             });
-
             const discovery = (check.discovery || []).find(x => x.prefix === owner.prefix) || {};
-            const allReadable = itemRows.length > 0 && itemRows.every(row => row.status === 'ok') && !(discovery.unknown || []).length && !discovery.error;
-            const monthlyRequirementCount = itemRows.reduce((sum, row) =>
-                sum + row.monthlyChecks.filter(check => check.applicable !== false).length, 0);
+            const allReadable = itemRows.length > 0 &&
+                itemRows.every(row => row.status === 'ok') &&
+                !(discovery.unknown || []).length && !discovery.error;
             const tourRequirementCount = itemRows.length * dueTourWindows.length;
-            const monthlyPassedCount = itemRows.reduce((sum, row) => sum + row.monthlyChecks.filter(x => x.ok).length, 0);
-            const tourPassedCount = itemRows.reduce((sum, row) => sum + row.tourChecks.filter(x => x.due && x.ok).length, 0);
-            const captainMonthlyOk = allReadable && monthlyPassedCount === monthlyRequirementCount;
+            const tourPassedCount = itemRows.reduce((sum, row) =>
+                sum + row.tourChecks.filter(x => x.due && x.ok).length, 0);
             const tourCheckOk = allReadable && tourPassedCount === tourRequirementCount;
-            const compliant = allReadable && captainMonthlyOk && tourCheckOk;
-
             return {
                 name: owner.name,
                 prefix: owner.prefix,
                 gearCount: itemRows.length,
                 allReadable,
-                captainMonthlyOk,
                 tourCheckOk,
-                compliant,
-                monthlyPassedCount,
-                monthlyRequirementCount,
+                compliant: tourCheckOk,
                 tourPassedCount,
                 tourRequirementCount,
                 discoveryError: discovery.error || '',
@@ -5405,9 +5370,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 items: itemRows
             };
         });
-
         return {
-            schemaVersion: 6,
+            schemaVersion: 7,
             reportId: check.checkId,
             generatedAt: new Date().toISOString(),
             setId: check.setId,
@@ -5423,8 +5387,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             setStatus('No Daily Captain Check report is stored yet.');
             return;
         }
-        if (Number(report.schemaVersion || 0) < 6) {
-            setStatus('This stored Daily Captain report predates SCBA Tour compliance. Run the read-only audit again for the complete grid.', false);
+        if (Number(report.schemaVersion || 0) < 7) {
+            setStatus('This stored Daily Captain report includes the retired Monthly Captain requirement. Run the Tour-only read-only audit again.', false);
             return;
         }
         const auditWindow = report.auditWindow || captainAuditWindow(report.generatedAt?.slice(0, 10));
@@ -5442,18 +5406,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         const months = Array.isArray(auditWindow.months) ? auditWindow.months.slice(0, 2) : [];
         const allItems = (report.owners || []).flatMap(owner => (owner.items || []).map(item => ({ owner, item })));
-        const missingMonthly = allItems.reduce((sum, row) =>
-            sum + (row.item.monthlyChecks || [])
-                .filter(check => check.applicable !== false && !check.ok).length, 0);
-        const missingTours = allItems.reduce((sum, row) => sum + (row.item.tourChecks || []).filter(check => check.due && !check.ok).length, 0);
+        const missingTours = allItems.reduce((sum, row) =>
+            sum + (row.item.tourChecks || []).filter(check => check.due && !check.ok).length, 0);
         const unreadable = allItems.filter(row => row.item.status !== 'ok').length;
-        const hasProblems = missingMonthly > 0 || missingTours > 0 || unreadable > 0;
+        const hasProblems = missingTours > 0 || unreadable > 0;
 
         const summaryBar = document.createElement('div');
         summaryBar.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px;padding:9px 10px;border-radius:8px;border:1px solid ' +
             (hasProblems ? '#e1a3a3' : '#a9cfad') + ';background:' + (hasProblems ? '#fff3f3' : '#eef8ef') + ';font-size:11px;color:#304b5a;';
-        summaryBar.innerHTML = '<b>' + (hasProblems ? 'NEEDS REVIEW' : 'ALL DUE CHECKS COMPLETE') + '</b>' +
-            '<span>Monthly missing: <b style="color:' + (missingMonthly ? '#b42318' : '#24713b') + '">' + missingMonthly + '</b></span>' +
+        summaryBar.innerHTML = '<b>' + (hasProblems ? 'NEEDS REVIEW' : 'ALL DUE TOUR CHECKS COMPLETE') + '</b>' +
             '<span>Tour missing: <b style="color:' + (missingTours ? '#b42318' : '#24713b') + '">' + missingTours + '</b></span>' +
             '<span>Unreadable: <b style="color:' + (unreadable ? '#b42318' : '#24713b') + '">' + unreadable + '</b></span>';
         box.appendChild(summaryBar);
@@ -5473,7 +5434,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const shortDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value || '') ? value.slice(5) : '';
         const monthTours = month => (auditWindow.tours || []).filter(tour => tour.month === month);
         const monthTourColumns = Math.max(1, ...months.map(month => monthTours(month).length));
-        const monthGridTemplate = () => '64px repeat(' + monthTourColumns + ', 34px)';
+        const monthGridTemplate = () => 'repeat(' + monthTourColumns + ', 34px)';
         const makeMonthCell = (item, month, rowBackground, topBorder) => {
             const td = document.createElement('td');
             const scheduledTours = monthTours(month);
@@ -5482,28 +5443,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     .filter(check => check.month === month)
                     .map(check => [check.startDate, check])
             );
-            const monthly = (item.monthlyChecks || []).find(check => check.month === month);
-            const capApplicable = monthly?.applicable !== false;
-            const capOk = capApplicable && item.status === 'ok' && !!(monthly && monthly.ok);
             td.style.cssText = 'padding:5px 7px;' + topBorder + 'vertical-align:middle;background:' + rowBackground +
-                ';min-width:' + (78 + monthTourColumns * 38) + 'px;';
-
+                ';min-width:' + (14 + monthTourColumns * 38) + 'px;';
             const grid = document.createElement('div');
             grid.style.cssText = 'display:grid;grid-template-columns:' + monthGridTemplate() + ';gap:4px;align-items:center;';
-
-            const cap = document.createElement('div');
-            cap.style.cssText = 'height:27px;display:flex;align-items:center;justify-content:center;border-radius:5px;border:1px solid ' +
-                (!capApplicable ? '#d8e1e6' : capOk ? '#78b684' : '#dc7f7f') + ';background:' +
-                (!capApplicable ? '#fafcfd' : capOk ? '#e5f5e8' : '#ffe3e3') +
-                ';color:' + (!capApplicable ? '#8c9da6' : capOk ? '#176b32' : '#b42318') +
-                ';font-size:11px;font-weight:800;white-space:nowrap;';
-            cap.textContent = !capApplicable ? '—' : capOk ? shortDate(monthly.date) : '✕';
-            cap.title = !capApplicable
-                ? 'Not applicable: SCBA Face Mask uses a Tour Checklist, not Captain Monthly'
-                : capOk ? 'Captain monthly completed ' + monthly.date
-                : 'Captain monthly missing for ' + month;
-            grid.appendChild(cap);
-
             scheduledTours.forEach(headerTour => {
                 const tour = itemTourMap.get(headerTour.startDate) || headerTour;
                 const due = headerTour.due === true;
@@ -5533,7 +5476,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const tableWrap = document.createElement('div');
         tableWrap.style.cssText = 'max-height:68vh;overflow:auto;border:1px solid #c9d7df;border-radius:10px;background:#fff;';
         const table = document.createElement('table');
-        table.style.cssText = 'width:100%;min-width:' + (365 + months.length * (78 + monthTourColumns * 38)) + 'px;border-collapse:separate;border-spacing:0;font-size:11px;color:#223f50;';
+        table.style.cssText = 'width:100%;min-width:' + (365 + months.length * (14 + monthTourColumns * 38)) + 'px;border-collapse:separate;border-spacing:0;font-size:11px;color:#223f50;';
         const thead = document.createElement('thead');
         const headRow = document.createElement('tr');
         const makeHead = (text, extra) => {
@@ -5547,16 +5490,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             makeHead('ITEM', 'left:155px;min-width:210px;z-index:6;')
         );
         months.forEach((month, monthIndex) => {
-            const th = makeHead('', 'min-width:' + (78 + monthTourColumns * 38) + 'px;' + (monthIndex ? 'border-left:2px solid #355f7c;' : ''));
+            const th = makeHead('', 'min-width:' + (14 + monthTourColumns * 38) + 'px;' + (monthIndex ? 'border-left:2px solid #355f7c;' : ''));
             const monthTitle = document.createElement('div');
             monthTitle.style.cssText = 'font-size:11px;font-weight:800;margin-bottom:5px;';
             monthTitle.textContent = displayMonthKey(month);
             const guide = document.createElement('div');
             guide.style.cssText = 'display:grid;grid-template-columns:' + monthGridTemplate() + ';gap:4px;align-items:center;';
-            const capHead = document.createElement('div');
-            capHead.style.cssText = 'text-align:center;font-size:9px;font-weight:800;color:#dce9f2;';
-            capHead.textContent = 'CAP';
-            guide.appendChild(capHead);
             const tours = monthTours(month);
             tours.forEach(tour => {
                 const label = document.createElement('div');
@@ -5580,7 +5519,6 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const ownerItems = owner.items || [];
             ownerItems.forEach((item, itemIndex) => {
                 const itemHasMissing = item.status !== 'ok' ||
-                    (item.monthlyChecks || []).some(check => !check.ok) ||
                     (item.tourChecks || []).some(check => check.due && !check.ok);
                 const baseBackground = ownerIndex % 2 ? '#f8fbfc' : '#ffffff';
                 const rowBackground = itemHasMissing ? '#fff1f1' : baseBackground;
@@ -5625,84 +5563,6 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         rerunV4.onclick = () => { overlay.remove(); launchCaptainDailyCheckFromAnywhere(); };
         box.append(rerunV4, closeV4);
         return;
-
-        (report.owners || []).forEach(owner => {
-            const card = document.createElement('div');
-            const verified = !!owner.compliant;
-            card.style.cssText = `padding:11px;margin:8px 0;border-radius:9px;border:1px solid ${verified ? '#9fc79f' : '#d7b56d'};background:${verified ? '#eef8ee' : '#fff8e8'};`;
-            const headline = document.createElement('div');
-            headline.style.cssText = 'font-size:14px;font-weight:700;color:#18384f;';
-            headline.textContent = owner.name;
-            const status = document.createElement('div');
-            status.style.cssText = 'font-size:12px;line-height:1.55;margin-top:4px;';
-            status.innerHTML = verified
-                ? `<b>COMPLIANT:</b> all ${owner.gearCount} current mapped PPE items satisfy both monthly checks and every tour check due in the two-month window.`
-                : `<b>NEEDS REVIEW:</b> Monthly ${owner.monthlyPassedCount}/${owner.monthlyRequirementCount} · Tour PPE ${owner.tourPassedCount}/${owner.tourRequirementCount}.`;
-            card.append(headline, status);
-
-            if (owner.discoveryError) {
-                const issue = document.createElement('div');
-                issue.style.cssText = 'font-size:11px;color:#8a5a00;margin-top:5px;';
-                issue.textContent = `Discovery issue: ${owner.discoveryError}`;
-                card.appendChild(issue);
-            }
-            if ((owner.unknownAssets || []).length) {
-                const issue = document.createElement('div');
-                issue.style.cssText = 'font-size:11px;color:#8a5a00;margin-top:5px;';
-                issue.textContent = `Unmapped gear: ${owner.unknownAssets.join(', ')}`;
-                card.appendChild(issue);
-            }
-
-            const details = document.createElement('details');
-            details.style.cssText = 'margin-top:7px;';
-            details.open = !verified;
-            const summary = document.createElement('summary');
-            summary.style.cssText = 'cursor:pointer;font-size:11px;color:#436276;';
-            summary.textContent = `${owner.gearCount} current mapped PPE item${owner.gearCount === 1 ? '' : 's'} — two-month history`;
-            const rows = document.createElement('div');
-            rows.style.cssText = 'margin-top:6px;font-size:11px;line-height:1.55;';
-            (owner.items || []).forEach(item => {
-                const row = document.createElement('div');
-                row.style.cssText = `padding:7px 0;border-top:1px solid ${item.compliant ? '#d6e9d6' : '#ead7ad'};`;
-                if (item.status !== 'ok') {
-                    row.textContent = `${item.type || 'PPE'} · ${item.assetId} · UNREADABLE: ${item.error || 'history not available'}`;
-                } else {
-                    const monthlyText = (item.monthlyChecks || []).map(x =>
-                        `${displayMonthKey(x.month)}: ${x.date ? `${displayHistoryDateKey(x.date)} ✓` : 'MISSING'}`
-                    ).join(' · ');
-                    const missingTours = (item.tourChecks || []).filter(x => !x.ok);
-                    const tourPassed = (item.tourChecks || []).filter(x => x.ok).length;
-                    const tourTotal = (item.tourChecks || []).length;
-                    const missingTourText = missingTours.length
-                        ? `<br><span style="color:#8a5a00">Missing tours: ${escapeHtml(missingTours.map(x => `${x.startDate.slice(5)}–${x.endDate.slice(5)}`).join(', '))}</span>`
-                        : '';
-                    row.innerHTML = `<b>${escapeHtml(item.type || 'PPE')}</b> · ${escapeHtml(item.assetId)}<br>` +
-                        `Captain's Monthly: ${escapeHtml(monthlyText)}<br>` +
-                        `Tour PPE: ${tourPassed}/${tourTotal} tours ✓${missingTourText}`;
-                }
-                rows.appendChild(row);
-            });
-            details.append(summary, rows);
-            card.appendChild(details);
-            box.appendChild(card);
-        });
-
-        const tourDetails = document.createElement('details');
-        tourDetails.style.cssText = 'margin-top:10px;padding:8px;border:1px solid #d5e0e7;border-radius:8px;background:#f8fbfc;';
-        const tourSummary = document.createElement('summary');
-        tourSummary.style.cssText = 'cursor:pointer;font-size:11px;font-weight:700;color:#436276;';
-        tourSummary.textContent = `Tours included (${(auditWindow.tours || []).length})`;
-        const tourList = document.createElement('div');
-        tourList.style.cssText = 'font-size:11px;line-height:1.6;margin-top:6px;color:#506a7b;';
-        tourList.textContent = (auditWindow.tours || []).map(x => `${displayHistoryDateKey(x.startDate)} + ${displayHistoryDateKey(x.endDate)}${(x.eligibleDates || []).length < 2 ? ' (through audit date)' : ''}`).join(' · ');
-        tourDetails.append(tourSummary, tourList);
-        box.appendChild(tourDetails);
-
-        const close = makeButton('Close');
-        close.onclick = () => overlay.remove();
-        const rerun = makeButton('Run Again', { background: '#176b8e', color: '#fff' });
-        rerun.onclick = () => { overlay.remove(); launchCaptainDailyCheckFromAnywhere(); };
-        box.append(rerun, close);
     }
 
     function showCaptainDailySetPicker() {
@@ -5726,7 +5586,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         title.textContent = 'Daily Captain Check';
         const sub = document.createElement('div');
         sub.style.cssText = 'font-size:12px;color:#607483;margin-bottom:14px;line-height:1.5;';
-        sub.textContent = "Read only. One line per person/item: previous month on the left, current month on the right. Captain Monthly shows the completion date or a red X; each two-shift tour shows a green check, red X once due, or stays blank until the tour starts.";
+        sub.textContent = 'Read only. Every PPE item shows its per-tour inspection status: green check when completed on either shift day, red X when due and missing, blank for future tours. Monthly Captain checks are retired.';
         box.append(title, sub);
 
         const selectLabel = document.createElement('label');
@@ -5870,7 +5730,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             for (const owner of owners) {
                 setStatus(`Daily Captain Check — preparing verified PPE for ${owner.name}…`);
                 try {
-                    const found = await discoverOwnerGear(owner, 'captain', freshInventory);
+                    const found = await discoverOwnerGear(owner, 'tour', freshInventory);
                     discovery.push({
                         name: owner.name,
                         prefix: owner.prefix,
@@ -5882,18 +5742,6 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         ownerName: owner.name,
                         ownerPrefix: owner.prefix
                     }));
-                    // The separately verified mask has Tour history only.
-                    for (const mask of found.supplemental || []) {
-                        if (mask.pool !== SCBA_FACE_MASK_POOL) continue;
-                        const template = getMode('scbaTour')?.templates?.[mask.pool];
-                        if (template !== SCBA_TOUR_TEMPLATE) {
-                            throw new Error(mask.assetId + ': SCBA Tour template is unverified.');
-                        }
-                        items.push({
-                            ...mask, template, inspectionModeKey: 'scbaTour',
-                            ownerName: owner.name, ownerPrefix: owner.prefix
-                        });
-                    }
                 } catch (error) {
                     discovery.push({ name: owner.name, prefix: owner.prefix, unknown: [], error: error.message });
                 }
@@ -6030,7 +5878,6 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     assetId: item.assetId,
                     type: item.type,
                     status: 'error',
-                    captain: { dates: [], latestDate: '' },
                     tour: { dates: [], latestDate: '' },
                     error: error.message
                 };
@@ -6043,7 +5890,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             if (check.index >= check.items.length) {
                 check.status = 'returning';
                 saveCaptainDailyCheck(check);
-                setStatus('Daily Captain Check — two-month Captain Monthly + per-tour PPE history read complete. Returning to PPE list…');
+                setStatus('Daily Captain Check: two-month per-tour PPE history read complete. Returning to PPE list.');
                 if (check.returnUrl && location.href !== check.returnUrl) location.href = check.returnUrl;
                 else setTimeout(resumeCaptainDailyCheck, 50);
             } else {
@@ -12342,7 +12189,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.62'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.63'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -12425,7 +12272,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || queue.inspectionVersion!=='3.2.62' ||
+        if(!queue || queue.inspectionVersion!=='3.2.63' ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>30000 || Date.now()<queue.openedAt)return false;
@@ -12516,7 +12363,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // Filling the note is reversible; the operator still submits the form.
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || queue.inspectionVersion!=='3.2.62' ||
+        if(!queue || queue.inspectionVersion!=='3.2.63' ||
             !['form_prefilled','native_form_opened'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -12712,6 +12559,431 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             await sleep(150);
         }
         return true;
+    }
+
+
+    // APPARATUS CHECK: read-only completion audit of the existing Standard
+    // SCBA Inspection records. Do not confuse a Rebel draft with a native
+    // Vector COMPLETED inspection or write a new inspection here.
+    const APPARATUS_CHECK_KEY = 'vector-rebel-apparatus-check-v1';
+    const APPARATUS_REPORT_KEY = 'vector-rebel-apparatus-report-v1';
+    const APPARATUS_AUDIT_SCHEMA = 1;
+    let apparatusCheckBusy = false;
+
+    function apparatusWorkWindows(asOfDate = localTodayKey(), referenceTime = new Date()) {
+        const original = captainAuditWindow(asOfDate);
+        return {
+            ...original,
+            tours: original.tours.map(tour => {
+                const days = [tour.startDate, tour.endDate];
+                const monday = days.find(key => {
+                    const day = utcDayNumber(key);
+                    return Number.isFinite(day) &&
+                        new Date(day * 86400000).getUTCDay() === 1;
+                }) || '';
+                // All requirements are evaluated at the time of the last
+                // native Item Log scan, not at the time the cached report
+                // is reopened. A stale report never turns a future blank red.
+                const now = referenceTime;
+                const today = localTodayKey(now);
+                const due = tour.startDate <= original.asOfDate &&
+                    (tour.startDate < today ||
+                     (tour.startDate === today && now.getHours() >= 7));
+                const mondayStarted = !!monday &&
+                    (monday < today || (monday === today && now.getHours() >= 7));
+                return {...tour,due,stationMonday:monday,
+                    stationDue:!!monday && monday <= original.asOfDate &&
+                        mondayStarted};
+            })
+        };
+    }
+
+    function apparatusShiftDate(timestamp, displayedDate) {
+        if (!Number.isFinite(timestamp)) return '';
+        // Vector's first Item Log cell normally includes the local time.
+        // Before 07:00 belongs to the preceding 24h duty day.
+        const hasTime = /\b\d{1,2}:\d{2}(?::\d{2})?\b/.test(displayedDate || '');
+        return localHistoryDateKey(timestamp - (hasTime ? 7*60*60*1000 : 0));
+    }
+
+    function apparatusStatusForTour(group, tour, items) {
+        const required = group === 'station4'
+            ? !!tour.stationMonday : true;
+        const due = group === 'station4' ? !!tour.stationDue : !!tour.due;
+        if (!required) return {code:'na',required:false,missing:[],unknown:[]};
+        if (!due) return {code:'future',required:true,missing:[],unknown:[]};
+        const selected = (items || []).filter(item => item.scope === group);
+        if (!selected.length)
+            return {code:'unknown',required:true,missing:[],unknown:['No identified SCBA assets']};
+        const eligible = group === 'station4' ?
+            [tour.stationMonday] : [tour.startDate,tour.endDate];
+        const missing = [],unknown = [],passed = [];
+        for (const item of selected) {
+            if ((item.dates || []).some(day => eligible.includes(day))) {
+                passed.push(item.name);
+            } else if (item.readable && item.exhaustive) {
+                missing.push(item.name);
+            } else {
+                unknown.push(item.name+': '+(item.error || 'history coverage not confirmed'));
+            }
+        }
+        return {code:unknown.length?'unknown':missing.length?'missing':'done',
+            required:true,missing,unknown,passed,expected:selected.length};
+    }
+
+    function apparatusReportState() {
+        const value = loadJSON(APPARATUS_REPORT_KEY,null);
+        return value && value.schemaVersion === APPARATUS_AUDIT_SCHEMA ? value : null;
+    }
+
+    function apparatusReadRun() {
+        let run=null;
+        try {run=JSON.parse(sessionStorage.getItem(APPARATUS_CHECK_KEY)||'null');}catch {}
+        if(!run || run.schemaVersion!==APPARATUS_AUDIT_SCHEMA ||
+           !['open_inventory','inventory','read_item','finish'].includes(run.phase) ||
+           !Number.isFinite(run.startedAt) ||
+           Date.now()-run.startedAt>45*60*1000) {
+            sessionStorage.removeItem(APPARATUS_CHECK_KEY);
+            return null;
+        }
+        return run;
+    }
+
+    function apparatusSaveRun(run) {
+        sessionStorage.setItem(APPARATUS_CHECK_KEY,JSON.stringify(run));
+    }
+
+    function apparatusVerifiedItemPage(item) {
+        let path='';
+        try {path=new URL(item.href,location.href).pathname;}catch {}
+        if(!/^\/app\/equipment\/Standard\/pool\/299946\/\d+\/item\/?$/i.test(path) ||
+            location.pathname.replace(/\/$/,'')!==path.replace(/\/$/,''))return false;
+        const exact = 'SCBA Frame:'+item.name;
+        return [...document.querySelectorAll(
+            'h1,h2,h3,h4,[role="heading"],[class*="item-title"],[class*="asset-title"],span,div'
+        )].some(el => {
+            if(el.closest('#'+PANEL_ID+',#'+OVERLAY_ID))return false;
+            const inner=uiText(el.innerText||el.textContent||'').replace(/\s*:\s*/,':');
+            return inner===exact && visible(el) && ![...el.children].some(child=>
+                uiText(child.innerText||child.textContent||'')
+                    .replace(/\s*:\s*/,':')===exact);
+        });
+    }
+
+    function apparatusNativeHistoryPage() {
+        const table=findItemLogHistoryTable();
+        const anchor=findHistorySectionAnchor();
+        if(!table && !anchor)return null; // not hydrated; never guess
+        const rows=table ? historyRows(table) : structuralItemLogRows(SCBA_FRAME_INSPECTION_TITLE);
+        const fingerprint=rows.map(itemLogRowText).join(' || ');
+        return {rows,fingerprint,
+            // Do not assume a paginator with ten latest records is exhaustive.
+            next:getPaginationControl('next'),
+            historyVisible:!!(table || anchor)};
+    }
+
+    async function apparatusReadVerifiedHistory(item) {
+        if(!apparatusVerifiedItemPage(item))
+            throw new Error(item.name+': Standard asset identity was not confirmed.');
+        await ensureItemLogTabActive(5000);
+        const allRows=[],seen=new Set();
+        let exhaustive=false,pages=0;
+        for(let page=0;page<30;page++) {
+            let lastFingerprint='',stable=0,snapshot=null;
+            const start=Date.now();
+            while(Date.now()-start<10000) {
+                if(!apparatusVerifiedItemPage(item))
+                    throw new Error(item.name+': Vector left the expected asset.');
+                const current=apparatusNativeHistoryPage();
+                const signature=current?.fingerprint || '<EMPTY ITEM LOG>';
+                if(current && signature===lastFingerprint)stable++;
+                else {lastFingerprint=signature;stable=1;}
+                if(current && stable>=4 && Date.now()-start>=800){snapshot=current;break;}
+                await sleep(200);
+            }
+            if(!snapshot)throw new Error(item.name+': Item Log did not settle.');
+            for(const row of snapshot.rows) {
+                if(!rowLooksLikeCompletedModeEntry(row,SCBA_FRAME_INSPECTION_TITLE))continue;
+                const audit=historyRowAudit(row,0);
+                const rawDate=audit.firstCell ||
+                    (itemLogRowText(row).match(/\d{1,2}\/\d{1,2}\/\d{4}[\d: APM]*/i)?.[0]||'');
+                const parsed=Number.isFinite(audit.parsedAt) ?
+                    audit.parsedAt : parseVectorHistoryDate(rawDate);
+                const shiftDate=apparatusShiftDate(parsed,rawDate);
+                if(!shiftDate)throw new Error(item.name+': completed SCBA record has unreadable date.');
+                const key=shiftDate+'|'+itemLogRowText(row);
+                if(seen.has(key))continue;
+                seen.add(key);allRows.push({shiftDate,
+                    text:itemLogRowText(row).slice(0,180)});
+            }
+            pages++;
+            const next=snapshot.next;
+            if(!paginationControlEnabled(next)) {
+                // A single page of exactly ten recent rows without an
+                // explicit disabled Next control might be truncated.
+                exhaustive=!!next || snapshot.rows.length<10;
+                break;
+            }
+            const previous=snapshot.fingerprint;
+            next.click(); // read-only Item Log pagination, not an inspection
+            const started=Date.now();
+            let changed=false;
+            while(Date.now()-started<10000){
+                const current=apparatusNativeHistoryPage();
+                if(current && current.fingerprint && current.fingerprint!==previous){
+                    changed=true;break;
+                }
+                await sleep(180);
+            }
+            if(!changed)throw new Error(item.name+': Item Log next page did not change.');
+        }
+        if(pages>=30)throw new Error(item.name+': Item Log exceeded 30 pages; history incomplete.');
+        return {name:item.name,scope:item.scope,href:item.href,
+            readable:true,exhaustive,
+            dates:[...new Set(allRows.map(row=>row.shiftDate))],
+            completedRows:allRows.length,pages,error:''};
+    }
+
+    function apparatusBuildReport(run) {
+        const window=apparatusWorkWindows(run.asOfDate);
+        const present=new Map((run.results || []).map(row=>[row.href,row]));
+        const items=(run.items||[]).map(item=>present.get(item.href) || {
+            name:item.name,scope:item.scope,href:item.href,
+            readable:false,exhaustive:false,dates:[],
+            error:'Item Log not scanned'
+        });
+        return {schemaVersion:APPARATUS_AUDIT_SCHEMA,
+            generatedAt:new Date().toISOString(),
+            asOfDate:run.asOfDate,
+            inventoryCapturedAt:run.inventoryCapturedAt,
+            inventoryPages:run.inventoryPages,
+            items,window};
+    }
+
+    function apparatusFinishRun(run) {
+        const report=apparatusBuildReport(run);
+        saveJSON(APPARATUS_REPORT_KEY,report);
+        sessionStorage.removeItem(APPARATUS_CHECK_KEY);
+        setStatus('Apparatus Check read-only scan complete. Showing actual Vector SCBA Item Log results.');
+        if(location.pathname==='/main/asset-manager'){
+            showApparatusCheck(report);
+        }else{
+            sessionStorage.setItem(APPARATUS_CHECK_KEY,JSON.stringify({
+                schemaVersion:APPARATUS_AUDIT_SCHEMA,
+                phase:'finish',startedAt:Date.now(),reportReady:true
+            }));
+            location.assign('https://app.vectorcheckit.us/main/asset-manager');
+        }
+    }
+
+    async function apparatusResumeRun() {
+        if(apparatusCheckBusy)return false;
+        let run=apparatusReadRun();
+        if(!run)return false;
+        if(run.phase==='finish'){
+            sessionStorage.removeItem(APPARATUS_CHECK_KEY);
+            if(run.reportReady && location.pathname==='/main/asset-manager'){
+                showApparatusCheck();
+            }
+            return true;
+        }
+        if(getRun() || getCaptainDailyCheck() || scbaAirpackReadNativeQueue() || currentInspection()){
+            setStatus('Apparatus Check paused while another PPE/SCBA workflow or inspection form is open.',false);
+            return true;
+        }
+        apparatusCheckBusy=true;
+        try{
+            if(run.phase==='open_inventory'){
+                if(location.pathname!=='/main/asset-manager'){
+                    location.assign('https://app.vectorcheckit.us/main/asset-manager');
+                    return true;
+                }
+                if(!scbaAirpackStandardTable()){
+                    const standardTabs=[...document.querySelectorAll(
+                        'button,a,[role="tab"]')]
+                        .filter(el=>visible(el) &&
+                            !el.closest('#'+PANEL_ID+',#'+OVERLAY_ID) &&
+                            uiEquals(el.innerText||el.textContent||'','Standard'));
+                    if(standardTabs.length===1)standardTabs[0].click();
+                    setStatus('Apparatus Check is opening Equipment > Standard.');
+                    return true;
+                }
+                run.phase='inventory';apparatusSaveRun(run);
+            }
+            if(run.phase==='inventory'){
+                const locations=['truck504','medic504','station4'];
+                await scbaAirpackEnsureNativeFilters(locations,message=>setStatus(message));
+                const inventory=await scbaAirpackReadInventory(message=>setStatus(message),locations);
+                run.items=inventory.items.map(item=>({
+                    name:item.name,scope:item.scope,href:item.href
+                }));
+                run.inventoryCapturedAt=inventory.capturedAt;
+                run.inventoryPages=inventory.pages;
+                run.index=0;run.results=[];run.phase='read_item';
+                apparatusSaveRun(run);
+            }
+            if(run.phase==='read_item'){
+                if(run.index>=run.items.length){apparatusFinishRun(run);return true;}
+                const item=run.items[run.index];
+                const expected=new URL(item.href,location.href);
+                if(location.pathname!==expected.pathname){
+                    run.navAttempts=run.navAttempts||{};
+                    const count=Number(run.navAttempts[item.href]||0)+1;
+                    if(count>3)throw new Error(item.name+': failed to reach Standard item after 3 attempts.');
+                    run.navAttempts[item.href]=count;
+                    apparatusSaveRun(run);
+                    setStatus('Apparatus Check: reading '+(run.index+1)+'/'+run.items.length+
+                        ' native SCBA inspection histories...');
+                    location.assign(item.href);
+                    return true;
+                }
+                let result;
+                try{result=await apparatusReadVerifiedHistory(item);}
+                catch(error){result={...item,readable:false,exhaustive:false,
+                    dates:[],error:String(error.message||error)};}
+                run.results.push(result);run.index++;
+                apparatusSaveRun(run);
+                if(run.index>=run.items.length){apparatusFinishRun(run);return true;}
+                setStatus('Apparatus Check: '+run.index+'/'+run.items.length+
+                    ' airpacks read from Vector history.');
+                location.assign(run.items[run.index].href);
+                return true;
+            }
+        }catch(error){
+            sessionStorage.removeItem(APPARATUS_CHECK_KEY);
+            setStatus('Apparatus Check stopped: '+(error?.message||String(error))+
+                '. Prior results were not replaced; no inspections were submitted.',false);
+        }finally{apparatusCheckBusy=false;}
+        return true;
+    }
+
+    function apparatusStartReadOnlyScan() {
+        if(getRun()||getCaptainDailyCheck()||scbaAirpackReadNativeQueue()||currentInspection()) {
+            setStatus('Finish or close the existing PPE/SCBA form or audit before checking apparatus.',false);
+            return;
+        }
+        if(apparatusReadRun()){
+            setStatus('An Apparatus Check read-only scan is already active.');
+            void apparatusResumeRun();return;
+        }
+        apparatusSaveRun({schemaVersion:APPARATUS_AUDIT_SCHEMA,
+            phase:'open_inventory',startedAt:Date.now(),
+            asOfDate:localTodayKey(),items:[],results:[],index:0});
+        setStatus('Starting read-only Apparatus Check from Vector Standard SCBA Item Logs...');
+        void apparatusResumeRun();
+    }
+
+    function showApparatusCheck(report) {
+        report=report || apparatusReportState();
+        if(!report){apparatusStartReadOnlyScan();return;}
+        const window=apparatusWorkWindows(report.asOfDate,new Date(report.generatedAt));
+        const {overlay,box}=makeOverlayBox('1040px');
+        const heading=document.createElement('div');
+        heading.style.cssText='font-size:20px;font-weight:700;color:#153e5c;margin-bottom:8px;';
+        heading.textContent='Apparatus Check';
+        const intro=document.createElement('p');
+        intro.style.cssText='font-size:12px;line-height:1.5;color:#5b7486;margin:0 0 12px;';
+        intro.textContent='Read only. Truck 504 and Medic 504 SCBA inspections are due every '+
+            'two-day C-shift tour. Station 4 SCBA Room is due only on C-shift Mondays. '+
+            'Green = completed for every currently assigned airpack; red = due and missing; '+
+            '? = native history not fully verified; blank = not yet due; dash = not scheduled. '+
+            'Only native COMPLETED inspections count, never Rebel drafts.';
+        box.append(heading,intro);
+        const meta=document.createElement('div');
+        meta.style.cssText='font-size:11px;color:#506b7d;margin-bottom:12px;';
+        meta.textContent='Last scanned: '+new Date(report.generatedAt).toLocaleString()+
+            ' | '+(report.items||[]).length+' identified SCBA airpacks'+
+            ' | current assignment snapshot, not historical location transfers.';
+        box.append(meta);
+        const periods=window.tours;
+        const scroll=document.createElement('div');
+        scroll.style.cssText='overflow:auto;border:1px solid #cad9e2;border-radius:8px;max-height:60vh;';
+        const table=document.createElement('table');
+        table.style.cssText='border-collapse:separate;border-spacing:0;min-width:100%;font:12px Arial,sans-serif;';
+        const head=document.createElement('thead');
+        const tr=document.createElement('tr');
+        const label=document.createElement('th');
+        label.textContent='SCBA LOCATION';
+        label.style.cssText='position:sticky;left:0;top:0;background:#143d59;color:white;'+
+            'padding:12px;z-index:3;text-align:left;white-space:nowrap;';
+        tr.append(label);
+        for(const tour of periods){
+            const cell=document.createElement('th');
+            const start=tour.startDate.slice(5),end=tour.endDate.slice(5);
+            cell.textContent=start+' + '+end+(tour.stationMonday?' ★':'');
+            cell.title=tour.stationMonday?'C-shift Monday: '+tour.stationMonday:'C-shift tour';
+            cell.style.cssText='min-width:94px;padding:10px 4px;text-align:center;'+
+                'color:#fff;border-left:1px solid #56738b;background:'+
+                (tour.month===window.months[0]?'#254c67':'#17658a')+';';
+            tr.append(cell);
+        }
+        head.append(tr);table.append(head);
+        const body=document.createElement('tbody');
+        for(const [group,name] of [
+            ['truck504','Truck 504'],['medic504','Medic 504'],
+            ['station4','Station 4 SCBA Room']
+        ]){
+            const row=document.createElement('tr');
+            const title=document.createElement('th');
+            title.textContent=name;
+            title.style.cssText='position:sticky;left:0;z-index:2;background:#f1f6f8;'+
+                'padding:12px;text-align:left;white-space:nowrap;border-bottom:1px solid #ccdbe4;';
+            row.append(title);
+            for(const tour of periods){
+                const state=apparatusStatusForTour(group,tour,report.items||[]);
+                const value={done:'✓',missing:'✕',unknown:'?',future:'',na:'—'}[state.code];
+                const cell=document.createElement('td');
+                cell.textContent=value;
+                const colors={
+                    done:['#e4f5e9','#216a37'],
+                    missing:['#ffe4e4','#b42318'],
+                    unknown:['#fff4d5','#875700'],
+                    future:['#fff','#ccc'],
+                    na:['#f5f7f8','#a9b4bb']
+                };
+                const colorsHere=colors[state.code];
+                cell.style.cssText='height:36px;text-align:center;font-size:20px;font-weight:bold;'+
+                    'border-bottom:1px solid #e2e9ed;border-left:1px solid #e2e9ed;'+
+                    'background:'+colorsHere[0]+';color:'+colorsHere[1]+';';
+                cell.title=name+' | '+tour.startDate+' + '+tour.endDate+
+                    (group==='station4'?' | Monday '+(tour.stationMonday||'not scheduled'):'')+
+                    ' | '+state.code.toUpperCase()+
+                    (state.missing.length?' | Missing: '+state.missing.join(', '):'')+
+                    (state.unknown.length?' | Unverified: '+state.unknown.join('; '):'');
+                row.append(cell);
+            }
+            body.append(row);
+        }
+        table.append(body);scroll.append(table);box.append(scroll);
+        const details=document.createElement('details');
+        details.style.cssText='margin-top:9px;font-size:11px;';
+        const summary=document.createElement('summary');
+        summary.textContent='Show missing/unverified airpacks by tour';
+        const lines=document.createElement('div');
+        lines.style.cssText='margin:7px 0;line-height:1.6;max-height:180px;overflow:auto;';
+        const issues=[];
+        for(const tour of periods){
+            for(const [group,name] of [
+                ['truck504','Truck 504'],['medic504','Medic 504'],
+                ['station4','Station 4 SCBA Room']
+            ]){
+                const status=apparatusStatusForTour(group,tour,report.items||[]);
+                if(!['missing','unknown'].includes(status.code))continue;
+                issues.push(tour.startDate+' + '+tour.endDate+' | '+name+': '+
+                    [...status.missing.map(v=>v+' not completed'),
+                     ...status.unknown.map(v=>v+' unverified')].join('; '));
+            }
+        }
+        lines.textContent=issues.join('\n')||'No missing or unverified due SCBA checks.';
+        lines.style.whiteSpace='pre-wrap';
+        details.append(summary,lines);box.append(details);
+        const actions=document.createElement('div');
+        actions.style.cssText='display:flex;gap:8px;margin-top:12px;';
+        const refresh=makeButton('Refresh From Vector');
+        refresh.onclick=()=>{overlay.remove();apparatusStartReadOnlyScan();};
+        const close=makeButton('Close');
+        close.onclick=()=>overlay.remove();
+        actions.append(refresh,close);box.append(actions);
     }
 
     function showStation4ScbaAirpackCheck() {
@@ -13069,8 +13341,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             mainAction('My Tour PPE', () => launchMyInspectionFromAnywhere('tour')),
             mainAction('SCBA Airpacks', showStation4ScbaAirpackCheck, false),
             mainAction('My After-Fire', () => launchMyInspectionFromAnywhere('afterFire')),
-            mainAction("Captain's Monthly", launchCaptainInspectionFromAnywhere),
             mainAction('Daily Captain Check', launchCaptainDailyCheckFromAnywhere, false),
+            mainAction('Apparatus Check', showApparatusCheck, false),
             mainAction('PPE Clean / Repair Form', showPpeCleanRepairForm, false),
             mainAction('Report Problem', showProblemReport, false),
             mainAction('Settings', () => showSettings('profile'), false)
@@ -13206,6 +13478,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
     }, 700);
 
+    // Read-only apparatus scan continues through native same-tab Item Log pages.
+    // Never visits Start Inspection or submits an official form.
+    setTimeout(()=>{void apparatusResumeRun();},900);
+    setInterval(()=>{void apparatusResumeRun();},2000);
     // Keep ownership alive only for the tab that already owns the active run.
     setInterval(() => {
         if (getRun()) refreshRunOwnership();

@@ -79,34 +79,37 @@ test('SCBA direct inspection starts without a chooser, persisting phase before c
 test('Daily Captain checks SCBA tour history, not a nonexistent Captain monthly mask checklist',()=>{
  const daily=body('async function readCaptainComplianceHistory(item) {',
    'function buildCaptainDailyReport(check) {');
- assert.match(daily,/readModeCompletionHistory\(verifiedItem, 'scbaTour'\)/);
- assert.match(daily,/notApplicable: true/);
+ assert.match(daily,/item\.inspectionModeKey === 'scbaTour'/);
+ assert.match(daily,/readModeCompletionHistory\(verifiedItem, modeKey\)/);
+ assert.doesNotMatch(daily,/getMode\('captain'\)/);
  const start=body('async function startCaptainDailyCheck(set, auditAsOfDate) {',
    'async function resumeCaptainDailyCheck() {');
- assert.match(start,/for \(const mask of found\.supplemental \|\| \[\]\)/);
- assert.match(start,/inspectionModeKey: 'scbaTour'/);
+ assert.match(start,/discoverOwnerGear\(owner, 'tour', freshInventory\)/);
+ assert.doesNotMatch(start,/discoverOwnerGear\(owner, 'captain', freshInventory\)/);
  assert.doesNotMatch(start,/submitInspection/);
 });
-test('Captain report monthly mask cells are N/A and monthly denominator excludes SCBA',()=>{
+test('Daily Captain report now checks only tour compliance including SCBA mask',()=>{
  const reportCode=body('function buildCaptainDailyReport(check) {',
   'function showCaptainDailyReport(report = getCaptainDailyReport()) {')+'\nreturn buildCaptainDailyReport;';
  const window={asOfDate:'2026-10-22',months:['2026-09','2026-10'],
- tours:[{startDate:'2026-10-21',endDate:'2026-10-22',month:'2026-10',due:true,eligibleDates:['2026-10-21','2026-10-22']}]};
- const fn=new Function('captainAuditWindow','localTodayKey',reportCode)(()=>window,()=>'2026-10-22');
+ tours:[{startDate:'2026-10-21',endDate:'2026-10-22',month:'2026-10',
+ due:true,eligibleDates:['2026-10-21','2026-10-22']}]};
+ const fn=new Function('captainAuditWindow','localTodayKey',reportCode)(
+  ()=>window,()=>'2026-10-22');
  const owner={name:'Michael Brion',prefix:'PERSON-123'};
  const items=[{...coat,ownerPrefix:owner.prefix,type:'Bunker Coat'},
- {...mask,ownerPrefix:owner.prefix,type:'SCBA Face Mask',template:'119122',inspectionModeKey:'scbaTour'}];
+ {...mask,ownerPrefix:owner.prefix,type:'SCBA Face Mask',
+ template:'119122',inspectionModeKey:'scbaTour'}];
  const results=items.map(item=>({assetId:item.assetId,ownerPrefix:owner.prefix,
- status:'ok',captain:{dates:['2026-09-02','2026-10-01']},tour:{dates:['2026-10-21']}}));
- const report=fn({owners:[owner],items,results,discovery:[],checkId:'c1',setName:'Crew',setId:'s1'});
- const rows=report.owners[0].items;
- assert.equal(report.schemaVersion,6);
- assert.equal(rows.length,2);
- assert.equal(rows[0].monthlyChecks.filter(x=>x.applicable !== false).length,2);
- assert.equal(rows[1].monthlyChecks.filter(x=>x.applicable !== false).length,0);
- assert.equal(report.owners[0].monthlyRequirementCount,2);
+ status:'ok',tour:{dates:['2026-10-21']}}));
+ const report=fn({owners:[owner],items,results,discovery:[],checkId:'c1',
+  setName:'Crew',setId:'s1'});
+ assert.equal(report.schemaVersion,7);
+ assert.equal(report.owners[0].items.length,2);
  assert.equal(report.owners[0].tourRequirementCount,2);
- assert.equal(rows[1].tourChecks[0].ok,true);
+ assert.equal(report.owners[0].tourPassedCount,2);
+ assert.ok(report.owners[0].compliant);
+ assert.ok(report.owners[0].items.every(row=>!('monthlyChecks' in row)));
 });
 test('SCBA failure in preview explicitly blocks auto-submission and requires manual Vector review',()=>{
  assert.match(src,/SCBA has one or more FAILED checks/);
