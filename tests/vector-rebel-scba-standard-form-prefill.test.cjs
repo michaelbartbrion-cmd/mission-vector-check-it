@@ -1,0 +1,98 @@
+'use strict';
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const src=fs.readFileSync(path.join(__dirname,'../beta/vector-rebel.user.js'),'utf8');
+const a=src.indexOf('    async function scbaAirpackPrefillVerifiedForm() {');
+const b=src.indexOf('    async function scbaAirpackShowNativeHandoff() {',a);
+assert.ok(a>=0&&b>a);
+const code=src.slice(a,b)+'\nreturn scbaAirpackPrefillVerifiedForm;';
+const qs=src.match(/const SCBA_FRAME_INSPECTION_QUESTIONS = Object.freeze\(\[([\s\S]*?)\]\);/);
+assert.ok(qs,'actual Standard SCBA question list is declared');
+const questions=(new Function('return ['+qs[1]+']'))();
+assert.equal(questions.length,11);
+const clean=s=>String(s??'').replace(/\s+/g,' ').trim();
+function harness({result='present_working',template='113271',count=11,
+    questionList=questions,physical=true,phase='native_form_opened',activePpe=false}={}){
+    let times=0,phaseWritten='',status='',submits=0;
+    const queue={inspectionVersion:'3.2.59',phase,
+        openedAt:Date.now()-500,items:[{name:'AP-04',result}],index:0};
+    const answers=Array.from({length:count},(_,i)=>({click(){times++;}}));
+    const failed=Array.from({length:count},()=>({click(){throw Error('unexpected FAIL clicked');}}));
+    const doc={body:{innerText:'SCBA Inspection\n'+questionList.join('\n')},
+        querySelectorAll:()=>[]};
+    const store={setItem(_k,s){phaseWritten=JSON.parse(s).phase;
+        Object.assign(queue,JSON.parse(s));}};
+    const fn=new Function('scbaAirpackFormBusy','scbaAirpackReadNativeQueue','getRun',
+        'currentInspection','SCBA_FRAME_INSPECTION_TEMPLATE','SCBA_FRAME_INSPECTION_TITLE',
+        'isLiveInspectionPage','exactButtons','scbaAirpackNativeResponseButtons',
+        'isCompletedInspectionView','uiIncludes','exactButton','document','uiText',
+        'SCBA_FRAME_INSPECTION_QUESTIONS','visible','enabledButton','sessionStorage',
+        'SCBA_AIRPACK_NATIVE_HANDOFF_KEY','setStatus','sleep',code);
+    const run=fn(false,()=>queue,()=>activePpe?{}:null,
+        ()=>({template,instance:'9560020'}),'113271','SCBA Inspection',
+        ()=>true,()=>[],label=>label==='Passed'?answers:label==='Failed'?failed:[],
+        ()=>false,(text,label)=>String(text).includes(label),()=>({}),
+        doc,clean,questions,()=>true,()=>null,store,'key',
+        text=>{status=text},async()=>{});
+    return {run,queue,stats:()=>({times,phaseWritten,status,submits})};
+}
+test('Official Standard SCBA form is explicitly mapped, never the seven-question SCBA PPE mask',()=>{
+    assert.match(src,/const SCBA_FRAME_POOL = '299946'/);
+    assert.match(src,/const SCBA_FRAME_INSPECTION_TEMPLATE = '113271'/);
+    assert.match(src,/const SCBA_FRAME_INSPECTION_TITLE = 'SCBA Inspection'/);
+    assert.equal(questions.length,11);
+    assert.match(src,/const SCBA_TOUR_TEMPLATE = '119122'/);
+});
+test('One-time prefill enters all 11 Passed answers on exact verified Standard form but never submits',async()=>{
+    const h=harness();
+    assert.equal(await h.run(),true);
+    assert.equal(h.stats().times,11);
+    assert.equal(h.stats().phaseWritten,'form_prefilled');
+    assert.match(h.stats().status,/Review the live form/);
+    assert.doesNotMatch(code,/enabledButton\('Submit Inspection'\)\.click|submit\.click\(\)|mainSubmit\.click/);
+    assert.equal(await h.run(),false);
+    assert.equal(h.stats().times,11,'new calls must not re-toggle responses');
+});
+test('Wrong form template fails closed without clicking any Passed or Submit',async()=>{
+    const h=harness({template:'119122'});
+    assert.equal(await h.run(),false);
+    assert.equal(h.stats().times,0);
+    assert.equal(h.stats().phaseWritten,'wrong_template');
+});
+test('Changed form count or question order blocks the automatic PASS sequence',async()=>{
+    for(const opts of [{count:10},{count:12},{questionList:[...questions].reverse()}]){
+        const h=harness(opts);
+        assert.equal(await h.run(),false);
+        assert.equal(h.stats().times,0);
+        assert.equal(h.stats().phaseWritten,'form_review_required');
+    }
+});
+test('Exception, stale handoff, or active PPE run cannot get auto-filled as PASS',async()=>{
+    for(const opts of [{result:'missing'},{result:'issue'},{phase:'form_prefilled'},
+        {activePpe:true}]){
+        const h=harness(opts);
+        assert.equal(await h.run(),false);
+        assert.equal(h.stats().times,0);
+    }
+    const h=harness();
+    h.queue.openedAt=Date.now()-50000;
+    assert.equal(await h.run(),false);
+    assert.equal(h.stats().times,0);
+});
+
+test('SCBA response control lookup tolerates native checkmark icons without matching unrelated buttons',()=>{
+    const start=src.indexOf('    function scbaAirpackNativeResponseButtons(label) {');
+    const end=src.indexOf('    async function scbaAirpackPrefillVerifiedForm() {',start);
+    assert.ok(start>=0&&end>start);
+    const source=src.slice(start,end)+'\nreturn scbaAirpackNativeResponseButtons;';
+    const values=['✓ Passed','✓ Passed','✕ Failed','Not Passed','Submit Inspection'];
+    const buttons=values.map(v=>({innerText:v,closest:()=>null}));
+    const f=new Function('document','visible','PANEL_ID','OVERLAY_ID',
+        'SCBA_AIRPACK_NATIVE_BANNER_ID','uiEquals','uiText',source)(
+        {querySelectorAll:()=>buttons},()=>true,'panel','overlay','native-banner',
+        (a,b)=>String(a).toLowerCase()===String(b).toLowerCase(),clean);
+    assert.equal(f('Passed').length,2);
+    assert.equal(f('Failed').length,1);
+});

@@ -19,7 +19,7 @@ const defs=[
 const key='scba-native-handoff-test', draft='scba-draft-test';
 const item=(name,scope,result='present_working',i=12)=>({
     name,scope,result,location:'Truck 504: 63000-13',pool:'SCBA Frame',
-    href:'https://app.vectorcheckit.us/main/equipment/'+i,
+    href:'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/'+i+'/item',
     draftResult:result
 });
 function harness({items=[item('AP-04','truck504')],header='AP-04',
@@ -46,7 +46,7 @@ function harness({items=[item('AP-04','truck504')],header='AP-04',
             textContent:'',type:''
         }},
         querySelectorAll(query){
-            if(query==='h1,h2,h3,h4')return [
+            if(query.startsWith('h1,h2,h3,h4'))return [
                 {innerText:header,textContent:header,closest:()=>null}
             ];
             if(query==='button,[role="button"]')return [starting];
@@ -58,13 +58,13 @@ function harness({items=[item('AP-04','truck504')],header='AP-04',
         'GM_setValue','sessionStorage','SCBA_AIRPACK_NATIVE_HANDOFF_KEY',
         'SCBA_AIRPACK_DRAFT_KEY','document','SCBA_AIRPACK_NATIVE_BANNER_ID',
         'visible','uiEquals','clean','sleep','setStatus','PANEL_ID',
-        'OVERLAY_ID',code);
+        'OVERLAY_ID','SCBA_FRAME_POOL',code);
     const x=fn(defs,location,()=>activePpe?{}:null,
         (k,v)=>{if(k===draft)saved=v;else if(k===draft+'-handoff')summary=v;else assert.fail('wrong draft key');},
         sessionStorage,key,draft,document,'native-banner-test',
         ()=>true,(a,b)=>String(a).toLowerCase()===String(b).toLowerCase(),
         v=>String(v||'').replace(/\s+/g,' ').trim(),
-        async()=>{},()=>{},'rebel-panel','rebel-overlay');
+        async()=>{},()=>{},'rebel-panel','rebel-overlay','299946');
     return {...x,location,sessionStorage,scan:{complete:true,items},
         get:()=>({navigated,nativeStarts,saved,summary,attached,stored:state.get(key)})};
 }
@@ -95,11 +95,11 @@ test('native check queues exact asset URLs and never marks a draft as official c
     assert.equal(run.items.length,2);
     assert.equal(run.items[1].result,'missing');
     assert.equal(run.phase,'open_item');
-    assert.equal(h.get().navigated,'https://app.vectorcheckit.us/main/equipment/12');
+    assert.equal(h.get().navigated,'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/12/item');
     assert.equal(h.get().saved.draftOnly,true);
     assert.equal(h.get().saved.nativeCheckStarted,true);
     assert.equal(h.read().items.length,2);
-    assert.doesNotMatch(code,/Submit Inspection|submitInspection\(|mainSubmit\.click\(/);
+    assert.doesNotMatch(code,/submitInspection\(|mainSubmit\.click\(|enabledButton\('Submit Inspection'\)\.click\(/);
 });
 test('missing native URLs, duplicate identity, or unreviewed assets cannot start',()=>{
     const h=harness();
@@ -114,7 +114,7 @@ test('missing native URLs, duplicate identity, or unreviewed assets cannot start
     ]}),/Duplicate/);
 });
 test('opens official native Start Inspection once only when exact item URL and heading verified',async()=>{
-    const h=harness({url:'https://app.vectorcheckit.us/main/equipment/12'});
+    const h=harness({url:'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/12/item'});
     h.sessionStorage.setItem(key,JSON.stringify(h.queue(h.scan)));
     assert.equal(await h.handoff(),true);
     assert.equal(h.get().nativeStarts,1);
@@ -124,7 +124,7 @@ test('opens official native Start Inspection once only when exact item URL and h
     assert.equal(h.get().attached.tag,'div');
 });
 test('wrong native asset heading refuses Start Inspection',async()=>{
-    const h=harness({url:'https://app.vectorcheckit.us/main/equipment/12',header:'AP-99'});
+    const h=harness({url:'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/12/item',header:'AP-99'});
     h.sessionStorage.setItem(key,JSON.stringify(h.queue(h.scan)));
     assert.equal(await h.handoff(),true);
     assert.equal(h.get().nativeStarts,0);
@@ -141,7 +141,7 @@ test('SCBA native handoff visits each airpack separately and never conflates sub
         item('AP-04','truck504','present_working',12),
         item('AP-45','medic504','missing',13),
         item('AP-58','station4','issue',14)
-    ],url:'https://app.vectorcheckit.us/main/equipment/12'});
+    ],url:'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/12/item'});
     let q=h.queue(h.scan);
     q.phase='native_form_opened';
     h.sessionStorage.setItem(key,JSON.stringify(q));
@@ -149,18 +149,18 @@ test('SCBA native handoff visits each airpack separately and never conflates sub
     assert.equal(h.get().navigated,'');
     let result=h.advance(q,true);
     assert.deepEqual(result,{done:false,index:1,count:1});
-    assert.equal(h.get().navigated,'https://app.vectorcheckit.us/main/equipment/13');
+    assert.equal(h.get().navigated,'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/13/item');
     q=h.read();
     assert.equal(q.index,1);
     assert.equal(q.phase,'open_item');
     assert.equal(q.operatorConfirmed[0].officialReceiptVerified,false);
-    h.location.href='https://app.vectorcheckit.us/main/equipment/13';
+    h.location.href='https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/13/item';
     q.phase='native_form_opened';
     h.sessionStorage.setItem(key,JSON.stringify(q));
     result=h.advance(q,true);
     assert.deepEqual(result,{done:false,index:2,count:2});
-    assert.equal(h.get().navigated,'https://app.vectorcheckit.us/main/equipment/14');
-    h.location.href='https://app.vectorcheckit.us/main/equipment/14';
+    assert.equal(h.get().navigated,'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/14/item');
+    h.location.href='https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/14/item';
     q=h.read();
     q.phase='native_form_opened';
     h.sessionStorage.setItem(key,JSON.stringify(q));
@@ -173,13 +173,13 @@ test('SCBA native handoff visits each airpack separately and never conflates sub
     assert.equal(h.get().summary.items[1].requestedResult,'missing');
 });
 test('cannot advance a native SCBA item without its own Start Inspection',()=>{
-    const h=harness({url:'https://app.vectorcheckit.us/main/equipment/12'});
+    const h=harness({url:'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/12/item'});
     const q=h.queue(h.scan);
     assert.throws(()=>h.advance(q,true),/not been opened/);
     assert.equal(h.get().summary,null);
 });
 test('cannot mark a different SCBA asset as confirmed',()=>{
-    const h=harness({url:'https://app.vectorcheckit.us/main/equipment/999'});
+    const h=harness({url:'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/999/item'});
     const q={...h.queue(h.scan),phase:'native_form_opened'};
     assert.throws(()=>h.advance(q,true),/exact SCBA asset/);
     assert.equal(h.get().summary,null);
