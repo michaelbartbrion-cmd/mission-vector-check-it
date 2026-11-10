@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.59
+// @version      3.2.60
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.59',
+        version: '3.2.60',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.59';
+    const VERSION = '3.2.60';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -11809,6 +11809,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     const SCBA_AIRPACK_PENDING_SELECTION_KEY = 'vector-rebel-scba-airpack-location-setup-v1';
     const SCBA_AIRPACK_NATIVE_HANDOFF_KEY = 'vector-rebel-scba-airpack-native-check-v1';
     const SCBA_AIRPACK_NATIVE_BANNER_ID = 'vector-rebel-scba-native-check-banner';
+    const SCBA_AIRPACK_EXCEPTION_NOTE_ID = 'vector-rebel-scba-exception-note';
     // Confirmed from live authenticated Vector Standard SCBA Frame AP-04:
     // equipment pool 299946, official 'SCBA Inspection' template 113271.
     // The separate SCBA Face Mask Tour PPE form is template 119122 (7 items).
@@ -12266,6 +12267,55 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // SCBA Frame is Standard equipment. This operator-reviewed handoff uses
     // the REAL item's Vector checklist. It does not assert the unknown native
     // template, sign, submit, or claim an inspection from this local draft.
+
+    // A normal SCBA passes all eleven verified checks. Failed/missing gear
+    // expands its own detailed question list and requires an explanation.
+    function scbaAirpackBeginExceptionReview(item,kind) {
+        item.draftResult=kind;
+        item.comment='';
+        if(kind==='issue') {
+            // Proposed PASS elsewhere; the operator must mark actual failures.
+            item.questionAnswers=SCBA_FRAME_INSPECTION_QUESTIONS.map(()=> 'pass');
+        } else if(kind==='missing') {
+            // Only absence is known; never claim other physical tests passed.
+            item.questionAnswers=SCBA_FRAME_INSPECTION_QUESTIONS.map((_,i)=>
+                i===0?'fail':'');
+        } else {
+            item.questionAnswers=null;
+        }
+    }
+
+    function scbaAirpackReviewProblem(item) {
+        if(item.draftResult==='present_working')return '';
+        if(!['issue','missing'].includes(item.draftResult))
+            return 'Choose Pass, Fail / Issue, or Missing for '+item.name+'.';
+        const note=clean(item.comment || '');
+        if(!note)return item.name+': explain the failed or missing SCBA.';
+        if(note.length>1000)return item.name+': comment must be 1,000 characters or fewer.';
+        if(!Array.isArray(item.questionAnswers) ||
+            item.questionAnswers.length!==SCBA_FRAME_INSPECTION_QUESTIONS.length ||
+            item.questionAnswers.some(v=>!['pass','fail',''].includes(v)))
+            return item.name+': inspection question selections are invalid.';
+        if(item.draftResult==='missing' && item.questionAnswers[0]!=='fail')
+            return item.name+': mark Components Present as Failed when the airpack is missing.';
+        if(!item.questionAnswers.some(v=>v==='fail'))
+            return item.name+': mark at least one failed inspection question.';
+        return '';
+    }
+
+    function scbaAirpackReadyNativeAnswers(item) {
+        if(item.result==='present_working')
+            return SCBA_FRAME_INSPECTION_QUESTIONS.map(()=> 'pass');
+        if(!['issue','missing'].includes(item.result))return null;
+        if(!Array.isArray(item.questionAnswers) ||
+           item.questionAnswers.length!==SCBA_FRAME_INSPECTION_QUESTIONS.length ||
+           item.questionAnswers.some(v=>!['pass','fail'].includes(v)) ||
+           !item.questionAnswers.some(v=>v==='fail') ||
+           (item.result==='missing' && item.questionAnswers[0]!=='fail') ||
+           !clean(item.comment || ''))return null;
+        return item.questionAnswers.slice();
+    }
+
     function scbaAirpackNativeQueue(scan) {
         if(!scan?.complete || !Array.isArray(scan.items) || !scan.items.length)
             throw new Error('Find the complete SCBA inventory before starting checks.');
@@ -12274,6 +12324,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 throw new Error('SCBA asset location is outside the selected sites.');
             if(!['present_working','issue','missing'].includes(item.draftResult))
                 throw new Error('Review each SCBA result before starting native checks.');
+            const reviewProblem=scbaAirpackReviewProblem(item);
+            if(reviewProblem)throw new Error(reviewProblem);
             let url;
             try {url=new URL(item.href,location.href);}catch {}
             if(!url || url.origin!==location.origin ||
@@ -12282,12 +12334,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 throw new Error('Vector has no safe native equipment link for '+item.name+'.');
             return {
                 name:item.name,scope:item.scope,location:item.location,
-                pool:item.pool,href:url.href,result:item.draftResult
+                pool:item.pool,href:url.href,result:item.draftResult,
+                questionAnswers:Array.isArray(item.questionAnswers)?
+                    item.questionAnswers.slice():null,
+                comment:clean(item.comment || '')
             };
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.59'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.60'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -12333,6 +12388,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             throw new Error('Close or complete the native inspection chooser before advancing.');
         const confirmedItems=[...(queue.operatorConfirmed||[]),{
             name:item.name,href:item.href,requestedResult:item.result,
+            questionAnswers:item.questionAnswers,comment:item.comment || '',
             operatorConfirmedAt:new Date().toISOString(),officialReceiptVerified:false
         }];
         if(queue.index+1>=queue.items.length) {
@@ -12369,14 +12425,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || queue.inspectionVersion!=='3.2.59' ||
+        if(!queue || queue.inspectionVersion!=='3.2.60' ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>30000 || Date.now()<queue.openedAt)return false;
         const inspection=currentInspection();
         if(!inspection)return false;
         const item=queue.items[queue.index];
-        if(item.result!=='present_working')return false;
+        const answers=scbaAirpackReadyNativeAnswers(item);
+        // If a missing unit could not be physically checked, leave blank
+        // questions alone. It requires careful manual native handling.
+        if(!answers)return false;
         if(inspection.template!==SCBA_FRAME_INSPECTION_TEMPLATE) {
             sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
                 JSON.stringify({...queue,phase:'wrong_template',formTemplate:inspection.template}));
@@ -12423,22 +12482,82 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             JSON.stringify({...queue,phase:'form_prefill_in_progress',
                 formTemplate:inspection.template,formInstance:inspection.instance}));
         try {
-            for(let i=0;i<11;i++){
-                passed[i].click();
-                await sleep(220);
+            for(let i=0;i<answers.length;i++){
+                // Vector hides a completed response pair after every click.
+                // Requery the live remaining controls, not stale references.
+                const remainingPass=scbaAirpackNativeResponseButtons('Passed');
+                const remainingFail=scbaAirpackNativeResponseButtons('Failed');
+                if(remainingPass.length!==answers.length-i ||
+                   remainingFail.length!==answers.length-i)
+                    throw new Error('Vector question controls changed after item '+i+
+                        '. Stop and review the existing form.');
+                const controls=answers[i]==='pass'?remainingPass:remainingFail;
+                controls[0].click();
+                await sleep(230);
             }
             sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
                 JSON.stringify({...queue,phase:'form_prefilled',
                     formTemplate:inspection.template,formInstance:inspection.instance}));
-            setStatus('SCBA '+item.name+': all 11 Passed answers entered into official '+
-                'template 113271. Review the live form and click Vector Submit Inspection. '+
-                'No submission was made by Vector Rebel.');
+            setStatus('SCBA '+item.name+': all 11 reviewed Pass/Fail selections entered '+
+                'into official template 113271. Review the form before clicking Submit. '+
+                (item.comment?'Exception comment is saved in Rebel, not yet in Vector. ':'')+
+                'No inspection was submitted by Rebel.');
             return true;
         } catch(error) {
             setStatus('SCBA prefill stopped partway through: '+error.message+
                 '. Review the existing form manually; no automatic retry or submit.',false);
             return false;
         } finally {scbaAirpackFormBusy=false;}
+    }
+
+    function scbaAirpackShowNativeExceptionNote() {
+        const queue=scbaAirpackReadNativeQueue();
+        if(!queue || !['native_form_opened','form_prefilled'].includes(queue.phase))
+            return false;
+        const item=queue.items[queue.index];
+        if(!item || !['issue','missing'].includes(item.result) ||
+           !clean(item.comment || ''))return false;
+        const form=currentInspection();
+        if(!form || form.template!==SCBA_FRAME_INSPECTION_TEMPLATE)return false;
+        if(queue.formInstance && queue.formInstance!==form.instance)return false;
+        if(!queue.formInstance && (
+            !Number.isFinite(queue.openedAt) ||
+            Date.now()-queue.openedAt>30000 ||
+            Date.now()<queue.openedAt
+        ))return false;
+        if(document.getElementById(SCBA_AIRPACK_EXCEPTION_NOTE_ID))return true;
+        const note=document.createElement('div');
+        note.id=SCBA_AIRPACK_EXCEPTION_NOTE_ID;
+        note.setAttribute('role','note');
+        note.style.cssText='position:fixed;right:12px;bottom:12px;'+
+            'width:310px;max-width:calc(100vw - 24px);z-index:2147483646;'+
+            'padding:10px;background:#fff9eb;border:2px solid #ad7445;'+
+            'border-radius:8px;color:#573821;font:12px/1.4 Arial,sans-serif;'+
+            'box-shadow:0 4px 12px #0003;';
+        const title=document.createElement('strong');
+        title.textContent=item.name+' inspection exception';
+        const value=document.createElement('div');
+        value.style.cssText='margin:8px 0;white-space:pre-wrap;max-height:140px;overflow:auto;';
+        value.textContent=item.comment;
+        const hint=document.createElement('div');
+        hint.style.cssText='font-size:11px;line-height:1.3;';
+        hint.textContent='Comment saved in Rebel locally. This native SCBA '+
+            'inspection has no visible comment field, so the comment is '+
+            'not attached to the official Vector inspection.';
+        const copy=document.createElement('button');
+        copy.type='button';copy.textContent='Copy comment';
+        copy.style.cssText='margin-top:7px;padding:6px;';
+        copy.onclick=async()=>{
+            try {
+                await navigator.clipboard.writeText(item.comment);
+                copy.textContent='Copied';
+            } catch {
+                copy.textContent='Select comment above to copy';
+            }
+        };
+        note.append(title,value,hint,copy);
+        document.body.append(note);
+        return true;
     }
 
     async function scbaAirpackShowNativeHandoff() {
@@ -12594,9 +12713,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         body.style.cssText='padding:14px 18px 18px;';
         const instructions=document.createElement('p');
         instructions.style.cssText='font-size:12px;line-height:1.5;margin:0 0 9px;';
-        instructions.textContent='Choose the locations to check. Find SCBA Airpacks automatically applies '+
-            'those Vector filters and collects matching equipment. SCBA masks '+
-            'and loose cylinders are excluded. Official inspections are not yet submitted.';
+        instructions.textContent='Choose locations, then review each airpack. Pass accepts all 11 '+
+            'checks; Fail / Issue or Missing opens individual Pass / Fail questions '+
+            'and a comment. Vector submissions remain separate from this review.';
         const chooser=document.createElement('fieldset');
         chooser.style.cssText='border:1px solid #c7d9e5;border-radius:8px;' +
             'padding:8px 12px 10px;margin:0 0 10px;';
@@ -12644,9 +12763,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             'border-radius:7px;background:#fff;';
         const footer=document.createElement('p');
         footer.style.cssText='font-size:11px;line-height:1.45;color:#855623;margin:10px 0 0;';
-        footer.textContent='Draft only. No SCBA inspection, inspection signature, or Vector check '+
-            'has been created or submitted by this feature. Physically inspect each airpack '+
-            'and open its native Vector item to confirm the applicable inspection checklist.';
+        footer.textContent='Pass / Fail selections are proposals until the matching '+
+            'official Vector SCBA inspection is submitted. Rebel never submits automatically. '+
+            'Exception comments are saved locally because the observed native '+
+            'SCBA form has no comment field.';
         const physicalLabel=document.createElement('label');
         physicalLabel.style.cssText='display:flex;align-items:flex-start;gap:8px;'+
             'padding:9px 0;font-size:12px;line-height:1.4;';
@@ -12699,8 +12819,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         select.setAttribute('aria-label','Physical review of '+item.name);
                         for(const [value,label] of [
                             ['not_checked','Not checked'],
-                            ['present_working','Present / Working'],
-                            ['issue','Issue'],
+                            ['present_working','Pass / Present / Working'],
+                            ['issue','Fail / Issue'],
                             ['missing','Missing']
                         ]) {
                             const option=document.createElement('option');
@@ -12709,11 +12829,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         // Preselect the *proposed* normal condition. This is
                         // not an official PASS or completed physical inspection.
                         select.value='present_working';
-                        select.onchange=()=>{
-                            item.draftResult=select.value;
-                            physical.checked=false;
-                        };
                         item.draftResult='present_working';
+                        item.comment='';
+                        item.questionAnswers=null;
+                        select.onchange=()=>{
+                            scbaAirpackBeginExceptionReview(item,select.value);
+                            physical.checked=false;
+                            showException();
+                        };
                         const open=document.createElement('button');
                         open.type='button';
                         open.textContent='Open item';
@@ -12728,8 +12851,77 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                                 if(item.href)location.assign(item.href);
                             }catch(error){status.textContent='Local draft save failed: '+error.message;}
                         };
+
+                        // Only exceptions expand, keeping the regular daily
+                        // review as one compact Pass / Present / Working row.
+                        const accordion=document.createElement('details');
+                        accordion.style.cssText='padding:7px 12px 12px;background:#fff7ec;'+
+                            'border-bottom:1px solid #e6d3bc;';
+                        const summary=document.createElement('summary');
+                        summary.textContent='11 SCBA inspection questions and comment';
+                        summary.style.cssText='font-size:12px;font-weight:bold;cursor:pointer;';
+                        const explanation=document.createElement('div');
+                        explanation.style.cssText='margin:7px 0;color:#704d27;font-size:11px;';
+                        accordion.append(summary,explanation);
+                        const questionInputs=[];
+                        for(let i=0;i<SCBA_FRAME_INSPECTION_QUESTIONS.length;i++) {
+                            const q=document.createElement('label');
+                            q.style.cssText='display:flex;align-items:center;justify-content:space-between;'+
+                                'gap:10px;padding:5px 0;font-size:11px;border-bottom:1px solid #f1e4d9;';
+                            const text=document.createElement('span');
+                            text.textContent=(i+1)+'. '+SCBA_FRAME_INSPECTION_QUESTIONS[i];
+                            const pick=document.createElement('select');
+                            pick.setAttribute('aria-label',item.name+' question '+(i+1));
+                            for(const [value,label] of [
+                                ['','Choose result'],['pass','Pass'],['fail','Fail']
+                            ]){
+                                const option=document.createElement('option');
+                                option.value=value;option.textContent=label;pick.append(option);
+                            }
+                            pick.onchange=()=>{
+                                if(!Array.isArray(item.questionAnswers))return;
+                                item.questionAnswers[i]=pick.value;
+                                physical.checked=false;
+                            };
+                            pick.style.cssText='min-width:112px;padding:4px;';
+                            q.append(text,pick);accordion.append(q);
+                            questionInputs.push(pick);
+                        }
+                        const commentLabel=document.createElement('label');
+                        commentLabel.style.cssText='display:block;margin-top:10px;'+
+                            'font-size:12px;font-weight:600;';
+                        commentLabel.textContent='Required comment for '+item.name;
+                        const comment=document.createElement('textarea');
+                        comment.setAttribute('aria-label','SCBA exception comment for '+item.name);
+                        comment.rows=2;comment.maxLength=1000;
+                        comment.placeholder='Describe what failed or what is missing.';
+                        comment.style.cssText='display:block;width:100%;box-sizing:border-box;'+
+                            'padding:7px;margin-top:4px;border:1px solid #bdab96;border-radius:5px;';
+                        comment.oninput=()=>{
+                            item.comment=comment.value;
+                            physical.checked=false;
+                        };
+                        commentLabel.append(comment);
+                        accordion.append(commentLabel);
+                        const showException=()=>{
+                            const exception=select.value==='issue'||select.value==='missing';
+                            accordion.style.display=exception?'block':'none';
+                            accordion.open=exception;
+                            if(!exception)return;
+                            const missing=select.value==='missing';
+                            explanation.textContent=missing?
+                                'Missing: components present is Failed. Do not mark an unperformed '+
+                                'physical test as Pass. Unanswered questions require manual Vector review.':
+                                'Issue: other questions initially show proposed Pass. Mark every failed '+
+                                'question, and explain the defect below.';
+                            questionInputs.forEach((input,index)=>{
+                                input.value=item.questionAnswers?.[index]||'';
+                            });
+                            comment.value=item.comment||'';
+                        };
                         line.append(name,select,open);
-                        list.append(line);
+                        list.append(line,accordion);
+                        showException();
                     }
                 }
                 status.textContent='Found candidate airpacks from confirmed native filters. '+
@@ -12761,7 +12953,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 });
                 status.textContent='Saved LOCAL proposed results for '+scan.items.length+
                     ' airpacks ('+reviewed+' marked, not yet officially recorded). '+
-                    'Official Vector inspection status has NOT been changed.';
+                    'Official Vector inspection status has NOT been changed. '+
+                    'Any exception comments are local only.';
             }catch(error){status.textContent='Cannot save local draft: '+error.message;}
         };
         body.append(instructions,chooser,controls,physicalLabel,status,coverage,list,footer);
@@ -12934,8 +13127,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     setTimeout(()=>{void scbaAirpackShowNativeHandoff().catch(error=>
         setStatus('SCBA native handoff stopped: '+error.message,false));},1100);
     // Prefill the exact 11-question Standard SCBA form once it opens.
-    setInterval(()=>{void scbaAirpackPrefillVerifiedForm().catch(error=>
-        setStatus('SCBA form prefill stopped: '+error.message,false));},950);
+    setInterval(()=>{
+        void scbaAirpackPrefillVerifiedForm().catch(error=>
+            setStatus('SCBA form prefill stopped: '+error.message,false));
+        try {
+            const showed=scbaAirpackShowNativeExceptionNote();
+            const note=document.getElementById(SCBA_AIRPACK_EXCEPTION_NOTE_ID);
+            if(note && !showed)note.remove();
+        } catch(error) {
+            setStatus('SCBA exception note display stopped: '+error.message,false);
+        }
+    },950);
     // Vector can navigate inside the existing tab without a full reload.
     // Refresh only a pending SCBA handoff banner when route or phase changes.
     setInterval(()=>{
