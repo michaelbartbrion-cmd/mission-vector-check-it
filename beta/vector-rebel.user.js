@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.61
+// @version      3.2.62
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.61',
+        version: '3.2.62',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.61';
+    const VERSION = '3.2.62';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -12276,9 +12276,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             // Proposed PASS elsewhere; the operator must mark actual failures.
             item.questionAnswers=SCBA_FRAME_INSPECTION_QUESTIONS.map(()=> 'pass');
         } else if(kind==='missing') {
-            // Only absence is known; never claim other physical tests passed.
-            item.questionAnswers=SCBA_FRAME_INSPECTION_QUESTIONS.map((_,i)=>
-                i===0?'fail':'');
+            // Missing is a whole-unit FAIL for all 11 checks, as requested.
+            // These are proposed inspection answers, not proof of tests performed.
+            item.questionAnswers=SCBA_FRAME_INSPECTION_QUESTIONS.map(()=> 'fail');
         } else {
             item.questionAnswers=null;
         }
@@ -12295,8 +12295,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             item.questionAnswers.length!==SCBA_FRAME_INSPECTION_QUESTIONS.length ||
             item.questionAnswers.some(v=>!['pass','fail',''].includes(v)))
             return item.name+': inspection question selections are invalid.';
-        if(item.draftResult==='missing' && item.questionAnswers[0]!=='fail')
-            return item.name+': mark Components Present as Failed when the airpack is missing.';
+        if(item.draftResult==='missing' &&
+            item.questionAnswers.some(value=>value!=='fail'))
+            return item.name+': a missing airpack must have all 11 checks marked Failed.';
         if(!item.questionAnswers.some(v=>v==='fail'))
             return item.name+': mark at least one failed inspection question.';
         return '';
@@ -12310,7 +12311,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
            item.questionAnswers.length!==SCBA_FRAME_INSPECTION_QUESTIONS.length ||
            item.questionAnswers.some(v=>!['pass','fail'].includes(v)) ||
            !item.questionAnswers.some(v=>v==='fail') ||
-           (item.result==='missing' && item.questionAnswers[0]!=='fail') ||
+           (item.result==='missing' && item.questionAnswers.some(v=>v!=='fail')) ||
            !clean(item.comment || ''))return null;
         return item.questionAnswers.slice();
     }
@@ -12341,7 +12342,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.61'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.62'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -12424,7 +12425,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || queue.inspectionVersion!=='3.2.61' ||
+        if(!queue || queue.inspectionVersion!=='3.2.62' ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>30000 || Date.now()<queue.openedAt)return false;
@@ -12515,7 +12516,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // Filling the note is reversible; the operator still submits the form.
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || queue.inspectionVersion!=='3.2.61' ||
+        if(!queue || queue.inspectionVersion!=='3.2.62' ||
             !['form_prefilled','native_form_opened'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -12729,9 +12730,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         body.style.cssText='padding:14px 18px 18px;';
         const instructions=document.createElement('p');
         instructions.style.cssText='font-size:12px;line-height:1.5;margin:0 0 9px;';
-        instructions.textContent='Choose locations, then review each airpack. Pass accepts all 11 '+
-            'checks; Fail / Issue or Missing opens individual Pass / Fail questions '+
-            'and a comment. Vector submissions remain separate from this review.';
+        instructions.textContent='Choose locations, then review each airpack. Pass proposes all 11 '+
+            'checks as Passed. Missing proposes all 11 as Failed and shows a comment. '+
+            'Issue expands the 11 questions, initially Passed, and shows a comment. '+
+            'Review physically before submitting in Vector.';
         const chooser=document.createElement('fieldset');
         chooser.style.cssText='border:1px solid #c7d9e5;border-radius:8px;' +
             'padding:8px 12px 10px;margin:0 0 10px;';
@@ -12868,13 +12870,20 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             }catch(error){status.textContent='Local draft save failed: '+error.message;}
                         };
 
-                        // Only exceptions expand, keeping the regular daily
-                        // review as one compact Pass / Present / Working row.
+                        // Pass: compact. Missing: simple comment only, all 11 Fail.
+                        // Issue: 11-question accordion, defaults Pass, plus comment.
+                        const exceptionPanel=document.createElement('div');
+                        exceptionPanel.style.cssText='padding:7px 12px 12px;background:#fff7ec;'+
+                            'border-bottom:1px solid #e6d3bc;';
+                        const missingMessage=document.createElement('p');
+                        missingMessage.style.cssText='font-size:12px;color:#83451f;margin:5px 0 10px;';
+                        missingMessage.textContent='Missing: all 11 SCBA checks will be marked Failed. Add a comment.';
+                        exceptionPanel.append(missingMessage);
                         const accordion=document.createElement('details');
                         accordion.style.cssText='padding:7px 12px 12px;background:#fff7ec;'+
                             'border-bottom:1px solid #e6d3bc;';
                         const summary=document.createElement('summary');
-                        summary.textContent='11 SCBA inspection questions and comment';
+                        summary.textContent='11 SCBA inspection questions';
                         summary.style.cssText='font-size:12px;font-weight:bold;cursor:pointer;';
                         const explanation=document.createElement('div');
                         explanation.style.cssText='margin:7px 0;color:#704d27;font-size:11px;';
@@ -12918,25 +12927,26 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             physical.checked=false;
                         };
                         commentLabel.append(comment);
-                        accordion.append(commentLabel);
+                        exceptionPanel.append(accordion,commentLabel);
                         const showException=()=>{
-                            const exception=select.value==='issue'||select.value==='missing';
-                            accordion.style.display=exception?'block':'none';
-                            accordion.open=exception;
-                            if(!exception)return;
+                            const issue=select.value==='issue';
                             const missing=select.value==='missing';
-                            explanation.textContent=missing?
-                                'Missing: components present is Failed. Do not mark an unperformed '+
-                                'physical test as Pass. Unanswered questions require manual Vector review.':
-                                'Issue: other questions initially show proposed Pass. Mark every failed '+
-                                'question, and explain the defect below.';
-                            questionInputs.forEach((input,index)=>{
+                            exceptionPanel.style.display=issue||missing?'block':'none';
+                            accordion.style.display=issue?'block':'none';
+                            accordion.open=issue;
+                            missingMessage.style.display=missing?'block':'none';
+                            if(!issue && !missing)return;
+                            explanation.textContent='Issue: other checks initially show proposed Pass. '+
+                                'Mark each failed check and describe the problem below.';
+                            if(issue)questionInputs.forEach((input,index)=>{
                                 input.value=item.questionAnswers?.[index]||'';
                             });
+                            comment.placeholder=missing?
+                                'Where should this missing SCBA be?':'Describe the SCBA issue.';
                             comment.value=item.comment||'';
                         };
                         line.append(name,select,open);
-                        list.append(line,accordion);
+                        list.append(line,exceptionPanel);
                         showException();
                     }
                 }
