@@ -23,7 +23,7 @@ const item=(name,scope,result='present_working',i=12)=>({
     draftResult:result,
     comment:result==='present_working'?'':'Physical exception recorded in test',
     questionAnswers:result==='issue'?['fail',...Array(10).fill('pass')]:
-        result==='missing'?['fail',...Array(10).fill('pass')]:null
+        result==='missing'?Array(11).fill('fail'):null
 });
 function harness({items=[item('AP-04','truck504')],header='AP-04',
     url='https://app.vectorcheckit.us/main/asset-manager',activePpe=false}={}){

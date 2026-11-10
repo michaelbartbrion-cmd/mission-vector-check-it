@@ -38,21 +38,18 @@ test('Fail / Issue expands eleven proposed Pass selections, requires a Fail and 
     assert.equal(f.ready(item)[6],'fail');
     assert.equal(f.ready(item).filter(x=>x==='pass').length,10);
 });
-test('Missing starts with the components question failed but never auto-passes untested systems',()=>{
+test('Missing auto-fails every SCBA question and requires only a comment',()=>{
     const item=q();
     f.begin(item,'missing');
     item.result='missing';
-    assert.equal(item.questionAnswers.length,11);
-    assert.equal(item.questionAnswers[0],'fail');
-    assert.equal(item.questionAnswers.slice(1).every(v=>v===''),true);
-    item.comment='AP-45 not found in Medic 504 riding position.';
+    assert.deepEqual(item.questionAnswers,Array(11).fill('fail'));
+    assert.match(f.problem(item),/explain/i);
+    item.comment='AP-45 not present in Medic 504 inventory.';
     assert.equal(f.problem(item),'');
-    assert.equal(f.ready(item),null,'incomplete missing SCBA requires manual native completion');
-    item.questionAnswers[0]='pass';
-    assert.match(f.problem(item),/components present/i);
-    item.questionAnswers[0]='fail';
-    item.questionAnswers.fill('fail');
     assert.deepEqual(f.ready(item),Array(11).fill('fail'));
+    item.questionAnswers[7]='pass';
+    assert.match(f.problem(item),/all 11 checks marked Failed/);
+    assert.equal(f.ready(item),null);
 });
 test('exception note cannot be blank; switching back to Pass removes stale failure answers',()=>{
     const item=q();
@@ -67,16 +64,17 @@ test('exception note cannot be blank; switching back to Pass removes stale failu
     assert.equal(item.questionAnswers,null);
     assert.equal(f.problem(item),'');
 });
-test('accordion is only shown for Fail or Missing and includes 11 choices and a text comment',()=>{
+test('Pass stays compact, Missing shows comment only, Issue opens the 11-question accordion',()=>{
     const x=src.slice(src.indexOf('    function showStation4ScbaAirpackCheck() {'),
         src.indexOf('    function installPanel() {'));
-    assert.match(x,/document\.createElement\('details'\)/);
-    assert.match(x,/accordion\.style\.display=exception\?'block':'none'/);
-    assert.match(x,/accordion\.open=exception/);
+    assert.match(x,/exceptionPanel\.style\.display=issue\|\|missing\?'block':'none'/);
+    assert.match(x,/accordion\.style\.display=issue\?'block':'none'/);
+    assert.match(x,/accordion\.open=issue/);
+    assert.match(x,/missingMessage\.textContent='Missing: all 11 SCBA checks will be marked Failed/);
+    assert.match(x,/exceptionPanel\.append\(accordion,commentLabel\)/);
     assert.match(x,/SCBA_FRAME_INSPECTION_QUESTIONS\.length/);
     assert.match(x,/document\.createElement\('textarea'\)/);
     assert.match(x,/comment\.maxLength=1000/);
-    assert.match(x,/questionInputs\.forEach/);
     assert.match(x,/physical\.checked=false/);
 });
 test('native failure detail notes use the exact Vector field, not an invented comment UI',()=>{

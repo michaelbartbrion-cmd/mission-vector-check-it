@@ -22,7 +22,7 @@ function harness({result='present_working',template='113271',count=11,
     questionAnswers=null,comment=''}={}){
     let times=0,phaseWritten='',status='',submits=0,remaining=count;
     const selections=[];
-    const queue={inspectionVersion:'3.2.61',phase,
+    const queue={inspectionVersion:'3.2.62',phase,
         openedAt:Date.now()-500,items:[{name:'AP-04',result,questionAnswers,comment}],index:0};
     const answers=Array.from({length:count},()=>({click(){
         times++;remaining--;selections.push('pass');
@@ -140,4 +140,12 @@ test('Issue with no stated failed question, no comment, or incomplete answers ca
         questionAnswers:['fail',...Array(9).fill('pass'),''],
         comment:'Fault found'});
     assert.equal(await incomplete.run(),false);
+});
+
+test('Missing all 11 passes to native form as eleven Fails after a required comment',async()=>{
+    const h=harness({result:'missing',questionAnswers:Array(11).fill('fail'),
+        comment:'Airpack AP-45 missing from Medic 504.'});
+    assert.equal(await h.run(),true);
+    assert.deepEqual(h.stats().selections,Array(11).fill('fail'));
+    assert.equal(h.stats().phaseWritten,'form_prefilled');
 });
