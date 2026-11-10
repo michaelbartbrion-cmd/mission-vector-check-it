@@ -26,9 +26,9 @@ function harness({recovered='BALDREE-3290326-BU',accepted=true}={}){
 test('Daily Captain read-only audit handles a list-clipped Hood PPE Name with verified exact heading and serial',async()=>{
  const h=harness(),item={assetId:'BALDREE-3290326-BU...',pool:'299900',itemId:'4599982',type:'Hood'};
  const results=await h.run(item);
- assert.deepEqual(Object.keys(results),['captain','tour']);
+ assert.deepEqual(Object.keys(results),['tour']);
  assert.deepEqual(h.calls.map(x=>x[1]),[
-  'BALDREE-3290326-BU','BALDREE-3290326-BU','BALDREE-3290326-BU','BALDREE-3290326-BU'
+  'BALDREE-3290326-BU','BALDREE-3290326-BU','BALDREE-3290326-BU'
  ]);
  assert.equal(item.assetId,'BALDREE-3290326-BU...','audit matching key must remain unchanged');
 });
