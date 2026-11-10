@@ -18,7 +18,7 @@ const locations=[
 test('airpack check is independently available in existing Vector Rebel panel',()=>{
     assert.match(src,/mainAction\('SCBA Airpacks', showStation4ScbaAirpackCheck, false\)/);
     assert.match(src,/mainAction\('My Tour PPE',/);
-    assert.match(src,/^\/\/ @version\s+3\.2\.57/m);
+    assert.match(src,/^\/\/ @version\s+3\.2\.58/m);
     assert.match(src,/const SCBA_AIRPACK_DRAFT_KEY = 'vector-rebel-station4-airpack-draft-v1'/);
     const check=cut('function showStation4ScbaAirpackCheck() {','function installPanel() {');
     assert.match(check,/makeOverlayBox\('830px'\)/);
@@ -30,6 +30,10 @@ test('airpack check is independently available in existing Vector Rebel panel',(
     assert.match(check,/scbaAirpackPendingSelection\(\)/);
     assert.doesNotMatch(check,/sessionStorage\.setItem\(SCBA_AIRPACK_PENDING_SELECTION_KEY/);
     assert.match(check,/Save Local Draft/);
+    assert.match(check,/Start SCBA Checks/);
+    assert.match(check,/physical\.checked/);
+    assert.match(check,/scbaAirpackBeginNativeChecks\(scan,physical\.checked\)/);
+    assert.match(check,/select\.value='present_working'/);
     assert.match(check,/draftOnly:true/);
     assert.match(check,/No SCBA inspection, inspection signature, or Vector check/);
     assert.doesNotMatch(check,/submitInspection\(|saveInspection\(|\.submit\(/);
