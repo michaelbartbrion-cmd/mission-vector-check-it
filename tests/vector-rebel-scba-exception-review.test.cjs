@@ -79,11 +79,13 @@ test('accordion is only shown for Fail or Missing and includes 11 choices and a 
     assert.match(x,/questionInputs\.forEach/);
     assert.match(x,/physical\.checked=false/);
 });
-test('native exception comment is visibly local-only; no misleading official submission',()=>{
-    const x=src.slice(src.indexOf('    function scbaAirpackShowNativeExceptionNote() {'),
+test('native failure detail notes use the exact Vector field, not an invented comment UI',()=>{
+    const x=src.slice(src.indexOf('    function scbaAirpackFillNativeFailureDetails() {'),
         src.indexOf('    async function scbaAirpackShowNativeHandoff() {'));
-    assert.match(x,/no visible comment field/);
-    assert.match(x,/not attached to the official Vector inspection/);
-    assert.match(x,/Copy comment/);
-    assert.doesNotMatch(x,/Submit Inspection|submit\.click\(\)/);
+    assert.match(x,/FAILURE DETAILS/);
+    assert.match(x,/Add a note for the failure/);
+    assert.match(x,/SELECT FAILING ITEMS/);
+    assert.match(x,/nativeSetInput\(input,note\)/);
+    assert.match(x,/equipment-items__item-list/);
+    assert.doesNotMatch(x,/submit\.click\(|Submit Inspection'\)\.click\(/);
 });
