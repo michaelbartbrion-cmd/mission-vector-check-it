@@ -58,6 +58,14 @@ The replacement receipt reader inspects each visible native completed-inspection
 
 **Verification:** 246/246 Vector Rebel automated regression tests passed, including a simulated replay of the live AP-04/9592591 `SCBA InspectionCOMPLETE` receipt, incomplete/wrong-page/wrong-form negatives, and 3.2.66 in-progress compatibility. Actual browser acceptance of the next-airpack navigation remains to be verified after installed-script update. This change does not declare success for the remaining six SCBAs.
 
+## November 15, 2026: live AP-60, check 5/7, pre-submit pause recovery
+
+**Vector Rebel 3.2.68** addresses the third attended halt. On Voyager, the authenticated SCBA Inspection template **113271**, instance **9592720**, was visible with **all eleven `inspection__step-item completed` rows marked Passed** and a single enabled native **Submit Inspection** button. The Rebel handoff banner reported **SCBA native check 5/7: AP-60** and `form_review_required`, and no official completion receipt was visible on this unfinished form. The exact internal trigger for the premature review state was not recovered from the current generic banner, but the code had been applying flattened page-text validation immediately after the eleventh React click and latching any one mismatch permanently, a plausible timing-related failure consistent with the fully answered live form.
+
+The change validates the real individual native completed checklist containers, in order, and checks each expected Passed/Failed value against the reviewed answer. A transient mismatch waits up to 12 seconds for React to finish rendering before parking for manual review. A previously paused `form_review_required` or `form_prefill_in_progress` queue can resume **only** if it has original physical-inspection and submission authorization, the exact same native SCBA template and instance are still open, all eleven native steps are completed and equal to the stored reviewed values, there are no extra required fields, and **no submission has yet been attempted**. Recovery does not click any answers or start another form. The existing once-only Submit and exact completed-receipt gate remain binding. Installed-browser continuation and completion for AP-60 and the remaining two checks are still unverified.
+
+**Development evidence:** 249 regression tests passed, including 3 new hydration and recovery cases replaying the observed AP-60 state and refusing partial/wrong/previously submitted recovery. A test pass does not prove any live official SCBA submission.
+
 ## Verified snapshot, November 3, 2026
 
 | Component | Evidence from current source/live data | Acceptance |

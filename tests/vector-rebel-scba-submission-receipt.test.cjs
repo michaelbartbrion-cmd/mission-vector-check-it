@@ -9,7 +9,7 @@ assert.ok(a>0&&b>a,'native completed receipt verifier');
 const code=source.slice(a,b)+'\nreturn scbaAirpackCompletedReceipt;';
 function harness({badge=true,form=true,instance='9592549',itemLog=false,
  phase='native_submit_clicked',length=2,completedLink='9592549',
- linkLabel='SCBA InspectionCOMPLETE',verifiedAsset=true,version='3.2.67'}={}){
+ linkLabel='SCBA InspectionCOMPLETE',verifiedAsset=true,version='3.2.68'}={}){
  let state={
   inspectionVersion:version,autoSubmitApproved:true,
   phase,submittedFormInstance:instance,

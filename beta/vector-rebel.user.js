@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.67
+// @version      3.2.68
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.67',
+        version: '3.2.68',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.67';
+    const VERSION = '3.2.68';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -12192,7 +12192,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.67'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.68'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -12280,7 +12280,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // form if Vector rerenders or SPA navigation races the interval.
     function scbaAirpackSelectNativeTemplate() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' ||
             queue.chooserSelectionAttemptedAt || getRun())return false;
         const item=queue.items[queue.index];
@@ -12338,7 +12338,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>180000 || Date.now()<queue.openedAt)return false;
@@ -12430,28 +12430,56 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // User authorizes the complete tour submission at the reviewed physical
     // confirmation checkbox. Unlike earlier builds, do not strand an all-Pass
     // SCBA at a filled but unsubmitted official Vector form.
+    // Vector's actual 11 native steps each have class
+    // "inspection__step-item completed" and one selected Passed/Failed
+    // response. Read those rows directly instead of flattened body.innerText
+    // which can temporarily lag the last React state update and report
+    // an erroneous mismatch immediately after the eleventh click.
     function scbaAirpackOfficialAnswersMatch(item) {
         const expected=scbaAirpackReadyNativeAnswers(item);
-        if(!expected || expected.length!==SCBA_FRAME_INSPECTION_QUESTIONS.length)return false;
-        const text=uiText(document.body?.innerText||'');
-        let previous=-1;
-        const starts=[];
-        for(const title of SCBA_FRAME_INSPECTION_QUESTIONS){
-            const index=text.toLowerCase().indexOf(uiText(title).toLowerCase(),previous+1);
-            if(index<0 || index<=previous)return false;
-            starts.push(index+uiText(title).length);
-            previous=index;
-        }
-        for(let i=0;i<expected.length;i++){
-            const fragment=text.slice(starts[i],i+1<starts.length?
-                text.toLowerCase().indexOf(uiText(SCBA_FRAME_INSPECTION_QUESTIONS[i+1]).toLowerCase(),starts[i]):text.length);
-            // A filled native question has one visible selected response
-            // ("Passed" / "Failed"), not the active unanswered button pair.
-            const matches=(fragment.match(/\bPassed\b|\bFailed\b/gi)||[])
-                .map(v=>v.toLowerCase());
-            if(matches.length!==1 || matches[0]!== (expected[i]==='pass'?'passed':'failed'))
-                return false;
-        }
+        if(!expected || expected.length!==SCBA_FRAME_INSPECTION_QUESTIONS.length)
+            return false;
+        const nativeSteps=[...document.querySelectorAll('.inspection__step-item')]
+            .filter(el=>visible(el) &&
+                !el.closest('#'+PANEL_ID+',#'+OVERLAY_ID+','+
+                    '#'+SCBA_AIRPACK_NATIVE_BANNER_ID));
+        if(nativeSteps.length!==11)return false;
+        if([...document.querySelectorAll('textarea')].some(visible) ||
+            enabledButton('Click to Sign') || enabledButton('Done'))return false;
+        return nativeSteps.every((step,i)=>{
+            if(!step.classList?.contains('completed'))return false;
+            const text=uiText(step.innerText||step.textContent||'');
+            if(!uiIncludes(text,SCBA_FRAME_INSPECTION_QUESTIONS[i]))return false;
+            const selected=(text.match(/\bPassed\b|\bFailed\b/gi)||[])
+                .map(x=>x.toLowerCase());
+            return selected.length===1 &&
+                selected[0]===(expected[i]==='pass'?'passed':'failed');
+        });
+    }
+
+    // A prior version could put an already-answered form into a permanent
+    // form_review_required state because it checked flattened text during
+    // transient React hydration. Resume only if the exact previously
+    // started form instance still has 11 completed, matching native rows.
+    // Never re-click any answers; never resume after ANY submit attempt.
+    function scbaAirpackRecoverCompletedForm() {
+        const q=scbaAirpackReadNativeQueue();
+        if(!q || !['form_review_required','form_prefill_in_progress'].includes(q.phase) ||
+            !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
+            q.submitAttemptedAt || getRun())return false;
+        const item=q.items[q.index],ins=currentInspection();
+        if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
+            !q.formInstance || q.formInstance!==ins.instance ||
+            q.formTemplate!==ins.template ||
+            isCompletedInspectionView(SCBA_FRAME_INSPECTION_TITLE) ||
+            !scbaAirpackOfficialAnswersMatch(item))return false;
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+            ...q,phase:'form_prefilled',reviewReason:'',
+            nativeFormVerifiedAt:Date.now(),submitValidationPendingSince:null
+        }));
+        setStatus('SCBA '+item.name+': recovered the 11 already-selected native '+
+            'responses without clicking them again. Checking authorization '+
+            'and submitting once; no duplicate inspection is started.');
         return true;
     }
 
@@ -12459,17 +12487,28 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const q=scbaAirpackReadNativeQueue();
         if(!q || q.phase!=='form_prefilled' ||
             !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
-            !['3.2.66','3.2.67'].includes(q.inspectionVersion) || getRun())return false;
+            !['3.2.66','3.2.67','3.2.68'].includes(q.inspectionVersion) || getRun())return false;
         const item=q.items[q.index],ins=currentInspection();
         if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
             ins.instance!==q.formInstance || q.submitAttemptedAt)return false;
         if(isCompletedInspectionView(SCBA_FRAME_INSPECTION_TITLE))return false;
         if(!scbaAirpackOfficialAnswersMatch(item)){
+            // The last native answer may still be hydrating. Wait for stable
+            // evidence instead of treating one early mismatch as permanent.
+            const now=Date.now();
+            const first=q.submitValidationPendingSince || now;
+            if(now-first<12000){
+                sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+                    ...q,submitValidationPendingSince:first
+                }));
+                return false;
+            }
             sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
-                ...q,phase:'form_review_required',reviewReason:'Submitted answer labels did not match all 11 reviewed selections.'
+                ...q,phase:'form_review_required',
+                reviewReason:'Native checklist not fully verified after 12 seconds; no submit attempted.'
             }));
-            setStatus('SCBA '+item.name+': form answers do not match the reviewed results. '+
-                'Stopped without submitting. Review the form manually.',false);
+            setStatus('SCBA '+item.name+': native answer verification did not settle. '+
+                'No submission was attempted. Review the form manually.',false);
             return false;
         }
         const submits=[...document.querySelectorAll('button,[role="button"]')]
@@ -12576,7 +12615,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68'].includes(queue.inspectionVersion) ||
             !['form_prefilled','native_form_opened','native_submit_clicked'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -12644,7 +12683,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // authorization. Record a no-retry latch BEFORE the final click.
     function scbaAirpackFinalizeFailure() {
         const q=scbaAirpackReadNativeQueue();
-        if(!q || !['3.2.66','3.2.67'].includes(q.inspectionVersion) ||
+        if(!q || !['3.2.66','3.2.67','3.2.68'].includes(q.inspectionVersion) ||
            q.phase!=='native_submit_clicked' || !q.autoSubmitApproved ||
            !q.physicalInspectionConfirmedAt || q.failureFinalSubmitAt ||
            q.failureNotePreparedFor!==q.submittedFormInstance || getRun())return false;
@@ -12781,8 +12820,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 queue.phase==='form_prefill_in_progress'?
                 'SCBA paused during answer entry. Review the currently open native form; '+
                 'automatic retries are disabled to prevent duplicate or incorrect answers.':
-                'SCBA paused for manual review because the verified form layout or required fields changed. '+
-                'No further automatic answers will be selected.';
+                'SCBA paused before submission. '+
+                (queue.reviewReason||'The native form could not be fully verified.')+
+                ' The helper will recheck the exact 11 completed native responses; '+
+                'it will not click any answer twice or resubmit an uncertain inspection.';
             return true;
         }
         if(['native_submit_clicked','native_failure_submit_clicked'].includes(queue.phase)){
@@ -12817,7 +12858,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         if(!fresh || fresh.items[fresh.index].href!==item.href ||
                            fresh.phase!=='form_prefilled')return;
                         sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
-                            JSON.stringify({...fresh,inspectionVersion:'3.2.67',
+                            JSON.stringify({...fresh,inspectionVersion:'3.2.68',
                                 autoSubmitApproved:true,
                                 physicalInspectionConfirmedAt:new Date().toISOString()}));
                         continueButton.disabled=true;
@@ -13833,6 +13874,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         catch(error){setStatus('SCBA receipt item navigation stopped: '+error.message,false);}
         try{scbaAirpackReportUnverifiedReceipt();}
         catch(error){setStatus('SCBA receipt warning stopped: '+error.message,false);}
+        try{scbaAirpackRecoverCompletedForm();}
+        catch(error){setStatus('SCBA form recovery stopped: '+error.message+
+            '. No response or submission was clicked.',false);}
         try{scbaAirpackSubmitReviewedForm();}
         catch(error){setStatus('SCBA submit stopped: '+error.message+
             '. Do not resubmit before checking the official Vector result.',false);}

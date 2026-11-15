@@ -11,23 +11,30 @@ const equal=(a,b)=>uiText(a).toLowerCase()===uiText(b).toLowerCase();
 const BEGIN=src.indexOf('    function scbaAirpackOfficialAnswersMatch(item) {');
 const END=src.indexOf('    function scbaAirpackCompletedReceipt() {',BEGIN);
 assert.ok(BEGIN>=0&&END>BEGIN);
-const code=src.slice(BEGIN,END)+'\nreturn {match:scbaAirpackOfficialAnswersMatch,submit:scbaAirpackSubmitReviewedForm};';
+const code=src.slice(BEGIN,END)+'\nreturn {match:scbaAirpackOfficialAnswersMatch,recover:scbaAirpackRecoverCompletedForm,submit:scbaAirpackSubmitReviewedForm};';
 function harness({approved=true,checked=true,phase='form_prefilled',answers=null,
-  template='113271',wrongInstance=false,extraSubmit=false,version='3.2.67'}={}){
+  template='113271',wrongInstance=false,extraSubmit=false,version='3.2.68'}={}){
  const expected=questions.map((_,i)=>answers?.[i]||'pass');
  const text=questions.map((q,i)=>q+'\n'+(expected[i]==='pass'?'Passed':'Failed')).join('\n');
  let clicks=0,status='',state={
   inspectionVersion:version,phase,autoSubmitApproved:approved,
   physicalInspectionConfirmedAt:checked?'2026-11-15T18:00:00Z':null,
-  formInstance:'9592549',items:[{name:'AP-04',
+  formInstance:'9592549',formTemplate:'113271',items:[{name:'AP-04',
     result:'present_working',href:'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/12/item'}],
   index:0
  };
  const button={innerText:'Submit Inspection',textContent:'Submit Inspection',
   disabled:false,getAttribute:()=>null,closest:()=>null,click(){clicks++}};
+ const steps=questions.map((q,i)=>({
+  innerText:q+'\n'+(expected[i]==='pass'?'Passed':'Failed'),
+  textContent:q+'\n'+(expected[i]==='pass'?'Passed':'Failed'),
+  classList:{contains:name=>name==='completed'},closest:()=>null
+ }));
  const document={
   body:{innerText:text},
-  querySelectorAll:()=>extraSubmit?[button,button]:[button]
+  querySelectorAll:selector=>selector==='.inspection__step-item'?steps:
+    selector==='textarea'?[]:selector==='button,[role="button"]'?
+    (extraSubmit?[button,button]:[button]):[]
  };
  const fn=new Function(
   'scbaAirpackReadNativeQueue','getRun','currentInspection',
@@ -35,14 +42,15 @@ function harness({approved=true,checked=true,phase='form_prefilled',answers=null
   'SCBA_FRAME_INSPECTION_TITLE','document','uiText','uiEquals','visible',
   'PANEL_ID','OVERLAY_ID','SCBA_AIRPACK_NATIVE_BANNER_ID','scbaAirpackReadyNativeAnswers',
   'isCompletedInspectionView','sessionStorage','SCBA_AIRPACK_NATIVE_HANDOFF_KEY',
-  'setStatus',code)(
+  'setStatus','uiIncludes','enabledButton',code)(
   ()=>state,()=>null,()=>({template,instance:wrongInstance?'wrong':'9592549'}),
   '113271',questions,'SCBA Inspection',document,uiText,equal,()=>true,
   'panel','overlay','banner',
   item=>item.result==='present_working'?Array(11).fill('pass'):null,()=>false,
-  {setItem(_key,value){state=JSON.parse(value)}},'scba-test-key',msg=>{status=msg}
+  {setItem(_key,value){state=JSON.parse(value)}},'scba-test-key',msg=>{status=msg},
+  (a,b)=>uiText(a).toLowerCase().includes(uiText(b).toLowerCase()),()=>false
  );
- return {...fn,document,get:()=>({state,clicks,status})};
+ return {...fn,document,steps,get:()=>({state,clicks,status})};
 }
 test('submits 11 reviewed Passed responses just once after explicit physical authorization',()=>{
  const h=harness();
@@ -64,9 +72,13 @@ test('never submits without explicit consent, without completed physical check, 
 });
 test('re-checks 11 native response labels and refuses changed or incomplete answers',()=>{
  const h=harness();
- h.document.body.innerText=h.document.body.innerText.replace('Passed','Failed');
+ h.steps[0].innerText=h.steps[0].innerText.replace('Passed','Failed');
  assert.equal(h.submit(),false);
  assert.equal(h.get().clicks,0);
+ assert.equal(h.get().state.phase,'form_prefilled',
+  'a transient mismatch must not permanently abort on first read');
+ h.get().state.submitValidationPendingSince=Date.now()-14000;
+ assert.equal(h.submit(),false);
  assert.equal(h.get().state.phase,'form_review_required');
 });
 test('does not confuse a merely filled form with a native submission receipt',()=>{
@@ -107,4 +119,41 @@ test('an authorized 3.2.66 queue remains safe to continue after upgrade',()=>{
  assert.equal(h.get().clicks,1);
  assert.equal(h.submit(),false);
  assert.equal(h.get().clicks,1);
+});
+
+test('React hydration finishing after initial mismatch permits one safe native submission',()=>{
+ const h=harness();
+ h.steps[10].innerText=h.steps[10].innerText.replace('Passed','');
+ assert.equal(h.submit(),false);
+ assert.equal(h.get().clicks,0);
+ assert.equal(h.get().state.phase,'form_prefilled');
+ h.steps[10].innerText=questions[10]+'\nPassed';
+ assert.equal(h.submit(),true);
+ assert.equal(h.get().clicks,1);
+ assert.equal(h.submit(),false);
+ assert.equal(h.get().clicks,1);
+});
+test('real Voyager AP-60 5/7 already completed Passed rows resume from 3.2.67 pause',()=>{
+ const h=harness({version:'3.2.67',phase:'form_review_required'});
+ assert.equal(h.recover(),true);
+ assert.equal(h.get().state.phase,'form_prefilled');
+ assert.equal(h.get().clicks,0,'recovery must not click any selected answer');
+ assert.equal(h.submit(),true);
+ assert.equal(h.get().clicks,1,'exact native form submits once');
+ assert.equal(h.submit(),false);
+});
+test('recovery never modifies partial or wrong form or any submit-attempted queue',()=>{
+ for(const opt of [{checked:false},{approved:false},{wrongInstance:true},
+  {phase:'native_submit_clicked'}]){
+  const h=harness({...opt,phase:opt.phase||'form_review_required'});
+  assert.equal(h.recover(),false);
+  assert.equal(h.get().clicks,0);
+ }
+ const partial=harness({phase:'form_review_required'});
+ partial.steps[9].classList.contains=()=>false;
+ assert.equal(partial.recover(),false);
+ assert.equal(partial.get().clicks,0);
+ const submitted=harness({phase:'form_review_required'});
+ submitted.get().state.submitAttemptedAt=Date.now();
+ assert.equal(submitted.recover(),false);
 });
