@@ -22,7 +22,7 @@ function harness({result='present_working',template='113271',count=11,
     questionAnswers=null,comment=''}={}){
     let times=0,phaseWritten='',status='',submits=0,remaining=count;
     const selections=[];
-    const queue={inspectionVersion:'3.2.64',phase,
+    const queue={inspectionVersion:'3.2.65',phase,
         openedAt:Date.now()-500,items:[{name:'AP-04',result,questionAnswers,comment}],index:0};
     const answers=Array.from({length:count},()=>({click(){
         times++;remaining--;selections.push('pass');
@@ -88,7 +88,7 @@ test('Exception, stale handoff, or active PPE run cannot get auto-filled as PASS
         assert.equal(h.stats().times,0);
     }
     const h=harness();
-    h.queue.openedAt=Date.now()-50000;
+    h.queue.openedAt=Date.now()-200000;
     assert.equal(await h.run(),false);
     assert.equal(h.stats().times,0);
 });

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.64
+// @version      3.2.65
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.64',
+        version: '3.2.65',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.64';
+    const VERSION = '3.2.65';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -12189,7 +12189,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.64'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.65'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -12266,16 +12266,74 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     .replace(/^[^A-Za-z]+/,''),label));
     }
 
+    // Once the inspector confirms the physical SCBA checks, the program can
+    // select the exact already-verified native SCBA Inspection checklist.
+    // This is only a chooser click: NEVER click Submit Inspection.
+    // Save the once-only latch *before* clicking to prevent a duplicate
+    // form if Vector rerenders or SPA navigation races the interval.
+    function scbaAirpackSelectNativeTemplate() {
+        const queue=scbaAirpackReadNativeQueue();
+        if(!queue || !['3.2.64','3.2.65'].includes(queue.inspectionVersion) ||
+            queue.phase!=='native_form_opened' ||
+            queue.chooserSelectionAttemptedAt || getRun())return false;
+        const item=queue.items[queue.index];
+        if(!item)return false;
+        let target;
+        try{target=new URL(item.href,location.href);}catch{return false;}
+        if(target.origin!==location.origin ||
+            target.pathname.replace(/\/$/,'')!==location.pathname.replace(/\/$/,''))return false;
+        if(currentInspection())return false;
+        const root=typeof findChooserRoot==='function'?findChooserRoot():null;
+        if(!root || !visible(root))return false;
+        const card=typeof findInspectionCardInChooser==='function'?
+            findInspectionCardInChooser(SCBA_FRAME_INSPECTION_TITLE):null;
+        if(!card || !visible(card) ||
+            card.disabled || card.getAttribute('aria-disabled')==='true'){
+            // Do not guess which native checklist to open. Report once.
+            if(!queue.chooserBlockedReported){
+                sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
+                    JSON.stringify({...queue,chooserBlockedReported:true}));
+                setStatus('SCBA paused at the Vector inspection chooser: exact SCBA Inspection '+
+                    'template was not identified. No answers or submission were made.',false);
+                void rebelCommandEvent('scba_handoff_blocked',{
+                    success:false,errorType:'scba_template_not_found',
+                    errorMessage:'Exact SCBA Inspection card not found in native chooser.',
+                    metadata:{stage:'template_chooser',template:'113271'}});
+            }
+            return false;
+        }
+        // Choosing by visible title alone is insufficient for submitting any
+        // inspection. The existing prefill step separately verifies the
+        // actual native template id 113271 and eleven question controls.
+        const next={...queue,chooserSelectionAttemptedAt:Date.now(),
+            openedAt:Date.now(),chooserBlockedReported:false};
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify(next));
+        try{
+            card.click();
+        }catch(error){
+            setStatus('SCBA chooser click failed. Open the exact SCBA Inspection card '+
+                'manually and review the form. '+(error?.message||String(error)),false);
+            void rebelCommandEvent('scba_handoff_blocked',{
+                success:false,errorType:'scba_chooser_click_failed',
+                errorMessage:telemetrySafeErrorMessage(error?.message||'Chooser click failed'),
+                metadata:{stage:'template_chooser',template:'113271'}});
+            return false;
+        }
+        setStatus('SCBA: selected the official SCBA Inspection checklist. '+
+            'Verifying form 113271 before filling reviewed answers. Nothing submitted.');
+        return true;
+    }
+
     // The 11-question Standard SCBA frame form was identified directly in
     // Vector, not inferred from the separate seven-question PPE mask form.
     // This step PREFILLS answers. It NEVER clicks Submit Inspection.
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || queue.inspectionVersion!=='3.2.64' ||
+        if(!queue || !['3.2.64','3.2.65'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
-            Date.now()-queue.openedAt>30000 || Date.now()<queue.openedAt)return false;
+            Date.now()-queue.openedAt>180000 || Date.now()<queue.openedAt)return false;
         const inspection=currentInspection();
         if(!inspection)return false;
         const item=queue.items[queue.index];
@@ -12363,7 +12421,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // Filling the note is reversible; the operator still submits the form.
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || queue.inspectionVersion!=='3.2.64' ||
+        if(!queue || !['3.2.64','3.2.65'].includes(queue.inspectionVersion) ||
             !['form_prefilled','native_form_opened'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -12430,7 +12488,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const item=queue.items[queue.index];
         // Start Inspection is a one-time native navigation per item.
         // Returning from the completed form shows "Next", never starts twice.
-        if(!['open_item','native_form_opened','form_prefilled'].includes(queue.phase))return false;
+        if(!['open_item','native_form_opened','form_prefilled',
+            'form_prefill_in_progress','form_review_required','wrong_template'].includes(queue.phase))return false;
         const page=new URL(location.href);
         const expected=new URL(item.href);
         if(page.origin!==expected.origin || page.pathname!==expected.pathname) {
@@ -12469,6 +12528,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         document.body.append(banner);
         if(getRun()){
             status.textContent='A PPE inspection is already active. No SCBA form was opened.';
+            return true;
+        }
+        if(['form_prefill_in_progress','form_review_required','wrong_template'].includes(queue.phase)){
+            status.textContent=queue.phase==='wrong_template'?
+                'SCBA paused: Vector opened a different native form (template '+
+                (queue.formTemplate||'unknown')+'). Review manually, no submission was made.':
+                queue.phase==='form_prefill_in_progress'?
+                'SCBA paused during answer entry. Review the currently open native form; '+
+                'automatic retries are disabled to prevent duplicate or incorrect answers.':
+                'SCBA paused for manual review because the verified form layout or required fields changed. '+
+                'No further automatic answers will be selected.';
             return true;
         }
         if(queue.phase==='native_form_opened' || queue.phase==='form_prefilled') {
@@ -13470,6 +13540,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         setStatus('SCBA native handoff stopped: '+error.message,false));},1100);
     // Prefill the exact 11-question Standard SCBA form once it opens.
     setInterval(()=>{
+        try{scbaAirpackSelectNativeTemplate();}
+        catch(error){
+            setStatus('SCBA chooser selection stopped: '+error.message,false);
+        }
         void scbaAirpackPrefillVerifiedForm().catch(error=>
             setStatus('SCBA form prefill stopped: '+error.message,false));
         try {

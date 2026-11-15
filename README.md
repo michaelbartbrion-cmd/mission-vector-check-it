@@ -34,6 +34,12 @@ Michael explicitly designated the **current successor conversation** as the sole
 
 **Acceptance remains open:** a successful merge or Node regression test does not establish that the installed browser version is current or that the authenticated Standard Item Log pagination/DOM and complete status receipts work live. SCBA submission is separate and still requires the inspector's physical verification and explicit native confirmation. No email or CrewSense write is authorized.
 
+## November 15, 2026: SCBA native handoff stoppage and recovery
+
+**Vector Rebel 3.2.65** addresses a concrete SCBA progression gap: after the user confirmed physical review and tapped `Start SCBA Checks`, the old native handoff clicked `Start Inspection` but only *displayed* the Vector `Select Inspection...` chooser. It did not select the known, verified **Standard SCBA Inspection** checklist. The replacement makes a one-time exact-card chooser selection for the approved `SCBA Inspection` title, then separately verifies native template **113271** and all eleven controls before prefilling reviewed answers. It never clicks `Submit Inspection` or auto-confirms that a completed inspection was recorded. A selected 3.2.64 native handoff queue can continue after the update without discarding previously recorded proposals. Incomplete or changed forms now show an explicit manual-review banner, never an automatic retry that could duplicate Pass/Fail selections; the form-opening timeout is extended to accommodate slow Vector hydration. If the chooser cannot identify the correct card, one blocker diagnostic is sent through existing Rebel Command telemetry. Actual cause of the user's current observed stop still requires the live on-screen stage/receipt; absence of prior SCBA-specific telemetry prevents retrospectively proving which gate was encountered.
+
+**Acceptance:** static tests verify chooser safety and state preservation. Only a supervised next SCBA inspection in the authenticated browser can establish live progression. Do not submit official SCBA inspection records on the operator's behalf without physical confirmation and final inspector approval.
+
 ## Verified snapshot, November 3, 2026
 
 | Component | Evidence from current source/live data | Acceptance |
