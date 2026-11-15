@@ -83,7 +83,7 @@ test('all SCBA physical-review dropdowns default to proposed Present / Working',
     assert.match(ui,/document\.createElement\('textarea'\)/);
     assert.match(ui,/SCBA_FRAME_INSPECTION_QUESTIONS\.length/);
     assert.match(ui,/physical\.checked=false/);
-    assert.match(ui,/scbaAirpackBeginNativeChecks\(scan,physical\.checked\)/);
+    assert.match(ui,/scbaAirpackBeginNativeChecks\(scan,physical\.checked,physical\.checked\)/);
 });
 test('native handoff requires human confirmation even though proposed defaults are green',()=>{
     const h=harness();
@@ -92,16 +92,23 @@ test('native handoff requires human confirmation even though proposed defaults a
     assert.equal(h.get().navigated,'');
     assert.equal(h.get().saved,null);
 });
+test('native SCBA submission requires explicit post-inspection authorization',()=>{
+ const h=harness();
+ assert.throws(()=>h.begin(h.scan,true,false),/Authorize submission/);
+ assert.equal(h.get().stored,undefined);
+});
 test('native check queues exact asset URLs and never marks a draft as official completion',()=>{
     const h=harness({items:[
         item('AP-04','truck504','present_working',12),
         item('AP-45','medic504','missing',13)
     ]});
-    const run=h.begin(h.scan,true);
+    const run=h.begin(h.scan,true,true);
     assert.equal(run.index,0);
     assert.equal(run.items.length,2);
     assert.equal(run.items[1].result,'missing');
     assert.equal(run.phase,'open_item');
+    assert.equal(run.autoSubmitApproved,true);
+    assert.ok(run.physicalInspectionConfirmedAt);
     assert.equal(h.get().navigated,'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/12/item');
     assert.equal(h.get().saved.draftOnly,true);
     assert.equal(h.get().saved.nativeCheckStarted,true);
@@ -139,7 +146,7 @@ test('wrong native asset heading refuses Start Inspection',async()=>{
 });
 test('active PPE run blocks a second SCBA workflow',()=>{
     const h=harness({activePpe:true});
-    assert.throws(()=>h.begin(h.scan,true),/active PPE/);
+    assert.throws(()=>h.begin(h.scan,true,true),/active PPE/);
     assert.equal(h.get().stored,undefined);
 });
 

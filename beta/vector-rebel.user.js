@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.65
+// @version      3.2.66
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.65',
+        version: '3.2.66',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.65';
+    const VERSION = '3.2.66';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -12189,7 +12189,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.65'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.66'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -12206,12 +12206,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return entry;
     }
 
-    function scbaAirpackBeginNativeChecks(scan,physicallyConfirmed) {
+    function scbaAirpackBeginNativeChecks(scan,physicallyConfirmed,autoSubmitApproved=false) {
         if(!physicallyConfirmed)
             throw new Error('Confirm that you physically checked the selected airpacks and marked exceptions.');
+        if(!autoSubmitApproved)
+            throw new Error('Authorize submission of the reviewed SCBA inspections before starting.');
         if(getRun())
             throw new Error('Finish the active PPE inspection before starting SCBA checks.');
-        const queue=scbaAirpackNativeQueue(scan);
+        const queue={...scbaAirpackNativeQueue(scan),
+            physicalInspectionConfirmedAt:new Date().toISOString(),
+            autoSubmitApproved:true};
         // Save first, navigate second, and never create an official record by
         // assuming that a local select value is a completed inspection.
         GM_setValue(SCBA_AIRPACK_DRAFT_KEY,{
@@ -12273,7 +12277,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // form if Vector rerenders or SPA navigation races the interval.
     function scbaAirpackSelectNativeTemplate() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' ||
             queue.chooserSelectionAttemptedAt || getRun())return false;
         const item=queue.items[queue.index];
@@ -12326,11 +12330,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     // The 11-question Standard SCBA frame form was identified directly in
     // Vector, not inferred from the separate seven-question PPE mask form.
-    // This step PREFILLS answers. It NEVER clicks Submit Inspection.
+    // This step only PREFILLS answers. The separately authorized submit
+    // state machine sends the native form once, then verifies completion.
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>180000 || Date.now()<queue.openedAt)return false;
@@ -12403,10 +12408,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
                 JSON.stringify({...queue,phase:'form_prefilled',
                     formTemplate:inspection.template,formInstance:inspection.instance}));
-            setStatus('SCBA '+item.name+': all 11 reviewed Pass/Fail selections entered '+
-                'into official template 113271. Review the form, then click Submit. '+
-                (item.comment?'If Vector opens FAILURE DETAILS, Rebel will populate its note. ':'')+
-                'No inspection was submitted by Rebel.');
+            setStatus('SCBA '+item.name+': 11 reviewed answers filled in official '+
+                'template 113271. Submitting confirmed checks and checking Vector receipt. '+
+                'If an inspection has an exception, native FAILURE DETAILS still requires review.');
             return true;
         } catch(error) {
             setStatus('SCBA prefill stopped partway through: '+error.message+
@@ -12419,10 +12423,142 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     //   .modal.fade.in > "FAILURE DETAILS", selectable SCBA item row,
     //   "Failure Notes(*)" text area, and a SECOND Submit Inspection.
     // Filling the note is reversible; the operator still submits the form.
+
+    // User authorizes the complete tour submission at the reviewed physical
+    // confirmation checkbox. Unlike earlier builds, do not strand an all-Pass
+    // SCBA at a filled but unsubmitted official Vector form.
+    function scbaAirpackOfficialAnswersMatch(item) {
+        const expected=scbaAirpackReadyNativeAnswers(item);
+        if(!expected || expected.length!==SCBA_FRAME_INSPECTION_QUESTIONS.length)return false;
+        const text=uiText(document.body?.innerText||'');
+        let previous=-1;
+        const starts=[];
+        for(const title of SCBA_FRAME_INSPECTION_QUESTIONS){
+            const index=text.toLowerCase().indexOf(uiText(title).toLowerCase(),previous+1);
+            if(index<0 || index<=previous)return false;
+            starts.push(index+uiText(title).length);
+            previous=index;
+        }
+        for(let i=0;i<expected.length;i++){
+            const fragment=text.slice(starts[i],i+1<starts.length?
+                text.toLowerCase().indexOf(uiText(SCBA_FRAME_INSPECTION_QUESTIONS[i+1]).toLowerCase(),starts[i]):text.length);
+            // A filled native question has one visible selected response
+            // ("Passed" / "Failed"), not the active unanswered button pair.
+            const matches=(fragment.match(/\bPassed\b|\bFailed\b/gi)||[])
+                .map(v=>v.toLowerCase());
+            if(matches.length!==1 || matches[0]!== (expected[i]==='pass'?'passed':'failed'))
+                return false;
+        }
+        return true;
+    }
+
+    function scbaAirpackSubmitReviewedForm() {
+        const q=scbaAirpackReadNativeQueue();
+        if(!q || q.phase!=='form_prefilled' ||
+            !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
+            !['3.2.66'].includes(q.inspectionVersion) || getRun())return false;
+        const item=q.items[q.index],ins=currentInspection();
+        if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
+            ins.instance!==q.formInstance || q.submitAttemptedAt)return false;
+        if(isCompletedInspectionView(SCBA_FRAME_INSPECTION_TITLE))return false;
+        if(!scbaAirpackOfficialAnswersMatch(item)){
+            sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+                ...q,phase:'form_review_required',reviewReason:'Submitted answer labels did not match all 11 reviewed selections.'
+            }));
+            setStatus('SCBA '+item.name+': form answers do not match the reviewed results. '+
+                'Stopped without submitting. Review the form manually.',false);
+            return false;
+        }
+        const submits=[...document.querySelectorAll('button,[role="button"]')]
+            .filter(button=>visible(button) &&
+                !button.closest('#'+PANEL_ID+',#'+OVERLAY_ID+','+
+                    '#'+SCBA_AIRPACK_NATIVE_BANNER_ID) &&
+                !button.closest('.modal.fade.in,[role="dialog"]') &&
+                uiEquals(button.innerText||button.textContent||'','Submit Inspection') &&
+                !button.disabled && button.getAttribute('aria-disabled')!=='true');
+        if(submits.length!==1){
+            setStatus('SCBA '+item.name+': unique native Submit Inspection control could '+
+                'not be verified. Nothing was submitted automatically.',false);
+            return false;
+        }
+        const now=Date.now();
+        // One-shot durable latch BEFORE the consequential click. A reload
+        // or unconfirmed response cannot submit a second inspection.
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+            ...q,phase:'native_submit_clicked',submitAttemptedAt:now,
+            submittedFormInstance:ins.instance
+        }));
+        submits[0].click();
+        setStatus('SCBA '+item.name+': native Submit Inspection clicked once after '+
+            'physical review. Waiting for Vector completion evidence; not yet counted complete.');
+        return true;
+    }
+
+    function scbaAirpackCompletedReceipt() {
+        const q=scbaAirpackReadNativeQueue();
+        if(!q || !q.autoSubmitApproved ||
+           !['native_submit_clicked','native_failure_submit_clicked'].includes(q.phase) ||
+           !q.submitAttemptedAt)return false;
+        const ins=currentInspection();
+        const item=q.items[q.index];
+        if(!item)return false;
+        // History navigation is visible on unfinished Vector forms too.
+        // Require an explicit completed-date banner, never just disappearance
+        // of Submit while the server or React route is still loading.
+        const text=uiText(document.body?.innerText||'');
+        const completionBadge=/\bComplete(?:d)? on [A-Za-z]+ \d{1,2}, \d{4}\b/i.test(text);
+        const sameForm=!!ins && ins.template===SCBA_FRAME_INSPECTION_TEMPLATE &&
+            ins.instance===q.submittedFormInstance && completionBadge &&
+            isCompletedInspectionView(SCBA_FRAME_INSPECTION_TITLE);
+        // If Vector redirects immediately after Submit, independently match
+        // a completed Item Log entry linked to THIS exact form instance.
+        // Other SCBA checks on the same date do not establish a receipt.
+        let nativeItemLogProof=false;
+        try {
+            if(!sameForm && !ins && apparatusVerifiedItemPage(item)){
+                const rows=historyRows(findItemLogHistoryTable());
+                nativeItemLogProof=rows.some(row=>
+                    rowLooksLikeCompletedModeEntry(row,SCBA_FRAME_INSPECTION_TITLE) &&
+                    [...row.querySelectorAll('a[href]')].some(link=>
+                        inspectionFromUrl(link.href)?.instance===q.submittedFormInstance));
+            }
+        }catch {}
+        if(!sameForm && !nativeItemLogProof)return false;
+        const completed={
+            name:item.name,href:item.href,requestedResult:item.result,
+            questionAnswers:item.questionAnswers,comment:item.comment||'',
+            officialReceiptVerified:true,
+            formTemplate:SCBA_FRAME_INSPECTION_TEMPLATE,
+            formInstance:q.submittedFormInstance,
+            proofSource:sameForm?'native_completed_form':'exact_completed_item_log_link',
+            observedAt:new Date().toISOString()
+        };
+        const recorded=[...(q.officialCompleted||[]),completed];
+        if(q.index+1>=q.items.length){
+            GM_setValue(SCBA_AIRPACK_DRAFT_KEY+'-handoff',{
+                items:recorded,finishedAt:new Date().toISOString(),
+                officialReceiptVerified:true,operatorReportedOnly:false
+            });
+            sessionStorage.removeItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY);
+            setStatus('All '+recorded.length+' reviewed SCBA inspections have native '+
+                'completion evidence. Finished without submitting duplicates.');
+            return true;
+        }
+        const next={...q,index:q.index+1,phase:'open_item',
+            officialCompleted:recorded,openedAt:null,formInstance:null,
+            submitAttemptedAt:null,submittedFormInstance:null,
+            chooserSelectionAttemptedAt:null,failureNotePreparedFor:null,
+            failureNoteAttemptedFor:null,failureFinalSubmitAt:null,
+            returnForReceiptAt:null,formTemplate:null};
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify(next));
+        location.assign(next.items[next.index].href);
+        return true;
+    }
+
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65'].includes(queue.inspectionVersion) ||
-            !['form_prefilled','native_form_opened'].includes(queue.phase) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66'].includes(queue.inspectionVersion) ||
+            !['form_prefilled','native_form_opened','native_submit_clicked'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
         if(!item || !['issue','missing'].includes(item.result) ||
@@ -12477,8 +12613,93 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             failureNotePreparedFor:inspection.instance
         }));
         setStatus('SCBA '+item.name+': native FAILURE DETAILS item selected and '+
-            'Failure Notes entered. Review the note, then click Vector Submit Inspection. '+
-            'Nothing was submitted by Rebel.');
+            'Failure Notes entered. Checking details before final native submission. '+
+            'No successful inspection receipt has been verified.');
+        return true;
+    }
+
+
+    // Vector requires a second Submit after a Failed result and note. The
+    // first click merely opens FAILURE DETAILS. Complete that dialog only
+    // with matching equipment, matching operator note, and explicit tour
+    // authorization. Record a no-retry latch BEFORE the final click.
+    function scbaAirpackFinalizeFailure() {
+        const q=scbaAirpackReadNativeQueue();
+        if(!q || q.inspectionVersion!=='3.2.66' ||
+           q.phase!=='native_submit_clicked' || !q.autoSubmitApproved ||
+           !q.physicalInspectionConfirmedAt || q.failureFinalSubmitAt ||
+           q.failureNotePreparedFor!==q.submittedFormInstance || getRun())return false;
+        const item=q.items[q.index],ins=currentInspection();
+        if(!item || !['issue','missing'].includes(item.result) ||
+           !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
+           ins.instance!==q.submittedFormInstance)return false;
+        const modals=[...document.querySelectorAll('.modal.fade.in,[role="dialog"]')]
+            .filter(el=>visible(el) &&
+                uiIncludes(el.innerText||el.textContent||'','FAILURE DETAILS') &&
+                uiIncludes(el.innerText||el.textContent||'','SELECT FAILING ITEMS'));
+        if(modals.length!==1)return false;
+        const modal=modals[0];
+        const input=[...modal.querySelectorAll('textarea,input[placeholder]')]
+            .filter(el=>visible(el) && uiEquals(clean(el.getAttribute('placeholder')||''),
+                'Add a note for the failure'));
+        const rows=[...modal.querySelectorAll('.equipment-items__item-list')]
+            .filter(el=>visible(el) && [...el.querySelectorAll('*')].some(child=>
+                !child.children.length && uiEquals(
+                    clean(child.innerText||child.textContent||''),item.name)));
+        if(input.length!==1 || rows.length!==1 ||
+           !rows[0].classList?.contains('selected') ||
+           clean(input[0].value)!==clean(item.comment||''))return false;
+        const submits=[...modal.querySelectorAll('button,[role="button"]')]
+            .filter(el=>visible(el) && !el.disabled &&
+                uiEquals(el.innerText||el.textContent||'','Submit Inspection'));
+        if(submits.length!==1)return false;
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+            ...q,phase:'native_failure_submit_clicked',failureFinalSubmitAt:Date.now()
+        }));
+        submits[0].click();
+        setStatus('SCBA '+item.name+': native FAILURE DETAILS final Submit clicked once. '+
+            'Waiting for official completion proof before advancing.');
+        return true;
+    }
+
+    // Report an unverified official submission once. This is an uncertain
+    // receipt, NOT a failure or permission to click Submit again.
+    function scbaAirpackReportUnverifiedReceipt() {
+        const q=scbaAirpackReadNativeQueue();
+        if(!q || !['native_submit_clicked','native_failure_submit_clicked'].includes(q.phase) ||
+           !q.submitAttemptedAt || Date.now()-q.submitAttemptedAt<30000 ||
+           q.receiptWarningSent)return false;
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
+            JSON.stringify({...q,receiptWarningSent:true}));
+        setStatus('SCBA submission was attempted once, but the official completed '+
+            'form has not been verified. Check native Vector history before retrying. '+
+            'Rebel will not submit this form a second time.',false);
+        void rebelCommandEvent('scba_receipt_unverified',{
+            success:false,errorType:'scba_receipt_unverified',
+            errorMessage:'SCBA native Submit was clicked but exact completion evidence not verified.',
+            metadata:{stage:'after_native_submit',phase:q.phase,version:VERSION}
+        });
+        return true;
+    }
+
+    function scbaAirpackReturnToItemForReceipt() {
+        const q=scbaAirpackReadNativeQueue();
+        if(!q || !q.autoSubmitApproved ||
+           !['native_submit_clicked','native_failure_submit_clicked'].includes(q.phase) ||
+           !q.submitAttemptedAt || Date.now()-q.submitAttemptedAt<5000 ||
+           q.returnForReceiptAt || getRun() || currentInspection())return false;
+        const item=q.items[q.index];
+        if(!item)return false;
+        const expected=new URL(item.href);
+        if(location.origin!==expected.origin || location.pathname===expected.pathname ||
+            !['/main/asset-manager','/main/equipment'].includes(location.pathname.replace(/\/$/,'')))
+            return false;
+        // Only after the native route has changed. Do not interrupt a still
+        // open inspection or the failure-details dialogue.
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+            ...q,returnForReceiptAt:Date.now()
+        }));
+        location.assign(item.href);
         return true;
     }
 
@@ -12488,14 +12709,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const item=queue.items[queue.index];
         // Start Inspection is a one-time native navigation per item.
         // Returning from the completed form shows "Next", never starts twice.
-        if(!['open_item','native_form_opened','form_prefilled',
-            'form_prefill_in_progress','form_review_required','wrong_template'].includes(queue.phase))return false;
+        if(!['open_item','native_form_opened','form_prefilled','native_submit_clicked',
+            'native_failure_submit_clicked','form_prefill_in_progress',
+            'form_review_required','wrong_template'].includes(queue.phase))return false;
         const page=new URL(location.href);
         const expected=new URL(item.href);
         if(page.origin!==expected.origin || page.pathname!==expected.pathname) {
-            if(!['native_form_opened','form_prefilled'].includes(queue.phase) || currentInspection())return false;
-            // Once the native form is finished, Vector may return to an
-            // equipment list instead of the original asset detail.
+            const inspection=currentInspection();
+            if(!inspection || inspection.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
+                !['native_form_opened','form_prefilled','native_submit_clicked',
+                  'native_failure_submit_clicked','form_review_required'].includes(queue.phase))
+                return false;
+            // Keep the existing in-tab progress visible on the native form.
         }
         if(document.getElementById(SCBA_AIRPACK_NATIVE_BANNER_ID))return true;
         const banner=document.createElement('div');
@@ -12541,10 +12766,50 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 'No further automatic answers will be selected.';
             return true;
         }
+        if(['native_submit_clicked','native_failure_submit_clicked'].includes(queue.phase)){
+            status.textContent='The reviewed native SCBA form was submitted once. '+
+                (queue.phase==='native_submit_clicked' && item.result!=='present_working'?
+                    'Processing Vector FAILURE DETAILS and required comment. ':
+                    'Waiting for the exact form completion receipt. ')+
+                'Do not submit again; if no receipt appears, review native Vector history.';
+            return true;
+        }
         if(queue.phase==='native_form_opened' || queue.phase==='form_prefilled') {
             // Do not guess which Standard SCBA template/answers to submit.
             // The operator completes THIS item's official Vector form.
             const isItemPage=page.pathname===expected.pathname;
+            if(!isItemPage && currentInspection()){
+                status.textContent=queue.phase==='form_prefilled'&&queue.autoSubmitApproved?
+                    'Reviewed answers entered. Rebel is validating and submitting this '+
+                    'inspection using your prior physical-check authorization.':
+                    'The original SCBA form is filled but not yet submitted. '+
+                    'Review this SCBA and confirm physical inspection to submit.';
+                if(queue.phase==='form_prefilled' && !queue.autoSubmitApproved){
+                    const continueButton=document.createElement('button');
+                    continueButton.type='button';
+                    continueButton.textContent='I physically checked this SCBA: Submit & Continue';
+                    continueButton.style.cssText='margin:8px 4px 0 0;padding:6px;'+
+                        'background:#176b8e;color:white;';
+                    continueButton.onclick=()=>{
+                        if(!confirm('I physically inspected '+item.name+
+                            ', reviewed its 11 answers, and authorize submitting '+
+                            'the native SCBA Inspection now. Continue?'))return;
+                        const fresh=scbaAirpackReadNativeQueue();
+                        if(!fresh || fresh.items[fresh.index].href!==item.href ||
+                           fresh.phase!=='form_prefilled')return;
+                        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
+                            JSON.stringify({...fresh,inspectionVersion:'3.2.66',
+                                autoSubmitApproved:true,
+                                physicalInspectionConfirmedAt:new Date().toISOString()}));
+                        continueButton.disabled=true;
+                        setStatus('Authorized. Checking reviewed answers before the '+
+                            'single native Submit Inspection click.');
+                        void scbaAirpackSubmitReviewedForm();
+                    };
+                    banner.append(continueButton);
+                }
+                return true;
+            }
             if(!isItemPage){
                 status.textContent='Finish the official inspection for '+item.name+
                     ', then return to this item to proceed. No result was assumed.';
@@ -13119,7 +13384,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         instructions.textContent='Choose locations, then review each airpack. Pass proposes all 11 '+
             'checks as Passed. Missing proposes all 11 as Failed and shows a comment. '+
             'Issue expands the 11 questions, initially Passed, and shows a comment. '+
-            'Review physically before submitting in Vector.';
+            'Review physically and authorize submission only after completing the inspections.';
         const chooser=document.createElement('fieldset');
         chooser.style.cssText='border:1px solid #c7d9e5;border-radius:8px;' +
             'padding:8px 12px 10px;margin:0 0 10px;';
@@ -13155,7 +13420,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const controls=document.createElement('div');
         controls.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
         const find=makeButton('Find SCBA Airpacks');
-        const startNative=makeButton('Start SCBA Checks');
+        const startNative=makeButton('Submit Reviewed SCBA Checks');
         startNative.disabled=true;
         const save=makeButton('Save Local Draft');
         save.disabled=true;
@@ -13167,10 +13432,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             'border-radius:7px;background:#fff;';
         const footer=document.createElement('p');
         footer.style.cssText='font-size:11px;line-height:1.45;color:#855623;margin:10px 0 0;';
-        footer.textContent='Pass / Fail selections are proposals until the matching '+
-            'official Vector SCBA inspection is submitted. Rebel never submits automatically. '+
-            'On failed inspections, Vector opens FAILURE DETAILS. Rebel copies your comment '+
-            'into its required native Failure Notes field and selects the failing airpack.';
+        footer.textContent='Pass / Fail results are proposals until the native Vector form '+
+            'is submitted and a completion receipt verified. After your physical inspection '+
+            'confirmation, Rebel submits each reviewed SCBA form once, including native '+
+            'Failure Notes for exceptions. It stops rather than retry an uncertain submission.';
         const physicalLabel=document.createElement('label');
         physicalLabel.style.cssText='display:flex;align-items:flex-start;gap:8px;'+
             'padding:9px 0;font-size:12px;line-height:1.4;';
@@ -13180,7 +13445,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const physicalText=document.createElement('span');
         physicalText.textContent='I physically completed the SCBA checks, including '+
             'pressure retention and release, for every airpack marked Present / Working; '+
-            'any missing or failed equipment is marked above.';
+            'any missing or failed equipment is marked above. I authorize Rebel to '+
+            'submit the reviewed Standard SCBA inspections. No PASS is assumed without my check.';
         physicalLabel.append(physical,physicalText);
         let scan=null;
         find.onclick=async()=>{
@@ -13350,7 +13616,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         startNative.onclick=()=>{
             try {
                 if(!scan)throw new Error('Find SCBA airpacks first.');
-                scbaAirpackBeginNativeChecks(scan,physical.checked);
+                scbaAirpackBeginNativeChecks(scan,physical.checked,physical.checked);
             } catch(error) {
                 status.textContent='SCBA check handoff stopped: '+error.message+
                     '\nNo official inspection was submitted.';
@@ -13540,6 +13806,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         setStatus('SCBA native handoff stopped: '+error.message,false));},1100);
     // Prefill the exact 11-question Standard SCBA form once it opens.
     setInterval(()=>{
+        try{scbaAirpackCompletedReceipt();}
+        catch(error){setStatus('SCBA receipt verification stopped: '+error.message,false);}
+        try{scbaAirpackFinalizeFailure();}
+        catch(error){setStatus('SCBA failure final submit stopped: '+error.message,false);}
+        try{scbaAirpackReturnToItemForReceipt();}
+        catch(error){setStatus('SCBA receipt item navigation stopped: '+error.message,false);}
+        try{scbaAirpackReportUnverifiedReceipt();}
+        catch(error){setStatus('SCBA receipt warning stopped: '+error.message,false);}
+        try{scbaAirpackSubmitReviewedForm();}
+        catch(error){setStatus('SCBA submit stopped: '+error.message+
+            '. Do not resubmit before checking the official Vector result.',false);}
         try{scbaAirpackSelectNativeTemplate();}
         catch(error){
             setStatus('SCBA chooser selection stopped: '+error.message,false);

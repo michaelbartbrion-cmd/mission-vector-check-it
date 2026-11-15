@@ -30,7 +30,7 @@ function harness({show=true,itemName='AP-45',rowName='AP-45',
             selector==='.equipment-items__item-list'?[row]:[]
     };
     const doc={querySelectorAll:()=>show?[modal]:[]};
-    const queue={inspectionVersion:'3.2.65',phase,index:0,
+    const queue={inspectionVersion:'3.2.66',phase,index:0,
         createdAt:Date.now(),openedAt:Date.now()-600,
         items:[{name:itemName,result:'issue',comment}]};
     const storage={setItem(_k,v){mutations++;Object.assign(queue,JSON.parse(v));}};
@@ -50,7 +50,7 @@ test('native SCBA FAILURE DETAILS auto-fills required note and keeps selected ai
     assert.equal(x.stats().clicks,0,'already selected native row must remain selected');
     assert.equal(x.stats().writes,1);
     assert.equal(x.queue.failureNotePreparedFor,'9560253');
-    assert.match(x.stats().status,/Nothing was submitted by Rebel/);
+    assert.match(x.stats().status,/No successful inspection receipt has been verified/);
     assert.equal(x.fn(),true);
     assert.equal(x.stats().writes,1,'do not overwrite repeated modal or navigation');
 });
