@@ -40,6 +40,16 @@ Michael explicitly designated the **current successor conversation** as the sole
 
 **Acceptance:** static tests verify chooser safety and state preservation. Only a supervised next SCBA inspection in the authenticated browser can establish live progression. Do not submit official SCBA inspection records on the operator's behalf without physical confirmation and final inspector approval.
 
+## November 15, 2026: SCBA native submission and next-airpack progression
+
+**Vector Rebel 3.2.66** corrects the diagnosed full-STOP at the official SCBA form: Voyager's authenticated Vector inspection instance **9592549** was observed with all **11 Passed** responses selected and an enabled **Submit Inspection** button still waiting. The previous 3.2.65 release intentionally only filled the form and had no authorized submission path. The earlier assumption that the stop was the template chooser was not the explanation for this observed stage.
+
+The new handoff requires the operator to physically check the SCBAs, review each item's proposed Pass / Missing / Issue answers, and explicitly tick the physical-check **and submission authorization** checkbox. Rebel then opens the exact native Standard SCBA Inspection 113271, verifies all 11 expected selected responses, and clicks the native Submit **once**. For an Issue or Missing, it locates the real FAILURE DETAILS dialog, checks the exact failing item selection and the matching operator comment, then clicks that dialog's final Submit **once**. Every click is latched before acting; a reload or ambiguous result never triggers a second submission.
+
+The program does not advance to the next airpack or report success until it observes positive evidence for the **same exact native form instance**: either an explicit completed-date banner on that form or a completed Item Log row linking to that instance. If the receipt cannot be verified, it stops with an explicit warning and reports a de-identified telemetry blocker, rather than submitting twice or fabricating completion. Existing 3.2.65 handoff queues require a separate **I physically checked this SCBA: Submit & Continue** confirmation to grant auto-submission; upgrading never silently submits an already-filled form.
+
+**Verification:** 239 automated Vector Rebel tests passed at development time, including DOM-based single-submit guards, required notes, exact individual receipt gates, legacy opt-in, and no duplicate submission. This is not yet authenticated live post-submission acceptance. No official SCBA inspection was submitted in development; a physically attended Vector acceptance test is still required.
+
 ## Verified snapshot, November 3, 2026
 
 | Component | Evidence from current source/live data | Acceptance |

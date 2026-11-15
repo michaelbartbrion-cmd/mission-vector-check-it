@@ -9,7 +9,7 @@ const finish=source.indexOf('    // The 11-question Standard SCBA frame form',be
 assert.ok(begin>=0&&finish>begin,'choosing native SCBA template function exists');
 const body=source.slice(begin,finish)+'\nreturn scbaAirpackSelectNativeTemplate;';
 const key='scba-native-queue-test';
-function harness({version='3.2.65',phase='native_form_opened',existingForm=false,
+function harness({version='3.2.66',phase='native_form_opened',existingForm=false,
  chooser=true,exactCard=true,wrongPath=false,alreadyChosen=false,activePpe=false}={}){
  const queue={inspectionVersion:version,phase,index:0,createdAt:Date.now(),items:[
   {name:'AP-04',href:'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/12/item'}
@@ -75,9 +75,12 @@ test('if chooser arrives later, exact SCBA template can still be selected',()=>{
  assert.equal(h.get().clicks,0);
  assert.equal(h.get().events.length,0);
 });
-test('source keeps official submission manual and shows paused states explicitly',()=>{
- assert.match(source,/No inspection was submitted by Rebel/);
+test('SCBA handoff requires physical approval before native submission and preserves paused states',()=>{
+ assert.match(source,/scbaAirpackSubmitReviewedForm\(\)/);
+ assert.match(source,/autoSubmitApproved:true/);
  assert.match(source,/I submitted this inspection/);
+ assert.match(source,/autoSubmitApproved:true/);
+ assert.match(source,/physicalInspectionConfirmedAt/);
  assert.match(source,/form_prefill_in_progress','form_review_required','wrong_template/);
  assert.match(source,/automatic retries are disabled/);
  assert.match(source,/Date\.now\(\)-queue\.openedAt>180000/);

@@ -22,7 +22,7 @@ function harness({result='present_working',template='113271',count=11,
     questionAnswers=null,comment=''}={}){
     let times=0,phaseWritten='',status='',submits=0,remaining=count;
     const selections=[];
-    const queue={inspectionVersion:'3.2.65',phase,
+    const queue={inspectionVersion:'3.2.66',phase,
         openedAt:Date.now()-500,items:[{name:'AP-04',result,questionAnswers,comment}],index:0};
     const answers=Array.from({length:count},()=>({click(){
         times++;remaining--;selections.push('pass');
@@ -61,7 +61,7 @@ test('One-time prefill enters all 11 Passed answers on exact verified Standard f
     assert.equal(await h.run(),true);
     assert.equal(h.stats().times,11);
     assert.equal(h.stats().phaseWritten,'form_prefilled');
-    assert.match(h.stats().status,/Review the form/);
+    assert.match(h.stats().status,/Submitting confirmed checks/);
     assert.doesNotMatch(code,/enabledButton\('Submit Inspection'\)\.click|submit\.click\(\)|mainSubmit\.click/);
     assert.equal(await h.run(),false);
     assert.equal(h.stats().times,11,'new calls must not re-toggle responses');
@@ -115,7 +115,7 @@ test('Issue fills a specific mix of Pass and Fail and preserves the equipment co
     assert.equal(await h.run(),true);
     assert.deepEqual(h.stats().selections,answerPlan);
     assert.equal(h.stats().times,11);
-    assert.match(h.stats().status,/Rebel will populate its note/);
+    assert.match(h.stats().status,/FAILURE DETAILS still requires review/);
 });
 test('Missing item with unperformed questions is never automatically marked Passed',async()=>{
     const partial=['fail',...Array(10).fill('')];
