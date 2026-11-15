@@ -13,11 +13,11 @@ const END=src.indexOf('    function scbaAirpackCompletedReceipt() {',BEGIN);
 assert.ok(BEGIN>=0&&END>BEGIN);
 const code=src.slice(BEGIN,END)+'\nreturn {match:scbaAirpackOfficialAnswersMatch,submit:scbaAirpackSubmitReviewedForm};';
 function harness({approved=true,checked=true,phase='form_prefilled',answers=null,
-  template='113271',wrongInstance=false,extraSubmit=false}={}){
+  template='113271',wrongInstance=false,extraSubmit=false,version='3.2.67'}={}){
  const expected=questions.map((_,i)=>answers?.[i]||'pass');
  const text=questions.map((q,i)=>q+'\n'+(expected[i]==='pass'?'Passed':'Failed')).join('\n');
  let clicks=0,status='',state={
-  inspectionVersion:'3.2.66',phase,autoSubmitApproved:approved,
+  inspectionVersion:version,phase,autoSubmitApproved:approved,
   physicalInspectionConfirmedAt:checked?'2026-11-15T18:00:00Z':null,
   formInstance:'9592549',items:[{name:'AP-04',
     result:'present_working',href:'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/12/item'}],
@@ -75,8 +75,10 @@ test('does not confuse a merely filled form with a native submission receipt',()
  assert.ok(a>0&&b>a);
  const receipt=src.slice(a,b);
  assert.match(receipt,/Complete\(\?:d\)\? on/);
- assert.match(receipt,/inspectionFromUrl\(link\.href\)\?\.instance===q\.submittedFormInstance/);
+ assert.match(receipt,/id\.instance!==q\.submittedFormInstance/);
  assert.match(receipt,/officialReceiptVerified:true/);
+ assert.match(receipt,/expectedLabel\+'COMPLETE'/);
+ assert.match(receipt,/expectedLabel\+'COMPLETED'/);
  assert.match(receipt,/phase:'open_item'/);
 });
 test('native failed inspection final submit requires exact selected airpack and matching required note',()=>{
@@ -97,4 +99,12 @@ test('live native form remains visible to the helper after the inspected answers
  assert.match(handoff,/if\(!isItemPage && currentInspection\(\)\)/);
  assert.match(handoff,/I physically checked this SCBA: Submit & Continue/);
  assert.match(handoff,/autoSubmitApproved:true/);
+});
+
+test('an authorized 3.2.66 queue remains safe to continue after upgrade',()=>{
+ const h=harness({version:'3.2.66'});
+ assert.equal(h.submit(),true);
+ assert.equal(h.get().clicks,1);
+ assert.equal(h.submit(),false);
+ assert.equal(h.get().clicks,1);
 });
