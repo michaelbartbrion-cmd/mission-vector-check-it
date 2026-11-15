@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.66
+// @version      3.2.67
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.66',
+        version: '3.2.67',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.66';
+    const VERSION = '3.2.67';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -4648,12 +4648,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function rowLooksLikeCompletedModeEntry(row, modeTitle) {
         const text = itemLogRowText(row);
-        return !!(
-            text &&
-            uiIncludes(text, modeTitle) &&
-            /\bCOMPLETED?\b/i.test(text) &&
-            !/\bINCOMPLETE\b/i.test(text)
-        );
+        if(!text || !uiIncludes(text,modeTitle) ||
+           /\bINCOMPLETE\b/i.test(text))return false;
+        // Vector's real native Item Log renders adjacent title/status text
+        // as "SCBA InspectionCOMPLETE" with no word boundary. Preserve
+        // positive COMPLETE detection for that layout without accepting
+        // INCOMPLETE or another form's completion badge.
+        const completedBesideTitle=new RegExp(
+            escapeRegex(uiText(modeTitle))+'\\s*COMPLETED?\\b','i').test(text);
+        return /\bCOMPLETED?\b/i.test(text) || completedBesideTitle;
     }
 
     // Returns { rows, parserPath } or null when the history region cannot be read
@@ -12189,7 +12192,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.66'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.67'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -12277,7 +12280,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // form if Vector rerenders or SPA navigation races the interval.
     function scbaAirpackSelectNativeTemplate() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' ||
             queue.chooserSelectionAttemptedAt || getRun())return false;
         const item=queue.items[queue.index];
@@ -12335,7 +12338,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>180000 || Date.now()<queue.openedAt)return false;
@@ -12456,7 +12459,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const q=scbaAirpackReadNativeQueue();
         if(!q || q.phase!=='form_prefilled' ||
             !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
-            !['3.2.66'].includes(q.inspectionVersion) || getRun())return false;
+            !['3.2.66','3.2.67'].includes(q.inspectionVersion) || getRun())return false;
         const item=q.items[q.index],ins=currentInspection();
         if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
             ins.instance!==q.formInstance || q.submitAttemptedAt)return false;
@@ -12510,17 +12513,33 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const sameForm=!!ins && ins.template===SCBA_FRAME_INSPECTION_TEMPLATE &&
             ins.instance===q.submittedFormInstance && completionBadge &&
             isCompletedInspectionView(SCBA_FRAME_INSPECTION_TITLE);
-        // If Vector redirects immediately after Submit, independently match
-        // a completed Item Log entry linked to THIS exact form instance.
-        // Other SCBA checks on the same date do not establish a receipt.
+        // Live Voyager regression: after the completed native 113271
+        // inspection returned to AP-04, Vector rendered an Item Log link
+        // whose accessible text was "SCBA InspectionCOMPLETE" (no space).
+        // The old row parser looked for a word-boundary before COMPLETE,
+        // so it could NEVER match that real DOM and left 1/7 hanging.
+        // Identify a positive receipt by exact FORM INSTANCE href and
+        // the exact native SCBA Inspection + COMPLETE status badge.
+        // This check runs only on the exact Standard item with verified
+        // visible identity; an arbitrary asset's completed row is rejected.
         let nativeItemLogProof=false;
         try {
             if(!sameForm && !ins && apparatusVerifiedItemPage(item)){
-                const rows=historyRows(findItemLogHistoryTable());
-                nativeItemLogProof=rows.some(row=>
-                    rowLooksLikeCompletedModeEntry(row,SCBA_FRAME_INSPECTION_TITLE) &&
-                    [...row.querySelectorAll('a[href]')].some(link=>
-                        inspectionFromUrl(link.href)?.instance===q.submittedFormInstance));
+                const expectedLabel=uiText(SCBA_FRAME_INSPECTION_TITLE).toUpperCase()
+                    .replace(/[^A-Z0-9]/g,'');
+                nativeItemLogProof=[...document.querySelectorAll('a[href]')]
+                    .filter(link=>visible(link) &&
+                        !link.closest('#'+PANEL_ID+',#'+OVERLAY_ID+','+
+                            '#'+SCBA_AIRPACK_NATIVE_BANNER_ID))
+                    .some(link=>{
+                        const id=inspectionFromUrl(link.href);
+                        if(!id || id.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
+                           id.instance!==q.submittedFormInstance)return false;
+                        const label=uiText(link.innerText||link.textContent||'')
+                            .toUpperCase().replace(/[^A-Z0-9]/g,'');
+                        return label===expectedLabel+'COMPLETE' ||
+                            label===expectedLabel+'COMPLETED';
+                    });
             }
         }catch {}
         if(!sameForm && !nativeItemLogProof)return false;
@@ -12557,7 +12576,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67'].includes(queue.inspectionVersion) ||
             !['form_prefilled','native_form_opened','native_submit_clicked'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -12625,7 +12644,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // authorization. Record a no-retry latch BEFORE the final click.
     function scbaAirpackFinalizeFailure() {
         const q=scbaAirpackReadNativeQueue();
-        if(!q || q.inspectionVersion!=='3.2.66' ||
+        if(!q || !['3.2.66','3.2.67'].includes(q.inspectionVersion) ||
            q.phase!=='native_submit_clicked' || !q.autoSubmitApproved ||
            !q.physicalInspectionConfirmedAt || q.failureFinalSubmitAt ||
            q.failureNotePreparedFor!==q.submittedFormInstance || getRun())return false;
@@ -12798,7 +12817,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         if(!fresh || fresh.items[fresh.index].href!==item.href ||
                            fresh.phase!=='form_prefilled')return;
                         sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
-                            JSON.stringify({...fresh,inspectionVersion:'3.2.66',
+                            JSON.stringify({...fresh,inspectionVersion:'3.2.67',
                                 autoSubmitApproved:true,
                                 physicalInspectionConfirmedAt:new Date().toISOString()}));
                         continueButton.disabled=true;

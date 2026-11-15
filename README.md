@@ -50,6 +50,14 @@ The program does not advance to the next airpack or report success until it obse
 
 **Verification:** 239 automated Vector Rebel tests passed at development time, including DOM-based single-submit guards, required notes, exact individual receipt gates, legacy opt-in, and no duplicate submission. This is not yet authenticated live post-submission acceptance. No official SCBA inspection was submitted in development; a physically attended Vector acceptance test is still required.
 
+## November 15, 2026: verified second SCBA stoppage, exact Item Log receipt fix
+
+**Vector Rebel 3.2.67** fixes a second confirmed stoppage after 3.2.66. Read-only inspection of Voyager's real Vector Check It tab showed it had reached **SCBA Frame AP-04**, Standard pool 299946, item 4601067, with an official **November 15, 2026 SCBA Inspection COMPLETE** history entry linked to native template **113271**, instance **9592591**. The Rebel banner remained at **1/7**, saying it had submitted the form once but was still waiting for a completion receipt. Thus submitting now worked; the blocker was the receipt parser failing to recognize the native log's adjacent text **`SCBA InspectionCOMPLETE`** (without a space before `COMPLETE`). The general Item Log parser used a word boundary and missed that real label.
+
+The replacement receipt reader inspects each visible native completed-inspection hyperlink on the **exact verified Standard SCBA item page**, checks its own exact template, checks its instance ID matches the one Rebel just submitted, and requires its text equal `SCBA InspectionCOMPLETE` or `SCBA InspectionCOMPLETED` after whitespace normalization. Only then may it mark that SCBA complete and navigate to the next airpack. It also updates the general completed-history row parser to recognize the adjacent badge. Missing or incomplete entries or the wrong instance never qualify. Existing 3.2.66 queue state persists in the same tab and all prior approval, native failure-notes, and one-shot submission protections remain. No new inspections were submitted during this investigation.
+
+**Verification:** 246/246 Vector Rebel automated regression tests passed, including a simulated replay of the live AP-04/9592591 `SCBA InspectionCOMPLETE` receipt, incomplete/wrong-page/wrong-form negatives, and 3.2.66 in-progress compatibility. Actual browser acceptance of the next-airpack navigation remains to be verified after installed-script update. This change does not declare success for the remaining six SCBAs.
+
 ## Verified snapshot, November 3, 2026
 
 | Component | Evidence from current source/live data | Acceptance |
