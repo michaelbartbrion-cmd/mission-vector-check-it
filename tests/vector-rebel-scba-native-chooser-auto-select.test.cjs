@@ -9,7 +9,7 @@ const finish=source.indexOf('    // The 11-question Standard SCBA frame form',be
 assert.ok(begin>=0&&finish>begin,'choosing native SCBA template function exists');
 const body=source.slice(begin,finish)+'\nreturn scbaAirpackSelectNativeTemplate;';
 const key='scba-native-queue-test';
-function harness({version='3.2.69',phase='native_form_opened',existingForm=false,
+function harness({version='3.2.70',phase='native_form_opened',existingForm=false,
  chooser=true,exactCard=true,wrongPath=false,alreadyChosen=false,activePpe=false}={}){
  const queue={inspectionVersion:version,phase,index:0,createdAt:Date.now(),items:[
   {name:'AP-04',href:'https://app.vectorcheckit.us/app/equipment/Standard/pool/299946/12/item'}

@@ -9,10 +9,10 @@ function block(start,end){
  return source.slice(a,b);
 }
 const helpers=block('    function captainOwnerTourDuty(', '    function buildCaptainDailyReport(');
-const funcs=new Function('localTodayKey','validDateKey',helpers+
+const funcs=new Function('localTodayKey','validDateKey','captainHistoricalOffFor',helpers+
   '\nreturn {captainOwnerTourDuty,captainDailyMissingTargets,captainDailySourceResults};')(
   ()=> '2026-11-15',
-  value=>/^\d{4}-\d{2}-\d{2}$/.test(value)?value:''
+  value=>/^\d{4}-\d{2}-\d{2}$/.test(value)?value:'',()=>null
 );
 const roster={
  startDate:'2026-11-15',endDate:'2026-11-16',
@@ -79,8 +79,8 @@ test('Recheck Missing selects only two missing/due items, never green verified o
 });
 test('report reflects two-month tour results with day-specific due and explicit OFF',()=>{
  const src=block('    function buildCaptainDailyReport(', '    function showCaptainDailyReport(');
- const make=new Function('captainAuditWindow','captainOwnerTourDuty','localTodayKey',src+
- '\nreturn buildCaptainDailyReport;')(()=>window,funcs.captainOwnerTourDuty,()=> '2026-11-15');
+ const make=new Function('captainAuditWindow','captainOwnerTourDuty','localTodayKey','getCaptainHistoricalOffTours',src+
+ '\nreturn buildCaptainDailyReport;')(()=>window,funcs.captainOwnerTourDuty,()=> '2026-11-15',()=>({schemaVersion:1,entries:{}}));
  const check={
   checkId:'c1',setId:'captain',setName:'Station 4',auditAsOfDate:'2026-11-15',
   tourRoster:roster,
@@ -122,7 +122,7 @@ test('picker has day-specific OFF/Here controls, Add Swing, and no permanent Cap
 });
 test('results show OFF and offer Recheck Missing based on due missing assets only',()=>{
  const body=block('    function showCaptainDailyReport(', '    function showCaptainDailySetPicker()');
- assert.match(body,/mark\.textContent = off \? 'OFF'/);
+ assert.match(body,/mark\.textContent=ok\?'✓':off\?/);
  assert.match(body,/Recheck Missing \('/);
  assert.match(body,/await startCaptainDailyMissingRecheck\(report\)/);
  assert.match(body,/const due = tour\.due === true/);
