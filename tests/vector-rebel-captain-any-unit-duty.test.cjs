@@ -85,10 +85,18 @@ test('an assigned unit on either day makes the entire tour PPE due, even another
  assert.equal(result.assignmentSource,'scout_any_unit');
  assert.deepEqual(result.dutyDates,['2026-10-10']);
 });
-test('swing from a different shift working any apparatus is also required to check',()=>{
+test('temporary swing with another shift working old dates is blank in my Captain report',()=>{
  const h=setup();
  const result=h.duty(swing,tour,window,roster,{},work(swing.name));
- assert.equal(result.due,true);assert.equal(result.off,false);
+ assert.equal(result.due,false);
+ assert.equal(result.off,false);
+ assert.equal(result.unknown,false);
+ assert.equal(result.notAssigned,true);
+ assert.equal(result.assignmentSource,'swing_outside_selected_tour');
+ // Only the selected current tour makes this temporary swing responsible.
+ const selected=h.duty(swing,todayTour,window,roster,{},work(swing.name));
+ assert.equal(selected.due,true);
+ assert.deepEqual(selected.dutyDates,['2026-11-15','2026-11-16']);
 });
 test('full verified off + full verified deployed on two shifts exempts PPE for that tour',()=>{
  const h=setup();
@@ -131,30 +139,38 @@ test('old Different shift / other captain note no longer creates exemption',()=>
  const h=setup(manual);
  assert.equal(h.duty(bob,tour,window,roster,{},null).due,true);
 });
-test('recomputed report makes verified swing work red if missed but preserves actual green native check',()=>{
+test('swing past uninspected tours are blank and verified past native checks stay green',()=>{
  const {h,report}=checkResult([...work(bob.name),...work(swing.name)]);
  const swingRow=report.owners.find(o=>o.prefix==='CASHMAN');
  const pants=swingRow.items.find(x=>x.assetId==='CASHMAN-P');
  const coat=swingRow.items.find(x=>x.assetId==='CASHMAN-C');
- assert.equal(coat.tourChecks[0].due,true);
+ assert.equal(coat.tourChecks[0].due,false);
  assert.equal(coat.tourChecks[0].ok,false);
- assert.equal(pants.tourChecks[0].due,true);
+ assert.equal(coat.tourChecks[0].unknown,false);
+ assert.equal(coat.tourChecks[0].off,false);
+ assert.equal(coat.tourChecks[0].notAssigned,true);
+ assert.equal(pants.tourChecks[0].due,false);
  assert.equal(pants.tourChecks[0].ok,true);
- assert.ok(h.missing(report).some(x=>x.assetId==='CASHMAN-C'));
- assert.ok(!h.missing(report).some(x=>x.assetId==='CASHMAN-P'&&
-  !pants.tourChecks[1].due));
+ assert.equal(pants.tourChecks[0].date,'2026-10-10');
+ assert.equal(coat.tourChecks[1].due,true);
+ assert.ok(!h.missing(report).some(x=>x.assetId==='CASHMAN-C'&&
+   !coat.tourChecks[1].due),'past swing tour is never missing');
+ assert.equal(report.swingHistoryLimited,true);
 });
-test('two-day leave/deployment removes missing red checks without changing Item Logs',()=>{
- const {h,report}=checkResult([...absences(bob.name),...absences(swing.name)]);
- const past=report.owners.flatMap(o=>o.items.flatMap(i=>i.tourChecks.slice(0,1)));
- assert.equal(past.every(x=>x.off&&!x.due),true);
+test('permanent crew with two-day leave is OFF, temporary swing other tour stays blank',()=>{
+ const {report}=checkResult([...absences(bob.name),...absences(swing.name)]);
+ const base=report.owners[0].items[0].tourChecks[0];
+ assert.equal(base.off,true);assert.equal(base.due,false);
+ const swingChecks=report.owners[1].items.map(item=>item.tourChecks[0]);
+ assert.equal(swingChecks.every(x=>!x.off&&!x.due&&!x.unknown),true);
  assert.equal(report.owners[1].items[1].tourDates[0],'2026-10-10');
- assert.equal(past.some(x=>x.unknown),false);
 });
-test('report marks uncertain past tours UNKNOWN, not OFF and not falsely missing',()=>{
+test('uncertain permanent historical attendance remains ?, temporary swing past stays blank',()=>{
  const {report}=checkResult([...unknown(bob.name),...unknown(swing.name)]);
- const past=report.owners.flatMap(o=>o.items.flatMap(i=>i.tourChecks.slice(0,1)));
- assert.equal(past.every(x=>x.unknown&&!x.off&&!x.due),true);
+ const base=report.owners[0].items[0].tourChecks[0];
+ assert.equal(base.unknown,true);assert.equal(base.off,false);assert.equal(base.due,false);
+ const swingChecks=report.owners[1].items.map(i=>i.tourChecks[0]);
+ assert.equal(swingChecks.every(x=>!x.unknown&&!x.off&&!x.due),true);
 });
 test('renderer shows explicit uncertainty and manual review but never submits native inspections',()=>{
  const ui=slice('    async function captainShowCommandAttendance(',
