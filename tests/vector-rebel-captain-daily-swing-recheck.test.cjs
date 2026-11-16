@@ -31,8 +31,10 @@ const window={asOfDate:'2026-11-15',months:['2026-10','2026-11'],
  tours:[past,current]};
 test('base member off Day 1, here Day 2: previous tours still due, upcoming day not falsely due',()=>{
  const b={prefix:'PERSON-BRION'};
- assert.deepEqual(funcs.captainOwnerTourDuty(b,past,window,roster),
-  {due:true,off:false});
+ const pastDuty=funcs.captainOwnerTourDuty(b,past,window,roster);
+ assert.equal(pastDuty.due,true);
+ assert.equal(pastDuty.off,false);
+ assert.equal(pastDuty.notAssigned,false);
  const shift=funcs.captainOwnerTourDuty(b,current,window,roster);
  assert.equal(shift.due,false);
  assert.equal(shift.off,false);
@@ -40,7 +42,8 @@ test('base member off Day 1, here Day 2: previous tours still due, upcoming day 
 });
 test('swing added Day 1 only is due current tour and not historical tours',()=>{
  const s={prefix:'PERSON-POWELL'};
- assert.equal(funcs.captainOwnerTourDuty(s,past,window,roster).off,true);
+ assert.equal(funcs.captainOwnerTourDuty(s,past,window,roster).off,false);
+ assert.equal(funcs.captainOwnerTourDuty(s,past,window,roster).notAssigned,true);
  assert.equal(funcs.captainOwnerTourDuty(s,past,window,roster).due,false);
  const active=funcs.captainOwnerTourDuty(s,current,window,roster);
  assert.equal(active.due,true);
@@ -101,7 +104,8 @@ test('report reflects two-month tour results with day-specific due and explicit 
  assert.equal(res.schemaVersion,8);
  assert.equal(res.owners[0].items[0].tourChecks[0].due,true);
  assert.equal(res.owners[0].items[0].tourChecks[1].due,false);
- assert.equal(res.owners[1].items[0].tourChecks[0].off,true);
+ assert.equal(res.owners[1].items[0].tourChecks[0].off,false);
+ assert.equal(res.owners[1].items[0].tourChecks[0].notAssigned,true);
  assert.equal(res.owners[1].items[0].tourChecks[1].due,true);
  assert.equal(res.owners[1].tourRequirementCount,1);
  assert.equal(res.owners[0].tourRequirementCount,1);
