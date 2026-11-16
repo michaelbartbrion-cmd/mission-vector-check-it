@@ -12,7 +12,7 @@ function make({approved=true,select=true,matchNote=true,correctItem=true,
  phase='native_submit_clicked',attempted=false,withModal=true}={}){
  let clicks=0,stored=null,status='';
  const item={name:'AP-45',result:'issue',comment:'Regulator leaking'};
- let q={inspectionVersion:'3.2.69',phase,autoSubmitApproved:approved,
+ let q={inspectionVersion:'3.2.70',phase,autoSubmitApproved:approved,
   physicalInspectionConfirmedAt:'2026-11-15T18:01:00Z',
   failureNotePreparedFor:'9592549',submittedFormInstance:'9592549',
   index:0,items:[item],...(attempted?{failureFinalSubmitAt:Date.now()}: {})};

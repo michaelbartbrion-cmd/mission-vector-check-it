@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.69
+// @version      3.2.70
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.69',
+        version: '3.2.70',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.69';
+    const VERSION = '3.2.70';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -60,6 +60,7 @@
     const CAPTAIN_LAST_SET_KEY = 'vectorRebelCaptainLastSet_v1';
     const CAPTAIN_DAILY_CHECK_KEY = 'vectorRebelCaptainDailyCheck_v1';
     const CAPTAIN_DAILY_REPORT_KEY = 'vectorRebelCaptainDailyReport_v1';
+    const CAPTAIN_HISTORICAL_OFF_KEY = 'vectorRebelCaptainHistoricalOff_v1';
     const CAPTAIN_DAILY_DEFERRED_KEY = 'vectorRebelCaptainDailyDeferred_v1';
     const MASTER_ROSTER_OVERRIDE_KEY = 'vectorRebelMasterRosterOverride_v1';
     const MASTER_ROSTER_REVIEW_KEY = 'vectorRebelMasterRosterReview_v1';
@@ -74,7 +75,7 @@
         LAST_SUMMARY_KEY, LEGACY_LAST_SUMMARY_KEY, RUN_HISTORY_KEY, GEAR_SNAPSHOTS_KEY,
         LAST_DIAGNOSTIC_KEY, STOPPED_RUN_KEY, MIGRATION_NOTICE_KEY, PANEL_MINIMIZED_KEY,
         CAPTAIN_LAST_SET_KEY, CAPTAIN_DAILY_CHECK_KEY, CAPTAIN_DAILY_REPORT_KEY,
-        MASTER_ROSTER_OVERRIDE_KEY, MASTER_ROSTER_REVIEW_KEY
+        CAPTAIN_HISTORICAL_OFF_KEY, MASTER_ROSTER_OVERRIDE_KEY, MASTER_ROSTER_REVIEW_KEY
     ];
 
     function getOrCreateTabId() {
@@ -5312,11 +5313,118 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return {tour};
     }
 
+    // Historical attendance is a CAPTAIN-ENTERED EXCEPTION, not an inspection
+    // record, a Scout capture, or a modification to official Vector or CrewSense.
+    // Never mark a person absent automatically based on a missing inspection.
+    function captainHistoricalTourEnded(tour, now = new Date()) {
+        const end=validDateKey(tour?.endDate);
+        if(!end)return false;
+        const shiftEnd=addDateKeyDays(end,1);
+        const today=localTodayKey(now);
+        return shiftEnd<today || (shiftEnd===today&&now.getHours()>=7);
+    }
+
+    function getCaptainHistoricalOffTours() {
+        const value=loadJSON(CAPTAIN_HISTORICAL_OFF_KEY,null);
+        return value?.schemaVersion===1 && value.entries &&
+            typeof value.entries==='object'&&!Array.isArray(value.entries)?
+                value:{schemaVersion:1,entries:{}};
+    }
+
+    function captainHistoricalOffKey(prefix,tourStart) {
+        return clean(prefix).toUpperCase()+'|'+(validDateKey(tourStart)||'');
+    }
+
+    function captainHistoricalOffFor(owner,tour,ledger=getCaptainHistoricalOffTours()) {
+        if(!owner?.prefix || !captainHistoricalTourEnded(tour))return null;
+        const key=captainHistoricalOffKey(owner.prefix,tour.startDate);
+        const entry=ledger?.entries?.[key];
+        if(!entry||entry.source!=='captain_manual'||
+           entry.prefix!==clean(owner.prefix).toUpperCase()||
+           entry.startDate!==tour.startDate||entry.endDate!==tour.endDate||
+           !clean(entry.reason))return null;
+        return entry;
+    }
+
+    function captainRecordHistoricalOff(owner,tour,reason,note='') {
+        if(!captainHistoricalTourEnded(tour))
+            throw new Error('Cannot mark a tour off until both shifts have finished.');
+        const prefix=clean(owner?.prefix).toUpperCase();
+        if(!prefix||!validDateKey(tour.startDate)||
+           addDateKeyDays(tour.startDate,1)!==tour.endDate)
+            throw new Error('The person or two-day tour identity is invalid.');
+        const why=clean(reason).slice(0,65);
+        if(!why)throw new Error('Select a reason before recording a historical absence.');
+        const ledger=getCaptainHistoricalOffTours();
+        const key=captainHistoricalOffKey(prefix,tour.startDate);
+        const existing=ledger.entries[key];
+        const now=new Date().toISOString();
+        const config=getConfig();
+        ledger.entries[key]={
+            source:'captain_manual',
+            prefix,startDate:tour.startDate,endDate:tour.endDate,
+            reason:why,note:clean(note).slice(0,220),
+            recordedBy:clean(config.inspectorName||'Captain'),
+            recordedAt:existing?.recordedAt||now,updatedAt:now
+        };
+        saveJSON(CAPTAIN_HISTORICAL_OFF_KEY,ledger);
+        return ledger.entries[key];
+    }
+
+    function captainClearHistoricalOff(owner,tour) {
+        const ledger=getCaptainHistoricalOffTours();
+        const key=captainHistoricalOffKey(owner?.prefix,tour?.startDate);
+        const old=ledger.entries[key];
+        if(!old||old.endDate!==tour?.endDate)return false;
+        delete ledger.entries[key];
+        saveJSON(CAPTAIN_HISTORICAL_OFF_KEY,ledger);
+        return true;
+    }
+
+    function captainRebuildStoredDailyReport(report) {
+        const original=report?.sourceSnapshot||{};
+        const owners=original.owners?.length?original.owners:
+            (report?.owners||[]).map(o=>({name:o.name,prefix:o.prefix}));
+        const items=original.items?.length?original.items:
+            (report?.owners||[]).flatMap(o=>(o.items||[]).map(item=>({
+                ownerPrefix:o.prefix,ownerName:o.name,
+                assetId:item.assetId,type:item.type,
+                inspectionModeKey:item.inspectionModeKey||'tour'
+            })));
+        const results=original.results?.length?original.results:
+            captainDailySourceResults(report);
+        const discovery=original.discovery||((report?.owners||[]).map(o=>({
+            prefix:o.prefix,error:o.discoveryError||'',
+            unknown:o.unknownAssets||[]
+        })));
+        const updated=buildCaptainDailyReport({
+            checkId:report.reportId,setId:report.setId,setName:report.setName,
+            auditAsOfDate:original.auditAsOfDate||report.auditWindow?.asOfDate,
+            owners,items,results,discovery,
+            tourRoster:original.tourRoster||report.tourRoster||null,
+            recheckCount:report.recheckCount,
+            recheckTargets:[],
+            recheckErrors:report.recheckErrors||[],
+            displayGeneratedAt:report.generatedAt
+        });
+        // Correct attendance without pretending another native inspection was
+        // read. Preserve any true earlier Recheck receipt summary as recorded.
+        updated.recheckSummary=report.recheckSummary||null;
+        updated.recheckedAssets=report.recheckedAssets||[];
+        updated.attendanceEditedAt=new Date().toISOString();
+        return updated;
+    }
+
     // A temporary two-day roster changes only this audit, NOT saved Captain
     // Sets or Vector/CrewSense assignments. Historic tours retain the usual
     // Captain Set. A swing is responsible only for explicitly selected days
     // on the selected tour; an off person has no requirement on that day.
-    function captainOwnerTourDuty(owner, tour, auditWindow, roster) {
+    function captainOwnerTourDuty(owner, tour, auditWindow, roster, historicalOff=null) {
+        const recorded=captainHistoricalOffFor(owner,tour,historicalOff);
+        if(recorded)return{due:false,off:true,
+            offSource:'captain_manual',offReason:recorded.reason,
+            offNote:recorded.note,offRecordedAt:recorded.recordedAt,
+            offRecordedBy:recorded.recordedBy};
         if(!roster || !roster.startDate || !Array.isArray(roster.basePrefixes))
             return {due:tour.due===true, off:false};
         const isBase=roster.basePrefixes.includes(owner.prefix);
@@ -5355,6 +5463,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function buildCaptainDailyReport(check) {
         const window = captainAuditWindow(check.auditAsOfDate || localTodayKey());
+        const historicalOff=getCaptainHistoricalOffTours();
         const owners = (check.owners || []).map(owner => {
             const items = (check.fullItems || check.items || [])
                 .filter(item => item.ownerPrefix === owner.prefix);
@@ -5365,7 +5474,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const tourDates = Array.isArray(result?.tour?.dates) ? result.tour.dates : [];
                 const readable = result?.status === 'ok';
                 const tourChecks = window.tours.map(tourWindow => {
-                    const duty=captainOwnerTourDuty(owner,tourWindow,window,check.tourRoster);
+                    const duty=captainOwnerTourDuty(owner,tourWindow,window,check.tourRoster,
+                        historicalOff);
                     const eligible = new Set(tourWindow.eligibleDates || []);
                     const date = tourDates.find(value => eligible.has(value)) || '';
                     return {
@@ -5375,13 +5485,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         eligibleDates: tourWindow.eligibleDates || [],
                         due: duty.due === true,
                         off: duty.off === true,
+                        offSource:duty.offSource||'',
+                        offReason:duty.offReason||'',
+                        offNote:duty.offNote||'',
+                        offRecordedAt:duty.offRecordedAt||'',
+                        offRecordedBy:duty.offRecordedBy||'',
                         dutyDates:duty.dutyDates||[],
                         date,
                         ok: readable && !!date
                     };
                 });
-                const toursOk = readable && tourChecks.filter(row => row.due)
-                    .every(row => row.ok);
+                const required=tourChecks.filter(row=>row.due);
+                const toursOk=(!required.length||readable)&&required.every(row=>row.ok);
                 return {
                     assetId: item.assetId,
                     type: item.type,
@@ -5397,7 +5512,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             });
             const discovery = (check.discovery || []).find(x => x.prefix === owner.prefix) || {};
             const allReadable = itemRows.length > 0 &&
-                itemRows.every(row => row.status === 'ok') &&
+                itemRows.every(row=>row.status==='ok'||
+                    !(row.tourChecks||[]).some(check=>check.due)) &&
                 !(discovery.unknown || []).length && !discovery.error;
             const tourRequirementCount = itemRows.reduce((sum,row)=>
                 sum+row.tourChecks.filter(check=>check.due).length,0);
@@ -5428,7 +5544,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return {
             schemaVersion: 8,
             reportId: check.checkId,
-            generatedAt: new Date().toISOString(),
+            generatedAt: check.displayGeneratedAt||new Date().toISOString(),
             setId: check.setId,
             setName: check.setName,
             ownerCount: owners.length,
@@ -5453,6 +5569,142 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         };
     }
 
+    function showCaptainHistoricalOffEditor(report,reportOverlay,
+            initialPrefix='',initialTourStart='') {
+        const tours=(report?.auditWindow?.tours||[])
+            .filter(tour=>captainHistoricalTourEnded(tour));
+        if(!tours.length){
+            setStatus('No fully completed past tours are shown in this report yet.',false);
+            return;
+        }
+        const people=(report.owners||[]).filter(p=>p.prefix);
+        if(!people.length){
+            setStatus('This report contains no identifiable Captain Set members.',false);
+            return;
+        }
+        const {overlay,box}=makeOverlayBox('540px');
+        const head=document.createElement('h3');
+        head.style.cssText='margin:0 0 5px;color:#153e5c;font:800 19px Arial;';
+        head.textContent='Past Tour: Mark Entire Tour OFF';
+        const explanation=document.createElement('p');
+        explanation.style.cssText='margin:5px 0 13px;color:#547184;font:12px/1.55 Arial;';
+        explanation.textContent='If a firefighter was not assigned or working on EITHER day of a past tour, record that here. All PPE items for that person and tour show OFF*, not a missed check. If this firefighter worked either day under your Captain Set, the tour check remains due. Another station or apparatus must manage its own requirements. This is your manual staffing record, not a Vector inspection or a verified CrewSense record.';
+        const label=(text,control)=>{
+            const wrap=document.createElement('label');
+            wrap.style.cssText='display:block;margin:8px 0;color:#2f566d;font:700 11px Arial;';
+            const title=document.createElement('div');
+            title.textContent=text;title.style.marginBottom='5px';
+            control.style.cssText='width:100%;box-sizing:border-box;padding:9px;border:1px solid #aebfcb;border-radius:6px;background:#fff;color:#1d3b51;font:12px Arial;';
+            wrap.append(title,control);return wrap;
+        };
+        const personSelect=document.createElement('select');
+        people.forEach(person=>{
+            const opt=document.createElement('option');
+            opt.value=person.prefix;opt.textContent=person.name;
+            personSelect.appendChild(opt);
+        });
+        if(people.some(p=>p.prefix===initialPrefix))personSelect.value=initialPrefix;
+        const tourSelect=document.createElement('select');
+        tours.forEach(tour=>{
+            const opt=document.createElement('option');
+            opt.value=tour.startDate;
+            opt.textContent=tour.startDate+' + '+tour.endDate;
+            tourSelect.appendChild(opt);
+        });
+        if(tours.some(t=>t.startDate===initialTourStart))tourSelect.value=initialTourStart;
+        const reasonSelect=document.createElement('select');
+        const reasons=[
+            ['','Choose a reason'],
+            ['Regular days off / not assigned','Regular days off / not assigned'],
+            ['Vacation','Vacation'],['Sick','Sick'],['Holiday','Holiday'],
+            ['Deployed elsewhere','Deployed elsewhere'],
+            ['Training / off-unit entire tour','Training / off-unit entire tour'],
+            ['Other confirmed absence','Other confirmed absence']
+        ];
+        reasons.forEach(([value,text])=>{
+            const opt=document.createElement('option');
+            opt.value=value;opt.textContent=text;reasonSelect.appendChild(opt);
+        });
+        const noteInput=document.createElement('input');
+        noteInput.type='text';noteInput.maxLength=220;
+        noteInput.placeholder='Optional note (example: approved vacation)';
+        const existingInfo=document.createElement('div');
+        existingInfo.style.cssText='margin:7px 0;min-height:18px;color:#607688;font:11px/1.5 Arial;';
+        const confirmation=document.createElement('label');
+        confirmation.style.cssText='display:flex;align-items:flex-start;gap:8px;margin:12px 0;padding:9px;background:#fff5e4;border:1px solid #ebd8ad;border-radius:6px;font:12px/1.4 Arial;color:#63471e;cursor:pointer;';
+        const confirmed=document.createElement('input');
+        confirmed.type='checkbox';confirmed.style.cssText='margin-top:2px;';
+        const confirmText=document.createElement('span');
+        confirmText.textContent='I confirm this firefighter was OFF or not assigned for BOTH entire shifts of the selected tour.';
+        confirmation.append(confirmed,confirmText);
+        const save=makeButton('Save OFF for this tour',{background:'#176b8e',color:'#fff'});
+        const restore=makeButton('Restore Requirement',{background:'#e8edf0',color:'#284656'});
+        const cancel=makeButton('Cancel');
+        const buttons=document.createElement('div');
+        buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;';
+        buttons.append(save,restore,cancel);
+        box.append(head,explanation,label('Firefighter',personSelect),
+            label('Past two-day tour',tourSelect),
+            label('Why was this person off?',reasonSelect),
+            label('Optional detail',noteInput),
+            existingInfo,confirmation,buttons);
+        const selected=()=>({
+            owner:people.find(p=>p.prefix===personSelect.value),
+            tour:tours.find(t=>t.startDate===tourSelect.value)
+        });
+        const refresh=()=>{
+            const {owner,tour}=selected();
+            const off=owner&&tour?captainHistoricalOffFor(owner,tour):null;
+            reasonSelect.value=off?.reason||'';
+            noteInput.value=off?.note||'';
+            confirmed.checked=false;
+            restore.disabled=!off;
+            existingInfo.textContent=off?
+                'Already marked OFF* by '+(off.recordedBy||'Captain')+
+                ' on '+new Date(off.updatedAt||off.recordedAt).toLocaleString()+
+                '. This is manually entered, not verified by Vector.' :
+                'No historical OFF exception saved for this person/tour.';
+        };
+        personSelect.onchange=refresh;tourSelect.onchange=refresh;
+        refresh();
+        const reDisplay=()=>{
+            const updated=captainRebuildStoredDailyReport(report);
+            saveJSON(CAPTAIN_DAILY_REPORT_KEY,updated);
+            overlay.remove();if(reportOverlay)reportOverlay.remove();
+            showCaptainDailyReport(updated);
+        };
+        save.onclick=()=>{
+            const {owner,tour}=selected();
+            if(!owner||!tour)return;
+            if(!confirmed.checked){
+                setStatus('Confirm OFF for both shifts of this past tour before saving.',false);
+                return;
+            }
+            if(!reasonSelect.value){
+                setStatus('Select an off-duty reason for this historical tour.',false);
+                return;
+            }
+            try{
+                captainRecordHistoricalOff(owner,tour,reasonSelect.value,noteInput.value);
+                setStatus(owner.name+' recorded OFF for '+tour.startDate+' + '+
+                    tour.endDate+' (captain-entered). No Vector inspection record changed.');
+                reDisplay();
+            }catch(error){setStatus(error.message||String(error),false);}
+        };
+        restore.onclick=()=>{
+            const {owner,tour}=selected();
+            if(!owner||!tour)return;
+            if(!confirm('Remove the manual OFF designation for '+owner.name+
+                ' on '+tour.startDate+' + '+tour.endDate+
+                '? Any outstanding PPE inspections will show as missing again.'))return;
+            if(captainClearHistoricalOff(owner,tour)){
+                setStatus('Manual OFF designation removed; tour requirements restored.');
+                reDisplay();
+            }
+        };
+        cancel.onclick=()=>overlay.remove();
+    }
+
     function showCaptainDailyReport(report = getCaptainDailyReport()) {
         if (!report) {
             setStatus('No Daily Captain Check report is stored yet.');
@@ -5471,7 +5723,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         sub.style.cssText = 'font-size:12px;color:#607483;margin-bottom:13px;line-height:1.5;';
         const monthText = (auditWindow.months || []).map(displayMonthKey).join(' + ');
         sub.innerHTML = escapeHtml(report.setName || 'Captain Set') + ' · read-only Item Log audit · ' + escapeHtml(new Date(report.generatedAt).toLocaleString()) + '<br>' +
-            '<b>Months:</b> ' + escapeHtml(monthText) + ' · <b>Red ✕</b> = required and missing · <b style="color:#24713b">green ✓</b> = completed · future tours have no mark.<br>' +
+            '<b>Months:</b> ' + escapeHtml(monthText) + ' · <b>Red ✕</b> = required and missing · <b style="color:#24713b">green ✓</b> = completed · <b>OFF*</b> = captain-entered entire-tour absence · future tours blank.<br>' +
             'Tour checks become due at 07:00 on the first assigned shift day. One completion on either assigned shift day satisfies the tour. Off/temporary swing overrides affect only the selected tour.';
         box.append(title, sub);
         if(report.tourRoster?.startDate){
@@ -5491,7 +5743,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const allItems = (report.owners || []).flatMap(owner => (owner.items || []).map(item => ({ owner, item })));
         const missingTours = allItems.reduce((sum, row) =>
             sum + (row.item.tourChecks || []).filter(check => check.due && !check.ok).length, 0);
-        const unreadable = allItems.filter(row => row.item.status !== 'ok').length;
+        const unreadable = allItems.filter(row=>row.item.status!=='ok' &&
+            (row.item.tourChecks||[]).some(check=>check.due)).length;
         const hasUnresolvedOwners=(report.owners||[]).some(owner=>
             !!owner.discoveryError||(owner.unknownAssets||[]).length>0);
         const hasProblems = missingTours > 0 || unreadable > 0 || hasUnresolvedOwners;
@@ -5530,7 +5783,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const monthTours = month => (auditWindow.tours || []).filter(tour => tour.month === month);
         const monthTourColumns = Math.max(1, ...months.map(month => monthTours(month).length));
         const monthGridTemplate = () => 'repeat(' + monthTourColumns + ', 34px)';
-        const makeMonthCell = (item, month, rowBackground, topBorder) => {
+        const makeMonthCell = (owner,item, month, rowBackground, topBorder) => {
             const td = document.createElement('td');
             const scheduledTours = monthTours(month);
             const itemTourMap = new Map(
@@ -5546,7 +5799,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const tour = itemTourMap.get(headerTour.startDate) || headerTour;
                 const due = tour.due === true;
                 const off = tour.off === true;
-                const ok = due && item.status === 'ok' && tour.ok === true;
+                const hasOfficialCompletion=item.status==='ok' && !!tour.date;
+                const ok = (due||off) && hasOfficialCompletion;
                 const missing = due && !ok;
                 const mark = document.createElement('div');
                 mark.style.cssText = 'height:27px;display:flex;align-items:center;justify-content:center;border-radius:5px;border:1px solid ' +
@@ -5554,10 +5808,34 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     (ok ? '#e5f5e8' : missing ? '#ffe3e3' : off ? '#e8edf0':'#fafcfd') + ';color:' +
                     (ok ? '#176b32' : missing ? '#b42318' : '#9aa8b0') +
                     ';font-size:'+(off?'9px':'17px')+';font-weight:900;line-height:1;';
-                mark.textContent = off ? 'OFF' : due ? (ok ? '✓' : '✕') : '';
-                mark.title = 'Tour ' + headerTour.startDate + ' + ' + headerTour.endDate + ': ' +
-                    (off?'Off this tour; no PPE due':due ? (ok ? 'completed' +
-                     (tour.date ? ' ' + tour.date : '') : 'missing') : 'future/not yet due');
+                mark.textContent=ok?'✓':off?
+                    (tour.offSource==='captain_manual'?'OFF*':'OFF'):
+                    due?'✕':'';
+                const offDetail=tour.offSource==='captain_manual'?
+                    'Captain-entered entire-tour OFF ('+(tour.offReason||'not specified')+
+                    ')'+(tour.offNote?' · '+tour.offNote:'')+
+                    (tour.offRecordedBy?' · recorded by '+tour.offRecordedBy:''):'';
+                mark.title='Tour '+headerTour.startDate+' + '+headerTour.endDate+': '+
+                    (offDetail||(off?'Off this tour; no PPE due':due?
+                    (ok?'completed '+(tour.date||''): 'required, missing'):
+                    'future/not yet due'));
+                if(ok&&off)mark.title+=' · Completed inspection remains shown.';
+                if(captainHistoricalTourEnded(headerTour) &&
+                   (missing||tour.offSource==='captain_manual')){
+                    mark.setAttribute('role','button');
+                    mark.setAttribute('tabindex','0');
+                    mark.setAttribute('aria-label','Edit past attendance for '+
+                        item.assetId+' on '+headerTour.startDate);
+                    mark.style.cursor='pointer';
+                    mark.style.outlineOffset='2px';
+                    mark.onclick=()=>showCaptainHistoricalOffEditor(report,overlay,
+                        owner.prefix,headerTour.startDate);
+                    mark.onkeydown=event=>{
+                        if(event.key==='Enter'||event.key===' '){
+                            event.preventDefault();mark.click();
+                        }
+                    };
+                }
                 grid.appendChild(mark);
             });
 
@@ -5616,8 +5894,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         (report.owners || []).forEach((owner, ownerIndex) => {
             const ownerItems = owner.items || [];
             ownerItems.forEach((item, itemIndex) => {
-                const itemHasMissing = item.status !== 'ok' ||
-                    (item.tourChecks || []).some(check => check.due && !check.ok);
+                const itemHasMissing = (item.tourChecks || []).some(check => check.due &&
+                    (item.status!=='ok' || !check.ok));
                 const baseBackground = ownerIndex % 2 ? '#f8fbfc' : '#ffffff';
                 const rowBackground = itemHasMissing ? '#fff1f1' : baseBackground;
                 const topBorder = itemIndex === 0 ? 'border-top:3px solid #6f8ea1;' : 'border-top:1px solid #dce5ea;';
@@ -5634,11 +5912,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     'background:' + rowBackground + ';box-shadow:' + (itemHasMissing ? 'inset 4px 0 0 #c83b3b,1px 0 0 #dce5ea' : '1px 0 0 #dce5ea') + ';white-space:nowrap;';
                 itemCell.innerHTML = '<b>' + escapeHtml(item.type || 'PPE') + '</b>' +
                     '<span style="font-size:9px;color:#6b7f8b;margin-left:6px">Asset ' + escapeHtml(item.assetId || 'unknown') + '</span>' +
-                    (item.status !== 'ok' ? '<span style="font-size:9px;color:#b42318;font-weight:800;margin-left:7px">HISTORY?</span>' : '');
+                    (item.status !== 'ok' && (item.tourChecks||[]).some(check=>check.due)?
+                        '<span style="font-size:9px;color:#b42318;font-weight:800;margin-left:7px">HISTORY?</span>' : '');
 
                 tr.append(person, itemCell);
                 months.forEach((month, monthIndex) => {
-                    const cell = makeMonthCell(item, month, rowBackground, topBorder);
+                    const cell = makeMonthCell(owner,item, month, rowBackground, topBorder);
                     if (monthIndex) cell.style.borderLeft = '2px solid #e1e8ec';
                     tr.appendChild(cell);
                 });
@@ -5652,11 +5931,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const footer = document.createElement('div');
         footer.style.cssText = 'font-size:10px;color:#6a7f8f;margin-top:8px;line-height:1.45;';
         footer.textContent = 'Audit through ' + displayHistoryDateKey(auditWindow.asOfDate) +
-            '. Previous month is fully due. Current-month future tours stay blank until their first 07:00 shift starts.';
+            '. OFF* is a manually recorded entire-tour absence, never a completed inspection or a verified CrewSense absence. Only mark OFF* when neither day was worked. Use Edit Past OFF or click a red X. Previous month is normally due; future tours stay blank until their first 07:00 shift starts.';
         box.appendChild(footer);
 
         const closeV4 = makeButton('Close');
         closeV4.onclick = () => overlay.remove();
+        const pastOff=makeButton('Edit Past OFF',{background:'#e1ebef',color:'#254963'});
+        pastOff.title='Record or correct an entire completed past tour when somebody was not required to check PPE. Manual captain entry, not a Vector record.';
+        pastOff.onclick=()=>showCaptainHistoricalOffEditor(report,overlay);
         const targets=captainDailyMissingTargets(report);
         const recheckV4=makeButton('Recheck Missing ('+targets.length+')',
             {background:'#147047',color:'#fff'});
@@ -5668,7 +5950,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         };
         const rerunV4 = makeButton('Run Again', { background: '#176b8e', color: '#fff' });
         rerunV4.onclick = () => { overlay.remove(); launchCaptainDailyCheckFromAnywhere(); };
-        box.append(recheckV4,rerunV4, closeV4);
+        box.append(pastOff,recheckV4,rerunV4, closeV4);
         return;
     }
 
@@ -12590,7 +12872,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.69'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.70'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -12678,7 +12960,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // form if Vector rerenders or SPA navigation races the interval.
     function scbaAirpackSelectNativeTemplate() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' ||
             queue.chooserSelectionAttemptedAt || getRun())return false;
         const item=queue.items[queue.index];
@@ -12736,7 +13018,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>180000 || Date.now()<queue.openedAt)return false;
@@ -12885,7 +13167,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const q=scbaAirpackReadNativeQueue();
         if(!q || q.phase!=='form_prefilled' ||
             !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
-            !['3.2.66','3.2.67','3.2.68','3.2.69'].includes(q.inspectionVersion) || getRun())return false;
+            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70'].includes(q.inspectionVersion) || getRun())return false;
         const item=q.items[q.index],ins=currentInspection();
         if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
             ins.instance!==q.formInstance || q.submitAttemptedAt)return false;
@@ -13013,7 +13295,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70'].includes(queue.inspectionVersion) ||
             !['form_prefilled','native_form_opened','native_submit_clicked'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -13081,7 +13363,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // authorization. Record a no-retry latch BEFORE the final click.
     function scbaAirpackFinalizeFailure() {
         const q=scbaAirpackReadNativeQueue();
-        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69'].includes(q.inspectionVersion) ||
+        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70'].includes(q.inspectionVersion) ||
            q.phase!=='native_submit_clicked' || !q.autoSubmitApproved ||
            !q.physicalInspectionConfirmedAt || q.failureFinalSubmitAt ||
            q.failureNotePreparedFor!==q.submittedFormInstance || getRun())return false;
@@ -13256,7 +13538,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         if(!fresh || fresh.items[fresh.index].href!==item.href ||
                            fresh.phase!=='form_prefilled')return;
                         sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
-                            JSON.stringify({...fresh,inspectionVersion:'3.2.69',
+                            JSON.stringify({...fresh,inspectionVersion:'3.2.70',
                                 autoSubmitApproved:true,
                                 physicalInspectionConfirmedAt:new Date().toISOString()}));
                         continueButton.disabled=true;
