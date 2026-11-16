@@ -8,11 +8,13 @@ function block(start,end){
  assert.ok(a>=0&&b>a,'source function boundaries: '+start);
  return source.slice(a,b);
 }
-const helpers=block('    function captainOwnerTourDuty(', '    function buildCaptainDailyReport(');
-const funcs=new Function('localTodayKey','validDateKey','captainHistoricalOffFor',helpers+
+const helpers=block('    function captainScoutTourDuty(', '    function buildCaptainDailyReport(');
+const funcs=new Function('localTodayKey','validDateKey','captainHistoricalOffFor',
+ 'captainHistoricalTourEnded','masterNameKey',helpers+
   '\nreturn {captainOwnerTourDuty,captainDailyMissingTargets,captainDailySourceResults};')(
   ()=> '2026-11-15',
-  value=>/^\d{4}-\d{2}-\d{2}$/.test(value)?value:'',()=>null
+  value=>/^\d{4}-\d{2}-\d{2}$/.test(value)?value:'',()=>null,
+  ()=>true,x=>String(x||'').toLowerCase().trim()
 );
 const roster={
  startDate:'2026-11-15',endDate:'2026-11-16',

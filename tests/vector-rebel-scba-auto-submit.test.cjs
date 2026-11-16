@@ -13,7 +13,7 @@ const END=src.indexOf('    function scbaAirpackCompletedReceipt() {',BEGIN);
 assert.ok(BEGIN>=0&&END>BEGIN);
 const code=src.slice(BEGIN,END)+'\nreturn {match:scbaAirpackOfficialAnswersMatch,recover:scbaAirpackRecoverCompletedForm,submit:scbaAirpackSubmitReviewedForm};';
 function harness({approved=true,checked=true,phase='form_prefilled',answers=null,
-  template='113271',wrongInstance=false,extraSubmit=false,version='3.2.72'}={}){
+  template='113271',wrongInstance=false,extraSubmit=false,version='3.2.73'}={}){
  const expected=questions.map((_,i)=>answers?.[i]||'pass');
  const text=questions.map((q,i)=>q+'\n'+(expected[i]==='pass'?'Passed':'Failed')).join('\n');
  let clicks=0,status='',state={
