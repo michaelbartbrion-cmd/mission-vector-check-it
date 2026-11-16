@@ -85,21 +85,20 @@ const report={owners:[{name:'Jerry Weems',prefix:'WEEMS',
 const result=(s1,s2)=>[
  {name:'Jerry Weems',date:'2026-11-09',status:s1,sourceQuality:'good_direct_capture'},
  {name:'Jerry Weems',date:'2026-11-10',status:s2,sourceQuality:'good_direct_capture'}];
-test('only two explicit full-day leave records produce a full-tour off suggestion',()=>{
+test('two full-day leave records are handled as source OFF, not a spurious review exception',()=>{
  const yes=candidates(report,result('full_leave_evidence','full_leave_evidence'));
- assert.equal(yes.length,1);assert.equal(yes[0].confidence,'both_leave');
+ assert.equal(yes.length,0);
  const maybe=candidates(report,result('full_leave_evidence','unknown'));
  assert.equal(maybe.length,1);assert.equal(maybe[0].confidence,'incomplete');
  assert.equal(candidates(report,result('work_evidence','unknown')).length,0);
  assert.equal(candidates(report,result('unknown','unknown')).length,0);
 });
-test('verified full-day other-unit assignments on both shift days yield a review-only different-crew suggestion',()=>{
- const other=result('other_crew_evidence','other_crew_evidence');
+test('verified full-day other-unit assignments are WORKING, never an excuse to dismiss PPE',()=>{
+ const other=result('work_evidence','work_evidence');
  const items=candidates(report,other);
- assert.equal(items.length,1);
- assert.equal(items[0].confidence,'both_other');
- assert.equal(candidates(report,result('other_crew_evidence','work_evidence')).length,1);
- assert.equal(candidates(report,result('other_crew_evidence','work_evidence'))[0].confidence,'incomplete');
+ assert.equal(items.length,0);
+ assert.equal(candidates(report,result('full_leave_evidence','work_evidence')).length,0);
+ assert.equal(candidates(report,result('deployment_evidence','work_evidence')).length,0);
 });
 test('Command attendance is suggest-only, preserves manual attestation for any red X',()=>{
  const t=src.slice(a,b);

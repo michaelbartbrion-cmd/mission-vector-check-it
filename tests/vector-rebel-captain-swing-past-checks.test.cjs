@@ -31,11 +31,12 @@ const other={name:'Baldree Guest',prefix:'PERSON-GUEST'};
 function harness(ledger=null){
  const manual=ledger||{schemaVersion:1,entries:{}};
  const ownerFunc=new Function('captainHistoricalOffFor','localTodayKey',
-  part('    function captainOwnerTourDuty(',
+  'captainHistoricalTourEnded','masterNameKey',
+  part('    function captainScoutTourDuty(',
        '    function captainDailyMissingTargets(')+
   '\nreturn captainOwnerTourDuty;')(
    (owner,tour)=>(manual.entries||{})[owner.prefix.toUpperCase()+'|'+tour.startDate]||null,
-   ()=>'2026-11-15');
+   ()=>'2026-11-15',()=>true,x=>String(x||'').toLowerCase().trim());
  const helpers=new Function(part('    function captainDailyMissingTargets(',
    '    function buildCaptainDailyReport(')+
    '\nreturn {captainDailyMissingTargets,captainDailySourceResults};')();
@@ -103,7 +104,7 @@ test('other shift with no completed check is blank, not OFF, red or a missing sc
  assert.equal(r.owners.find(x=>x.prefix===other.prefix).tourRequirementCount,0);
  assert.equal(r.owners.find(x=>x.prefix===brion.prefix).tourRequirementCount,2);
 });
-test('manual historical different shift on saved Captain Set member blanks that tour',()=>{
+test('historical different-shift note no longer waives PPE when original Captain Set indicates due',()=>{
  const ledger={schemaVersion:1,entries:{
   'PERSON-BRION|2026-11-09':{
     source:'captain_manual',prefix:'PERSON-BRION',startDate:'2026-11-09',
@@ -113,9 +114,9 @@ test('manual historical different shift on saved Captain Set member blanks that 
  const h=harness(ledger),r=run(h);
  const blank=item(r,brion.prefix,'B-1').tourChecks[0];
  assert.equal(blank.off,false);
- assert.equal(blank.notAssigned,true);
- assert.equal(blank.due,false);
- assert.equal(blank.offReason,'Different shift / other captain');
+ assert.equal(blank.notAssigned,false);
+ assert.equal(blank.due,true);
+ assert.equal(blank.offReason,'');
  assert.equal(item(r,brion.prefix,'B-1').tourChecks[1].due,true);
 });
 test('historical vacation is still OFF*, not a different-shift blank',()=>{
