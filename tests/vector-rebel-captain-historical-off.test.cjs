@@ -186,14 +186,14 @@ test('full backup includes this separate historical captain attendance ledger',(
 test('report allows direct red-X editing, shows OFF* and restore, never starts PPE inspection',()=>{
  const ui=section('    function showCaptainHistoricalOffEditor(',
   '    function showCaptainDailySetPicker(');
- assert.match(ui,/Past Tour: Mark Entire Tour OFF/);
+ assert.match(ui,/Past Tour: Correct Attendance/);
  assert.match(ui,/recordedBy/);
- assert.match(ui,/I confirm this firefighter was OFF or not assigned for BOTH entire shifts/);
+ assert.match(ui,/I confirm this firefighter was off or assigned to a different crew for BOTH shifts/);
  assert.match(ui,/captainRecordHistoricalOff\(owner,tour,reasonSelect.value/);
  assert.match(ui,/captainClearHistoricalOff\(owner,tour\)/);
  assert.match(ui,/mark\.onclick=\(\)=>showCaptainHistoricalOffEditor\(report,overlay/);
  assert.match(ui,/OFF\*/);
- assert.match(ui,/Edit Past OFF/);
+ assert.match(ui,/Edit Past Attendance/);
  const editor=section('    function showCaptainHistoricalOffEditor(',
   '    function showCaptainDailyReport(');
  assert.doesNotMatch(editor,/submitInspection|startInspection|startPpeRun|base44\.entities/);
