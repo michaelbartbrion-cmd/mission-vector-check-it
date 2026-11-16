@@ -76,9 +76,9 @@ test('last-name swing sorting uses surname prefix with first-name tie break',()=
 const a=src.indexOf('    function captainCommandAttendanceCandidates(');
 const b=src.indexOf('    function showCaptainDailyReport(',a);
 assert.ok(a>0&&b>a,'Rebel Command candidate read helper');
-const candidates=new Function('captainHistoricalTourEnded','masterNameKey',
+const candidates=new Function('captainHistoricalTourEnded','masterNameKey','captainIsTemporarySwing',
  src.slice(a,b)+'\nreturn captainCommandAttendanceCandidates;')(
- ()=>true,x=>String(x||'').toLowerCase().trim());
+ ()=>true,x=>String(x||'').toLowerCase().trim(),(o,r)=>!!r?.swingPrefixes?.includes(o.prefix)&&!r?.basePrefixes?.includes(o.prefix));
 const report={owners:[{name:'Jerry Weems',prefix:'WEEMS',
  items:[{tourChecks:[{startDate:'2026-11-09',due:true,ok:false}]}]}],
  auditWindow:{tours:[{startDate:'2026-11-09',endDate:'2026-11-10'}]}};

@@ -29,16 +29,16 @@ function harness(){
   'captainDailySourceResults','buildCaptainDailyReport','CAPTAIN_HISTORICAL_OFF_KEY',
   snapshot+'\nreturn {captainHistoricalTourEnded,getCaptainHistoricalOffTours,'+
   'captainHistoricalOffFor,captainRecordHistoricalOff,captainClearHistoricalOff,'+
-  'captainRebuildStoredDailyReport,captainScoutTourDuty};')(
+  'captainRebuildStoredDailyReport,captainScoutTourDuty,captainTemporarySwingDuty};')(
   validDateKey,addDateKeyDays,localTodayKey,loadJSON,saveJSON,clean,getConfig,
   r=>realFuncs.captainDailySourceResults(r),c=>realBuild(c),
   'vectorRebelCaptainHistoricalOff_v1');
  const regular=section('    function captainOwnerTourDuty(',
   '    function captainDailyMissingTargets(');
  const ownerFn=new Function('captainHistoricalOffFor','localTodayKey',
-  'captainScoutTourDuty',regular+
+  'captainScoutTourDuty','captainTemporarySwingDuty',regular+
   '\nreturn captainOwnerTourDuty;')(
-   provider.captainHistoricalOffFor,localTodayKey,provider.captainScoutTourDuty);
+   provider.captainHistoricalOffFor,localTodayKey,provider.captainScoutTourDuty,provider.captainTemporarySwingDuty);
  const allHelpers=section('    function captainDailyMissingTargets(',
   '    function buildCaptainDailyReport(');
  const realFuncs=new Function(allHelpers+
