@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Postmaster
 // @namespace    mission-vector-check-it-rebel-postmaster
-// @version      1.2.12
+// @version      1.2.13
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @description  Minimal read-only Outlook Web collector for Rebel Command with whole-mailbox indexing and automatic capture of messages the user opens.
@@ -22,7 +22,7 @@
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_POSTMASTER)return;
-const VERSION='rebel-postmaster-1.2.12';
+const VERSION='rebel-postmaster-1.2.13';
 const DEFAULT_ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const MANAGED_UPDATE_URL='https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js';
 function openManagedUpdate(){const u='chrome-extension://dhdgffkkebhmkfjojejmpbldmpobfkfo/options.html#nav=utils';try{GM_setClipboard(MANAGED_UPDATE_URL,'text')}catch(_){}try{GM_openInTab(u,{active:true,insert:true,setParent:true});state.msg='Update URL copied. Paste it into Tampermonkey Utilities → Import from URL, then click Install.';state.kind='info';render()}catch(_){alert('Update URL copied. Open Tampermonkey → Utilities → Import from URL, paste it, then click Install.')}}
@@ -122,7 +122,27 @@ async function reportMailboxManifest(ms){if(!ms?.mailboxId||!Array.isArray(ms?.f
 function findFolderNavTarget(target){const candidates=folderCandidates(),exact=candidates.find(c=>c.key===target.key);if(exact)return exact;if(String(target?.key||'').startsWith('name:'))return candidates.find(c=>clean(c.name).toLowerCase()===clean(target.name).toLowerCase())||null;return null}
 async function navigateToFolder(target){const c=findFolderNavTarget(target);if(c?.href){try{const u=new URL(c.href,location.href);if(u.href!==location.href){location.assign(u.href);return false}}catch(_){}}const el=c?._el;if(!el||!isFolderTreeNode(el))throw new Error(`Folder navigation target not found for ${target.name}. Expand the Outlook folder tree and resume.`);const before=folderName();el.click();const started=Date.now();while(Date.now()-started<8000){await wait(250);if(targetMatchesPage(target))return true}throw new Error(`Outlook did not navigate to ${target.name} after the safe folder-tree click (started from ${before}).`)}
 function statePayload(s){return{version:VERSION,workEmailIngestionState:{provider:'outlook_web_rendered_ui',mailboxId:s.mailboxId,folderId:s.folderId,folderName:s.folderName,syncStatus:s.status,lastPageCursor:String(s.lastTop??''),deltaCursor:s.lastKey||'',indexedCount:Number(s.seen?.length||0),lastSuccessAt:s.lastSuccessAt||undefined,lastError:s.lastError||'',updatedAt:new Date().toISOString()}}}
-async function reportCrawl(s){try{await request(statePayload(s))}catch(_){/* Local checkpoint remains authoritative until bridge state ingestion is enabled. */}}
+// A long Outlook virtual-list crawl can upload dozens of message batches.
+// Preserve each batch immediately in Rebel Command and the exact local crawl
+// checkpoint, but avoid POSTing an unchanged RUNNING status after EVERY batch.
+// Base44 reported rate limiting on a real folder crawl (October 17).
+// Always send transitions (new folder, paused, complete, error) immediately.
+const CRAWL_STATUS_MIN_INTERVAL_MS=30000;
+let lastCrawlStatusReport={key:'',at:0};
+async function reportCrawl(s){
+  const key=[s.mailboxId,s.folderId,s.status].join('|');
+  const now=Date.now();
+  if(s.status==='running'&&lastCrawlStatusReport.key===key &&
+     now-lastCrawlStatusReport.at<CRAWL_STATUS_MIN_INTERVAL_MS)return false;
+  try{
+    const res=await request(statePayload(s));
+    if(res?.workEmailIngestionState?.accepted){
+      lastCrawlStatusReport={key,at:Date.now()};
+      return true;
+    }
+  }catch(_){/* Local checkpoint remains authoritative; the next eligible update can retry. */}
+  return false;
+}
 let crawlAbort=false;
 function newCrawl(){return{version:2,mailboxId:mailboxId(),folderId:folderId(),folderKey:currentFolderKey(),folderName:folderName(),mailboxHint:mailboxHint(),status:'pending',seen:[],steps:0,lastTop:0,lastKey:'',lastSuccessAt:'',lastError:'',startedAt:new Date().toISOString(),updatedAt:new Date().toISOString()}}
 function crawlMatchesPage(s){if(!s||s.mailboxId!==mailboxId())return false;const key=currentFolderKey();if(s.folderKey&&key)return s.folderKey===key;return s.folderId===folderId()}
@@ -197,7 +217,7 @@ function render(){
     state.last=snapshot();const r=ensureUi();r.replaceChildren();const cs=crawlState(),same=crawlMatchesPage(cs),ms=mailboxState(),mb=mailboxSummary(ms);
     if(state.open){
         const p=add(r,'div',null,'p'),h=add(p,'div',null,'h'),title=add(h,'div');add(title,'b','REBEL POSTMASTER');
-        const sub=add(title,'div','v1.2.12 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
+        const sub=add(title,'div','v1.2.13 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
         const close=add(h,'button','','orb header-orb');close.type='button';close.dataset.pmAction='close';close.title='Minimize Rebel Postmaster';close.setAttribute('aria-label','Minimize Rebel Postmaster');close.innerHTML=REBEL_SYMBOL_HTML;
         const b=add(p,'div',null,'b');
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');
