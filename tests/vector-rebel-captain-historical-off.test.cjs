@@ -156,8 +156,12 @@ test('existing v8 report rebuild preserves native audit timestamp and recheck ou
  const prior=h.realBuild({...h.check,
    recheckTargets:[{ownerPrefix:'PERSON-BRION',assetId:'B-1'}],
    recheckCount:1});
+ prior.elapsedMs=123000;
+ prior.timingSampleCount=9;
  h.captainRecordHistoricalOff(h.owners[0],h.tours[0],'Vacation');
  const edited=h.captainRebuildStoredDailyReport(prior);
+ assert.equal(edited.elapsedMs,123000);
+ assert.equal(edited.timingSampleCount,9);
  assert.equal(edited.generatedAt,prior.generatedAt,
   'editing attendance is not a new native item log scan');
  assert.deepEqual(edited.recheckSummary,prior.recheckSummary,
