@@ -114,5 +114,5 @@ test('Monthly Captain button and monthly criteria are removed from active Daily 
  const report=src.slice(src.indexOf('    function buildCaptainDailyReport(check) {'),
   src.indexOf('    function showCaptainDailySetPicker() {'));
  assert.doesNotMatch(report,/monthlyChecks|monthlyRequirementCount|capHead/);
- assert.match(report,/schemaVersion: 7/);
+ assert.match(report,/schemaVersion: 8/);
 });

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.68
+// @version      3.2.69
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.68',
+        version: '3.2.69',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.68';
+    const VERSION = '3.2.69';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -5312,11 +5312,52 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return {tour};
     }
 
+    // A temporary two-day roster changes only this audit, NOT saved Captain
+    // Sets or Vector/CrewSense assignments. Historic tours retain the usual
+    // Captain Set. A swing is responsible only for explicitly selected days
+    // on the selected tour; an off person has no requirement on that day.
+    function captainOwnerTourDuty(owner, tour, auditWindow, roster) {
+        if(!roster || !roster.startDate || !Array.isArray(roster.basePrefixes))
+            return {due:tour.due===true, off:false};
+        const isBase=roster.basePrefixes.includes(owner.prefix);
+        if(tour.startDate!==roster.startDate)
+            return {due:isBase&&tour.due===true,off:!isBase};
+        const chosen=[roster.startDate,roster.endDate]
+            .filter(date=>(roster.onByDate?.[date]||[]).includes(owner.prefix));
+        if(!chosen.length)return {due:false,off:true};
+        const asOf=auditWindow.asOfDate;
+        const today=localTodayKey();
+        const firstShiftReached=asOf<today || (asOf===today&&new Date().getHours()>=7);
+        const due=chosen.some(date=>date<asOf || (date===asOf&&firstShiftReached));
+        return {due,off:false,dutyDates:chosen};
+    }
+
+    function captainDailyMissingTargets(report) {
+        return (report?.owners||[]).flatMap(owner=>(owner.items||[])
+            .filter(item=>(item.tourChecks||[]).some(check=>check.due&&!check.ok) ||
+                (item.status!=='ok' &&
+                  (item.tourChecks||[]).some(check=>check.due)))
+            .map(item=>({ownerPrefix:owner.prefix,ownerName:owner.name,
+                assetId:item.assetId,type:item.type})));
+    }
+
+    function captainDailySourceResults(report) {
+        // Old v7 reports have no stored URLs/history source snapshot. Rebuild
+        // only their history RESULTS, then find URLs through a fresh,
+        // bounded Responsible Party scan before a targeted recheck.
+        return (report?.owners||[]).flatMap(owner=>(owner.items||[]).map(item=>({
+            ownerName:owner.name,ownerPrefix:owner.prefix,
+            assetId:item.assetId,type:item.type,status:item.status||'error',
+            tour:{dates:[...(item.tourDates||[])],latestDate:item.latestTourDate||''},
+            error:item.error||''
+        })));
+    }
+
     function buildCaptainDailyReport(check) {
         const window = captainAuditWindow(check.auditAsOfDate || localTodayKey());
-        const dueTourWindows = window.tours.filter(tourWindow => tourWindow.due === true);
         const owners = (check.owners || []).map(owner => {
-            const items = (check.items || []).filter(item => item.ownerPrefix === owner.prefix);
+            const items = (check.fullItems || check.items || [])
+                .filter(item => item.ownerPrefix === owner.prefix);
             const results = (check.results || []).filter(result => result.ownerPrefix === owner.prefix);
             const byAsset = new Map(results.map(result => [result.assetId, result]));
             const itemRows = items.map(item => {
@@ -5324,6 +5365,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const tourDates = Array.isArray(result?.tour?.dates) ? result.tour.dates : [];
                 const readable = result?.status === 'ok';
                 const tourChecks = window.tours.map(tourWindow => {
+                    const duty=captainOwnerTourDuty(owner,tourWindow,window,check.tourRoster);
                     const eligible = new Set(tourWindow.eligibleDates || []);
                     const date = tourDates.find(value => eligible.has(value)) || '';
                     return {
@@ -5331,7 +5373,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         startDate: tourWindow.startDate,
                         endDate: tourWindow.endDate,
                         eligibleDates: tourWindow.eligibleDates || [],
-                        due: tourWindow.due === true,
+                        due: duty.due === true,
+                        off: duty.off === true,
+                        dutyDates:duty.dutyDates||[],
                         date,
                         ok: readable && !!date
                     };
@@ -5355,7 +5399,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const allReadable = itemRows.length > 0 &&
                 itemRows.every(row => row.status === 'ok') &&
                 !(discovery.unknown || []).length && !discovery.error;
-            const tourRequirementCount = itemRows.length * dueTourWindows.length;
+            const tourRequirementCount = itemRows.reduce((sum,row)=>
+                sum+row.tourChecks.filter(check=>check.due).length,0);
             const tourPassedCount = itemRows.reduce((sum, row) =>
                 sum + row.tourChecks.filter(x => x.due && x.ok).length, 0);
             const tourCheckOk = allReadable && tourPassedCount === tourRequirementCount;
@@ -5373,14 +5418,37 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 items: itemRows
             };
         });
+        const remainingTargets=owners.flatMap(owner=>(owner.items||[])
+            .filter(item=>(item.tourChecks||[]).some(x=>x.due&&!x.ok))
+            .map(item=>owner.prefix+'|'+item.assetId));
+        const remaining=new Set(remainingTargets);
+        const recheckTargets=check.recheckTargets||[];
+        const newlyCleared=recheckTargets.filter(t=>
+            !remaining.has(t.ownerPrefix+'|'+t.assetId)).length;
         return {
-            schemaVersion: 7,
+            schemaVersion: 8,
             reportId: check.checkId,
             generatedAt: new Date().toISOString(),
             setId: check.setId,
             setName: check.setName,
             ownerCount: owners.length,
             auditWindow: window,
+            tourRoster:check.tourRoster||null,
+            recheckCount:Number(check.recheckCount||0),
+            recheckedAssets:recheckTargets,
+            recheckErrors:check.recheckErrors||[],
+            recheckSummary:recheckTargets.length?{
+                itemsQueried:recheckTargets.length,
+                newlyCleared,
+                itemsStillMissing:recheckTargets.length-newlyCleared,
+                readErrors:(check.recheckErrors||[]).length
+            }:null,
+            sourceSnapshot:{
+                owners:check.owners||[],discovery:check.discovery||[],
+                items:check.fullItems||check.items||[],
+                results:check.results||[],auditAsOfDate:check.auditAsOfDate,
+                tourRoster:check.tourRoster||null
+            },
             owners
         };
     }
@@ -5404,15 +5472,29 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const monthText = (auditWindow.months || []).map(displayMonthKey).join(' + ');
         sub.innerHTML = escapeHtml(report.setName || 'Captain Set') + ' · read-only Item Log audit · ' + escapeHtml(new Date(report.generatedAt).toLocaleString()) + '<br>' +
             '<b>Months:</b> ' + escapeHtml(monthText) + ' · <b>Red ✕</b> = required and missing · <b style="color:#24713b">green ✓</b> = completed · future tours have no mark.<br>' +
-            'Tour checks become due at 07:00 on the first shift day. One completion on either shift day satisfies the whole tour.';
+            'Tour checks become due at 07:00 on the first assigned shift day. One completion on either assigned shift day satisfies the tour. Off/temporary swing overrides affect only the selected tour.';
         box.append(title, sub);
+        if(report.tourRoster?.startDate){
+            const rosterInfo=document.createElement('div');
+            rosterInfo.style.cssText='font-size:11px;color:#274d62;background:#f1f7f9;border:1px solid #c7dce5;border-radius:7px;padding:8px 10px;margin-bottom:10px;';
+            const t=report.tourRoster;
+            const names=(report.owners||[]);
+            const assigned=date=>(t.onByDate?.[date]||[]).map(prefix=>
+                names.find(o=>o.prefix===prefix)?.name||prefix).join(', ')||'Nobody assigned';
+            rosterInfo.textContent='THIS TOUR ONLY '+t.startDate+' + '+t.endDate+
+                ' | Day 1: '+assigned(t.startDate)+' | Day 2: '+assigned(t.endDate)+
+                ' | Saved Captain Set unchanged.';
+            box.appendChild(rosterInfo);
+        }
 
         const months = Array.isArray(auditWindow.months) ? auditWindow.months.slice(0, 2) : [];
         const allItems = (report.owners || []).flatMap(owner => (owner.items || []).map(item => ({ owner, item })));
         const missingTours = allItems.reduce((sum, row) =>
             sum + (row.item.tourChecks || []).filter(check => check.due && !check.ok).length, 0);
         const unreadable = allItems.filter(row => row.item.status !== 'ok').length;
-        const hasProblems = missingTours > 0 || unreadable > 0;
+        const hasUnresolvedOwners=(report.owners||[]).some(owner=>
+            !!owner.discoveryError||(owner.unknownAssets||[]).length>0);
+        const hasProblems = missingTours > 0 || unreadable > 0 || hasUnresolvedOwners;
 
         const summaryBar = document.createElement('div');
         summaryBar.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px;padding:9px 10px;border-radius:8px;border:1px solid ' +
@@ -5421,6 +5503,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             '<span>Tour missing: <b style="color:' + (missingTours ? '#b42318' : '#24713b') + '">' + missingTours + '</b></span>' +
             '<span>Unreadable: <b style="color:' + (unreadable ? '#b42318' : '#24713b') + '">' + unreadable + '</b></span>';
         box.appendChild(summaryBar);
+        if(report.recheckSummary){
+            const note=document.createElement('div');
+            note.style.cssText='font:700 11px/1.45 Arial;padding:7px 10px;margin-bottom:8px;border-radius:6px;background:#e9f4fb;color:#174761;';
+            const r=report.recheckSummary;
+            note.textContent='RECHECK: '+r.itemsQueried+' previously missing item(s) reread · '+
+                r.newlyCleared+' newly cleared · '+r.itemsStillMissing+
+                ' still missing'+(r.readErrors?' · '+r.readErrors+' read error(s)':'')+
+                '. Verified items were not reopened.';
+            box.appendChild(note);
+        }
 
         const ownerIssues = [];
         (report.owners || []).forEach(owner => {
@@ -5452,17 +5544,20 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             grid.style.cssText = 'display:grid;grid-template-columns:' + monthGridTemplate() + ';gap:4px;align-items:center;';
             scheduledTours.forEach(headerTour => {
                 const tour = itemTourMap.get(headerTour.startDate) || headerTour;
-                const due = headerTour.due === true;
+                const due = tour.due === true;
+                const off = tour.off === true;
                 const ok = due && item.status === 'ok' && tour.ok === true;
                 const missing = due && !ok;
                 const mark = document.createElement('div');
                 mark.style.cssText = 'height:27px;display:flex;align-items:center;justify-content:center;border-radius:5px;border:1px solid ' +
                     (ok ? '#78b684' : missing ? '#dc7f7f' : '#d8e1e6') + ';background:' +
-                    (ok ? '#e5f5e8' : missing ? '#ffe3e3' : '#fafcfd') + ';color:' +
-                    (ok ? '#176b32' : missing ? '#b42318' : '#9aa8b0') + ';font-size:17px;font-weight:900;line-height:1;';
-                mark.textContent = due ? (ok ? '✓' : '✕') : '';
+                    (ok ? '#e5f5e8' : missing ? '#ffe3e3' : off ? '#e8edf0':'#fafcfd') + ';color:' +
+                    (ok ? '#176b32' : missing ? '#b42318' : '#9aa8b0') +
+                    ';font-size:'+(off?'9px':'17px')+';font-weight:900;line-height:1;';
+                mark.textContent = off ? 'OFF' : due ? (ok ? '✓' : '✕') : '';
                 mark.title = 'Tour ' + headerTour.startDate + ' + ' + headerTour.endDate + ': ' +
-                    (due ? (ok ? 'completed' + (tour.date ? ' ' + tour.date : '') : 'missing') : 'future');
+                    (off?'Off this tour; no PPE due':due ? (ok ? 'completed' +
+                     (tour.date ? ' ' + tour.date : '') : 'missing') : 'future/not yet due');
                 grid.appendChild(mark);
             });
 
@@ -5562,9 +5657,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         const closeV4 = makeButton('Close');
         closeV4.onclick = () => overlay.remove();
+        const targets=captainDailyMissingTargets(report);
+        const recheckV4=makeButton('Recheck Missing ('+targets.length+')',
+            {background:'#147047',color:'#fff'});
+        recheckV4.disabled=!targets.length;
+        recheckV4.title='Read ONLY equipment with a due missing tour check or unreadable required history. Previously verified equipment is not revisited.';
+        recheckV4.onclick=async()=>{
+            overlay.remove();
+            await startCaptainDailyMissingRecheck(report);
+        };
         const rerunV4 = makeButton('Run Again', { background: '#176b8e', color: '#fff' });
         rerunV4.onclick = () => { overlay.remove(); launchCaptainDailyCheckFromAnywhere(); };
-        box.append(rerunV4, closeV4);
+        box.append(recheckV4,rerunV4, closeV4);
         return;
     }
 
@@ -5626,6 +5730,145 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         updateHint();
         box.append(dateLabel, auditInput, auditHint);
 
+        // Tour staffing is an ephemeral override. Existing saved Captain Set
+        // membership and historic tour coverage are never edited. Each shift
+        // has its own ON/OFF switches; add any swing from the master roster.
+        const rosterPanel=document.createElement('section');
+        rosterPanel.style.cssText='border:1px solid #cbdbe6;border-radius:9px;padding:10px;margin:10px 0;background:#f7fbfd;color:#1d3e55;';
+        const rosterHeader=document.createElement('div');
+        rosterHeader.style.cssText='font:750 13px Arial;margin-bottom:4px;';
+        rosterHeader.textContent='WHO IS HERE THIS TOUR';
+        const rosterInfo=document.createElement('p');
+        rosterInfo.style.cssText='font:11px/1.45 Arial;margin:3px 0 9px;color:#597383;';
+        rosterInfo.textContent='Your saved Captain Set is selected automatically. Uncheck an off-duty person for either shift. Add swings below. Changes apply only to this audit.';
+        const rosterList=document.createElement('div');
+        rosterList.style.cssText='display:grid;gap:4px;margin:8px 0;';
+        const swingControls=document.createElement('div');
+        swingControls.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;align-items:center;';
+        const swingSelect=document.createElement('select');
+        swingSelect.setAttribute('aria-label','Select a swing firefighter');
+        swingSelect.style.cssText='flex:1;min-width:190px;padding:8px;border:1px solid #b8c8d6;border-radius:6px;background:#fff;color:#173b50;';
+        const swingDate=document.createElement('select');
+        swingDate.setAttribute('aria-label','Swing assignment day');
+        swingDate.style.cssText='padding:8px;border:1px solid #b8c8d6;border-radius:6px;background:#fff;color:#173b50;';
+        const addSwing=makeButton('+ Add Swing',{background:'#176b8e',color:'#fff'});
+        const crewCount=document.createElement('small');
+        crewCount.style.cssText='display:block;margin-top:7px;color:#547183;font:10px/1.4 Arial;';
+        swingControls.append(swingSelect,swingDate,addSwing);
+        rosterPanel.append(rosterHeader,rosterInfo,rosterList,swingControls,crewCount);
+        box.appendChild(rosterPanel);
+
+        let tourEntries=new Map(),tourKeys=['',''],lastRosterScope='';
+        const activeCaptainSet=()=>usableSets.find(x=>x.id===select.value)||usableSets[0];
+        const currentTourKeys=()=>{
+            const date=validDateKey(auditInput.value)||localTodayKey();
+            const w=inferRegularTourWindow(new Date(date+'T12:00:00'));
+            return[w.startDate,w.endDate];
+        };
+        function renderCaptainTourRoster(){
+            const set=activeCaptainSet(),dates=currentTourKeys();
+            const scope=set.id+'|'+dates.join('|');
+            if(scope!==lastRosterScope){
+                lastRosterScope=scope;
+                tourEntries=new Map(set.people.map(person=>[person.prefix,{
+                    person,base:true,day1:true,day2:true
+                }]));
+            }
+            tourKeys=dates;
+            rosterList.innerHTML='';
+            const header=document.createElement('div');
+            header.style.cssText='display:grid;grid-template-columns:minmax(110px,1fr) 92px 92px 34px;gap:4px;align-items:center;font:800 10px Arial;color:#385c72;';
+            const who=document.createElement('span');who.textContent='CREW';
+            header.appendChild(who);
+            dates.forEach((date,index)=>{
+                const label=document.createElement('span');
+                label.textContent='Day '+(index+1)+' '+date.slice(5);
+                label.style.textAlign='center';
+                header.appendChild(label);
+            });
+            header.appendChild(document.createElement('span'));
+            rosterList.appendChild(header);
+            for(const entry of tourEntries.values()){
+                const row=document.createElement('div');
+                row.style.cssText='display:grid;grid-template-columns:minmax(110px,1fr) 92px 92px 34px;gap:4px;align-items:center;padding:5px 2px;border-top:1px solid #e0ebef;font:11px Arial;';
+                const name=document.createElement('span');
+                name.textContent=entry.person.name+(entry.base?'':' · SWING');
+                name.style.cssText='min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;';
+                row.appendChild(name);
+                for(let i=0;i<2;i++){
+                    const label=document.createElement('label');
+                    label.style.cssText='display:flex;align-items:center;justify-content:center;gap:4px;cursor:pointer;';
+                    const cb=document.createElement('input');
+                    cb.type='checkbox';cb.checked=i?entry.day2:entry.day1;
+                    cb.setAttribute('aria-label',(i?'Day 2':'Day 1')+' '+entry.person.name+' on duty');
+                    cb.onchange=()=>{
+                        if(i)entry.day2=cb.checked;
+                        else entry.day1=cb.checked;
+                        label.lastChild.textContent=cb.checked?'Here':'Off';
+                        refreshCount();
+                    };
+                    const state=document.createElement('span');
+                    state.textContent=cb.checked?'Here':'Off';
+                    label.append(cb,state);row.appendChild(label);
+                }
+                const last=document.createElement('span');
+                if(!entry.base){
+                    const remove=makeButton('×');
+                    remove.title='Remove this swing for the selected tour';
+                    remove.setAttribute('aria-label','Remove swing '+entry.person.name);
+                    remove.style.cssText+='padding:2px 7px;font-size:14px;';
+                    remove.onclick=()=>{tourEntries.delete(entry.person.prefix);renderCaptainTourRoster();};
+                    last.appendChild(remove);
+                }
+                row.appendChild(last);rosterList.appendChild(row);
+            }
+            const candidates=getCaptainPersonOptions()
+                .filter(person=>!tourEntries.has(person.prefix))
+                .sort((a,b)=>a.name.localeCompare(b.name));
+            swingSelect.innerHTML='';
+            const prompt=document.createElement('option');
+            prompt.value='';prompt.textContent='Select swing from master list';
+            swingSelect.appendChild(prompt);
+            candidates.forEach(person=>{
+                const option=document.createElement('option');
+                option.value=person.prefix;option.textContent=person.name;
+                swingSelect.appendChild(option);
+            });
+            swingDate.innerHTML='';
+            dates.forEach((date,i)=>{
+                const option=document.createElement('option');
+                option.value=String(i);option.textContent='Day '+(i+1)+' ('+date.slice(5)+')';
+                swingDate.appendChild(option);
+            });
+            const both=document.createElement('option');
+            both.value='both';both.textContent='Both days';swingDate.appendChild(both);
+            const today=localTodayKey();
+            swingDate.value=today===dates[1]?'1':'0';
+            function refreshCount(){
+                const records=[...tourEntries.values()];
+                crewCount.textContent='Assigned: Day 1 '+records.filter(x=>x.day1).length+
+                    ' · Day 2 '+records.filter(x=>x.day2).length+
+                    ' · '+records.filter(x=>!x.base).length+' temporary swing(s).';
+            }
+            refreshCount();
+        }
+        addSwing.onclick=()=>{
+            const prefix=swingSelect.value;
+            if(!prefix){setStatus('Select a swing person from the approved roster.',false);return;}
+            const person=getCaptainPersonOptions().find(p=>p.prefix===prefix);
+            if(!person || tourEntries.has(person.prefix)){
+                setStatus('That swing person is unavailable or already on this tour.',false);return;
+            }
+            const choice=swingDate.value;
+            tourEntries.set(person.prefix,{person,base:false,
+                day1:choice==='0'||choice==='both',day2:choice==='1'||choice==='both'});
+            renderCaptainTourRoster();
+            setStatus(person.name+' added as a swing for this tour only. Saved Captain Set unchanged.');
+        };
+        select.onchange=renderCaptainTourRoster;
+        auditInput.onchange=()=>{updateHint();renderCaptainTourRoster();};
+        renderCaptainTourRoster();
+
         const run = makeButton('Run Read-Only Check', { background: '#176b8e', color: '#fff' });
         run.onclick = async () => {
             const set = usableSets.find(x => x.id === select.value) || usableSets[0];
@@ -5634,9 +5877,30 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 setStatus('Daily Captain Check needs a valid audit-through date.', false);
                 return;
             }
+            const selected=[...tourEntries.values()];
+            const keys=currentTourKeys();
+            const onByDate={
+                [keys[0]]:selected.filter(entry=>entry.day1).map(entry=>entry.person.prefix),
+                [keys[1]]:selected.filter(entry=>entry.day2).map(entry=>entry.person.prefix)
+            };
+            if(!onByDate[keys[0]].length&&!onByDate[keys[1]].length){
+                setStatus('Both shifts are empty. Mark at least one firefighter Here before checking.',false);
+                return;
+            }
+            const selectedSet={
+                ...set,
+                people:selected.map(entry=>entry.person),
+                memberPrefixes:selected.map(entry=>entry.person.prefix),
+                tourRoster:{
+                    startDate:keys[0],endDate:keys[1],
+                    basePrefixes:set.people.map(person=>person.prefix),
+                    swingPrefixes:selected.filter(entry=>!entry.base).map(entry=>entry.person.prefix),
+                    onByDate
+                }
+            };
             persistentSetRaw(CAPTAIN_LAST_SET_KEY, set.id);
             overlay.remove();
-            await startCaptainDailyCheck(set, auditAsOfDate);
+            await startCaptainDailyCheck(selectedSet, auditAsOfDate);
         };
         const prior = getCaptainDailyReport();
         if (Number(prior?.schemaVersion || 0) >= 6) {
@@ -5649,6 +5913,128 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const close = makeButton('Cancel');
         close.onclick = () => overlay.remove();
         box.appendChild(close);
+    }
+
+    // Recheck only previously due, missing or unreadable PPE. The previous
+    // successful asset histories are copied into the new report and never
+    // re-navigated. This reads native Vector Item Logs; it never performs
+    // or submits an inspection on behalf of a firefighter.
+    async function startCaptainDailyMissingRecheck(report) {
+        if(Number(report?.schemaVersion||0)<7){
+            setStatus('Only Tour-only Daily Captain reports support missing-item rechecks.',false);
+            return false;
+        }
+        const targets=captainDailyMissingTargets(report);
+        if(!targets.length){
+            setStatus('No due missing PPE checks remain to recheck.');
+            return false;
+        }
+        if(getRun() || getCaptainDailyCheck() || captainDailyBusy){
+            setStatus('Another inspection or Daily Captain audit is active. Finish or resolve it before rechecking.',false);
+            return false;
+        }
+        captainDailyBusy=true;
+        try {
+            await ensurePpeEquipmentPage(message=>setStatus(message),false);
+            const source=report.sourceSnapshot||{};
+            const allOriginal=(report.owners||[]).flatMap(owner=>(owner.items||[])
+                .map(item=>({
+                    assetId:item.assetId,type:item.type,
+                    ownerName:owner.name,ownerPrefix:owner.prefix
+                })));
+            const ownerList=(source.owners?.length?source.owners:report.owners||[])
+                .map(owner=>{
+                    const configured=rosterPersonByPrefix(owner.prefix);
+                    return {...owner,...(configured||{}),
+                        // Preserve the report's original Vector identity.
+                        name:owner.name,prefix:owner.prefix};
+                });
+            const keys=new Set(targets.map(t=>t.ownerPrefix+'|'+t.assetId));
+            const stored=Array.isArray(source.items)?source.items:[];
+            const byKey=new Map(stored.filter(item=>item.url&&item.assetId)
+                .map(item=>[item.ownerPrefix+'|'+item.assetId,item]));
+            const lacking=targets.filter(target=>!byKey.has(target.ownerPrefix+'|'+target.assetId));
+            let inventory=null;
+            if(lacking.length){
+                const missingNames=new Set(lacking.map(target=>target.ownerPrefix));
+                const scopedOwners=ownerList.filter(owner=>missingNames.has(owner.prefix));
+                if(scopedOwners.length!==missingNames.size)
+                    throw new Error('Some previous PPE owners cannot be identified. Recheck cannot safely match their items.');
+                inventory=await scanPpeCrewOwners(scopedOwners,
+                    message=>setStatus('Recheck Missing: '+message));
+                for(const owner of scopedOwners){
+                    const found=await discoverOwnerGear(owner,'tour',inventory);
+                    for(const item of found.items||[]){
+                        const stamped={...item,ownerName:owner.name,ownerPrefix:owner.prefix};
+                        const key=stamped.ownerPrefix+'|'+stamped.assetId;
+                        if(keys.has(key)&&!byKey.has(key))byKey.set(key,stamped);
+                    }
+                }
+            }
+            const unresolved=targets.filter(target=>
+                !byKey.get(target.ownerPrefix+'|'+target.assetId)?.url);
+            if(unresolved.length)
+                throw new Error('Cannot safely locate '+unresolved.length+' missing PPE item(s), beginning with '+
+                    unresolved[0].ownerName+' '+unresolved[0].assetId+
+                    '. Original results remain unchanged. Update the roster/asset mapping first.');
+            const dueItems=targets.map(target=>
+                byKey.get(target.ownerPrefix+'|'+target.assetId));
+            const originalResults=Array.isArray(source.results)&&source.results.length?
+                source.results:captainDailySourceResults(report);
+            const reportAllItems=allOriginal.map(item=>
+                byKey.get(item.ownerPrefix+'|'+item.assetId)||
+                stored.find(storedItem=>storedItem.ownerPrefix===item.ownerPrefix&&
+                    storedItem.assetId===item.assetId)||item);
+            const check={
+                schemaVersion:3,
+                checkId:'captain-daily-recheck-'+Date.now()+'-'+
+                    Math.random().toString(36).slice(2,8),
+                status:'running',ownerTabId:TAB_ID,
+                startedAt:new Date().toISOString(),
+                returnUrl:location.href,
+                setId:report.setId,setName:report.setName,
+                auditAsOfDate:source.auditAsOfDate||report.auditWindow?.asOfDate,
+                owners:ownerList,discovery:source.discovery||[],
+                tourRoster:source.tourRoster||report.tourRoster||null,
+                items:dueItems,fullItems:reportAllItems,
+                index:0,results:originalResults,
+                recheckTargets:targets,
+                recheckCount:Number(report.recheckCount||0)+1,
+                recheckErrors:[],
+                navAttempts:{}
+            };
+            if(!validDateKey(check.auditAsOfDate))
+                throw new Error('The original audit date is missing. Start a fresh Daily Captain audit.');
+            saveCaptainDailyCheck(check);
+            rebelCommandEvent('scan_check_started',{
+                success:true,workflowMode:'captainDaily',action:'daily_captain_recheck',
+                description:'Read-only recheck of previously missing PPE.',
+                metadata:{itemCount:dueItems.length,stage:'missing_only'}
+            });
+            setStatus('Recheck Missing: reading 1/'+dueItems.length+' ('+
+                dueItems[0].assetId+'). All previously completed items are skipped.');
+            navigateCaptainDailyToItem(check,dueItems[0]);
+            return true;
+        }catch(error){
+            const message='Recheck Missing stopped: '+(error?.message||String(error));
+            saveDiagnostic(message);
+            void reportRebelErrorToCommand(message,'captainDaily','recheck');
+            setStatus(message,false);
+            return false;
+        }finally{
+            captainDailyBusy=false;
+        }
+    }
+
+    function mergeCaptainDailyRecheckResult(previous,current) {
+        if(!previous)return current;
+        if(current.status!=='ok')return previous.status==='ok'?
+            {...previous,lastRecheckError:current.error||'Native history unreadable'}:current;
+        if(previous.status!=='ok')return current;
+        const dates=[...new Set([...(previous.tour?.dates||[]),
+            ...(current.tour?.dates||[])])].filter(validDateKey).sort().reverse();
+        return {...current,tour:{...current.tour,dates,
+            latestDate:dates[0]||''}};
     }
 
     function consumeQueuedCaptainDailyAfterVerifiedRun(run, now = Date.now()) {
@@ -5761,6 +6147,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 setId: set.id,
                 setName: set.name,
                 auditAsOfDate: validAuditDate,
+                tourRoster:set.tourRoster||null,
                 auditStartDate: window.startDate,
                 auditMonths: window.months,
                 auditTours: window.tours,
@@ -5819,7 +6206,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const report = buildCaptainDailyReport(check);
             const dailyErrors = (check.results || []).filter(x => x?.status === 'error');
             saveJSON(CAPTAIN_DAILY_REPORT_KEY, report);
-            if (dailyErrors.length) {
+            if (dailyErrors.length || (check.recheckErrors||[]).length) {
                 rebelCommandEvent('scan_check_failed', {
                     success: false,
                     workflowMode: 'captainDaily',
@@ -5887,7 +6274,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
             if (cancelSerialAtStart !== captainDailyCancelSerial || getCaptainDailyCheck()?.checkId !== check.checkId) return true;
 
-            check.results = [...(check.results || []).filter(x => x.assetId !== item.assetId), result];
+            const previous=(check.results||[]).find(x=>
+                x.assetId===item.assetId&&x.ownerPrefix===item.ownerPrefix);
+            if(check.recheckTargets?.length){
+                if(result.status!=='ok')check.recheckErrors=[
+                    ...(check.recheckErrors||[]),{
+                        assetId:item.assetId,ownerName:item.ownerName,error:result.error||'Unreadable'
+                    }
+                ];
+                result=mergeCaptainDailyRecheckResult(previous,result);
+            }
+            check.results=[...(check.results||[]).filter(x=>
+                x.assetId!==item.assetId||x.ownerPrefix!==item.ownerPrefix),result];
             check.index += 1;
 
             if (check.index >= check.items.length) {
@@ -12192,7 +12590,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.68'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.69'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -12280,7 +12678,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // form if Vector rerenders or SPA navigation races the interval.
     function scbaAirpackSelectNativeTemplate() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' ||
             queue.chooserSelectionAttemptedAt || getRun())return false;
         const item=queue.items[queue.index];
@@ -12338,7 +12736,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>180000 || Date.now()<queue.openedAt)return false;
@@ -12487,7 +12885,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const q=scbaAirpackReadNativeQueue();
         if(!q || q.phase!=='form_prefilled' ||
             !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
-            !['3.2.66','3.2.67','3.2.68'].includes(q.inspectionVersion) || getRun())return false;
+            !['3.2.66','3.2.67','3.2.68','3.2.69'].includes(q.inspectionVersion) || getRun())return false;
         const item=q.items[q.index],ins=currentInspection();
         if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
             ins.instance!==q.formInstance || q.submitAttemptedAt)return false;
@@ -12615,7 +13013,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69'].includes(queue.inspectionVersion) ||
             !['form_prefilled','native_form_opened','native_submit_clicked'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -12683,7 +13081,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // authorization. Record a no-retry latch BEFORE the final click.
     function scbaAirpackFinalizeFailure() {
         const q=scbaAirpackReadNativeQueue();
-        if(!q || !['3.2.66','3.2.67','3.2.68'].includes(q.inspectionVersion) ||
+        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69'].includes(q.inspectionVersion) ||
            q.phase!=='native_submit_clicked' || !q.autoSubmitApproved ||
            !q.physicalInspectionConfirmedAt || q.failureFinalSubmitAt ||
            q.failureNotePreparedFor!==q.submittedFormInstance || getRun())return false;
@@ -12858,7 +13256,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         if(!fresh || fresh.items[fresh.index].href!==item.href ||
                            fresh.phase!=='form_prefilled')return;
                         sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
-                            JSON.stringify({...fresh,inspectionVersion:'3.2.68',
+                            JSON.stringify({...fresh,inspectionVersion:'3.2.69',
                                 autoSubmitApproved:true,
                                 physicalInspectionConfirmedAt:new Date().toISOString()}));
                         continueButton.disabled=true;

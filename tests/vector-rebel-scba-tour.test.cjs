@@ -94,8 +94,8 @@ test('Daily Captain report now checks only tour compliance including SCBA mask',
  const window={asOfDate:'2026-10-22',months:['2026-09','2026-10'],
  tours:[{startDate:'2026-10-21',endDate:'2026-10-22',month:'2026-10',
  due:true,eligibleDates:['2026-10-21','2026-10-22']}]};
- const fn=new Function('captainAuditWindow','localTodayKey',reportCode)(
-  ()=>window,()=>'2026-10-22');
+ const fn=new Function('captainAuditWindow','localTodayKey','captainOwnerTourDuty',reportCode)(
+  ()=>window,()=>'2026-10-22',(_owner,tour)=>({due:tour.due,off:false}));
  const owner={name:'Michael Brion',prefix:'PERSON-123'};
  const items=[{...coat,ownerPrefix:owner.prefix,type:'Bunker Coat'},
  {...mask,ownerPrefix:owner.prefix,type:'SCBA Face Mask',
@@ -104,7 +104,7 @@ test('Daily Captain report now checks only tour compliance including SCBA mask',
  status:'ok',tour:{dates:['2026-10-21']}}));
  const report=fn({owners:[owner],items,results,discovery:[],checkId:'c1',
   setName:'Crew',setId:'s1'});
- assert.equal(report.schemaVersion,7);
+ assert.equal(report.schemaVersion,8);
  assert.equal(report.owners[0].items.length,2);
  assert.equal(report.owners[0].tourRequirementCount,2);
  assert.equal(report.owners[0].tourPassedCount,2);
