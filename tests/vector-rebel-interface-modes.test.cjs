@@ -99,9 +99,9 @@ test('both interfaces schedule a local-midnight review and recover on tab resume
  const impl=part('    async function runMidnightInterfaceReview(){',
   '    let lastInterfaceErrorInboxPoll=0;');
  assert.match(impl,/setHours\(24,0,2,0\)/);
- assert.match(impl,/checkManagedInterfaceRelease\(\)/);
+ assert.match(impl,/\['release',checkManagedInterfaceRelease\]/);
  assert.match(impl,/refreshSharedRebelRoster\(true\)/);
- assert.match(impl,/flushPendingErrorReports\(\)/);
+ assert.match(impl,/\['errors',flushPendingErrorReports\]/);
  assert.match(impl,/refreshMasterErrorInbox\(\{notify:true\}\)/);
 });
 test('master inbox remains owner-only, shows new server errors without mutating source',()=>{
@@ -156,11 +156,12 @@ test('midnight checks run once per local date, and repeat on the next date only'
   'checkManagedInterfaceRelease','refreshSharedRebelRoster',
   'flushPendingErrorReports','isMasterOwnerInstallation',
   'refreshMasterErrorInbox','renderPanelInterface','VERSION',
-  'availableRelease','releaseCheckError','MIDNIGHT_CHECK_KEY',fn+
+  'availableRelease','releaseCheckError','MIDNIGHT_CHECK_KEY',
+  'let midnightReviewRequest=null;'+fn+
   '\nreturn runMidnightInterfaceReview;')(
     ()=>day,(key,fallback)=>state.get(key)||fallback,(key,x)=>state.set(key,x),
-    async()=>{calls.version++},async()=>{calls.roster++},
-    async()=>{calls.flush++},()=>true,async()=>{calls.error++},
+    async()=>{calls.version++;return true;},async()=>{calls.roster++;return true;},
+    async()=>{calls.flush++;return true;},()=>true,async()=>{calls.error++;return true;},
     ()=>{calls.render++},'3.2.76','','','vectorRebelMidnightReviewV1');
  assert.equal(await f(),true);
  assert.deepEqual(calls,{version:1,roster:1,flush:1,error:1,render:1});
@@ -199,10 +200,14 @@ test('error inbox excludes user devices and delivers new admin alerts only once'
  assert.equal(requestCount,1);
  assert.equal(noticeCount,0,'first poll must not flood owner with historical alerts');
  assert.equal(saved.get('seen').id,'error-1');
- last={...last,id:'error-2'};
+ last={...last,id:'error-2',occurredAt:'2026-11-16T20:02:00Z'};
  assert.equal(await api.load({notify:true}),true);
  assert.equal(noticeCount,1,'a new report after the first poll generates an opted-in browser alert');
  assert.equal(saved.get('seen').id,'error-2');
+ last={...last,id:'error-1',occurredAt:'2026-11-16T20:00:00Z'};
+ assert.equal(await api.load({notify:true}),true);
+ assert.equal(noticeCount,1,'older unreviewed errors do not generate a new alert');
+ assert.equal(saved.get('seen').id,'error-2','cursor must never move backwards');
 });
 
 test('master pairing cannot save credentials before verified admin-only endpoint',()=>{
@@ -223,4 +228,100 @@ test('User preview hides cloud error badge; only Master displays alert summary',
   '    function showMasterErrorInbox(){');
  assert.match(badge,/isMasterOwnerInstallation\(\)&&panelInterfaceMode\(\)==='master'/);
  assert.match(badge,/el\.style\.display=visible\?'block':'none'/);
+});
+
+test('partial midnight sync is retried the same calendar day after a transient failure',async()=>{
+ const fn=part('    async function runMidnightInterfaceReview(){',
+   '    function scheduleMidnightInterfaceReview(){');
+ const records=new Map(),counts={release:0,roster:0,queue:0,render:0};
+ let releaseOkay=false,rosterOkay=true;
+ const run=new Function('localCalendarDate','loadJSON','saveJSON',
+   'checkManagedInterfaceRelease','refreshSharedRebelRoster',
+   'flushPendingErrorReports','isMasterOwnerInstallation',
+   'refreshMasterErrorInbox','renderPanelInterface','VERSION',
+   'availableRelease','releaseCheckError','MIDNIGHT_CHECK_KEY',
+   'let midnightReviewRequest=null;'+fn+'\nreturn runMidnightInterfaceReview;')(
+    ()=>'2026-11-16',
+    (k,fallback)=>records.get(k)??fallback,(k,v)=>records.set(k,v),
+    async()=>{counts.release++;return releaseOkay;},
+    async()=>{counts.roster++;return rosterOkay;},
+    async()=>{counts.queue++;return true;},
+    ()=>false,async()=>{throw Error('must skip non-owner inbox');},
+    ()=>{counts.render++;},'3.2.76','','','midnight-test');
+ assert.equal(await run(),false,'failed update check is not complete');
+ assert.equal(records.get('midnight-test').status,'partial');
+ assert.deepEqual(records.get('midnight-test').failed,['release']);
+ assert.deepEqual(counts,{release:1,roster:1,queue:1,render:1});
+ releaseOkay=true;
+ assert.equal(await run(),true,'second attempt on same day succeeds');
+ assert.equal(records.get('midnight-test').status,'checked');
+ assert.deepEqual(counts,{release:2,roster:2,queue:2,render:2});
+ assert.equal(await run(),false,'successful day is not repeated');
+ assert.deepEqual(counts,{release:2,roster:2,queue:2,render:2});
+});
+test('one rejected or thrown collector action does not prevent other midnight checks',async()=>{
+ const fn=part('    async function runMidnightInterfaceReview(){',
+   '    function scheduleMidnightInterfaceReview(){');
+ const records=new Map(),calls=[];
+ const run=new Function('localCalendarDate','loadJSON','saveJSON',
+   'checkManagedInterfaceRelease','refreshSharedRebelRoster',
+   'flushPendingErrorReports','isMasterOwnerInstallation',
+   'refreshMasterErrorInbox','renderPanelInterface','VERSION',
+   'availableRelease','releaseCheckError','MIDNIGHT_CHECK_KEY',
+   'let midnightReviewRequest=null;'+fn+'\nreturn runMidnightInterfaceReview;')(
+   ()=>'2026-11-16',
+   (k,v)=>records.get(k)??v,(k,v)=>records.set(k,v),
+   async()=>{calls.push('release');return true;},
+   async()=>{calls.push('roster');throw Error('Server unavailable');},
+   async()=>{calls.push('pending errors');return true;},
+   ()=>true,async()=>{calls.push('inbox');return true;},
+   ()=>{calls.push('render');},'3.2.76','','','nightly-isolation'
+ );
+ assert.equal(await run(),false);
+ assert.deepEqual(calls.sort(),['inbox','pending errors','release','render','roster'].sort());
+ assert.deepEqual(records.get('nightly-isolation').failed,['roster']);
+});
+
+test('only owner master can acknowledge error report and requires exact verified receipt',async()=>{
+ const fn=part('    async function markMasterErrorReviewed(',
+   '    function refreshMasterAlertBadge(){');
+ let owner=false,master=true,requests=0,server={ok:true,suggestionId:'feedback:vr-error:123',status:'reviewing'};
+ const action=new Function('isMasterOwnerInstallation','panelInterfaceMode',
+   'clean','rebelCommandPairing','REBEL_COMMAND_ENDPOINT','GM_xmlhttpRequest',
+   fn+'\nreturn markMasterErrorReviewed;')(
+    ()=>owner,()=>master?'master':'user',
+    v=>String(v||'').trim(),
+    ()=>({token:'test-token',deviceId:'test-id'}),'https://example.test',
+    request=>{
+      requests++;
+      assert.equal(request.method,'POST');
+      assert.match(request.url,/action=vr-review-error/);
+      assert.equal(JSON.parse(request.data).suggestionId,'feedback:vr-error:123');
+      request.onload({status:200,responseText:JSON.stringify(server)});
+    }
+ );
+ const id='feedback:vr-error:123';
+ assert.equal(await action(id),false);
+ assert.equal(requests,0,'user cannot acknowledge');
+ owner=true;master=false;
+ assert.equal(await action(id),false);
+ assert.equal(requests,0,'owner User-preview cannot acknowledge');
+ master=true;
+ assert.equal(await action(id),true);
+ assert.equal(requests,1);
+ server={...server,suggestionId:'another'};
+ assert.equal(await action(id),false,'mismatched receipt is not accepted');
+ server={ok:true,suggestionId:id,status:'new'};
+ assert.equal(await action(id),false,'unacknowledged status is not accepted');
+ assert.equal(await action('invalid ID!'),false,'malformed ID cannot be submitted');
+ assert.equal(requests,3);
+});
+test('Master error row has explicit Mark Reviewed; no automatic dismissal',()=>{
+ const view=part('    function showMasterErrorInbox(){',
+  '    function localCalendarDate(){');
+ assert.match(view,/makeButton\('Mark Reviewed'\)/);
+ assert.match(view,/markMasterErrorReviewed\(alert\.id\)/);
+ assert.match(view,/await refreshMasterErrorInbox\(\)/);
+ assert.match(view,/Could not confirm reviewed/);
+ assert.doesNotMatch(view,/deleteSuggestion|autoReviewOnLoad/);
 });

@@ -15031,6 +15031,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     let availableRelease='';
     let releaseCheckError='';
     let midnightTimer=null;
+    let midnightReviewRequest=null;
 
     // A visual switch is NOT an authorization credential. On non-owner
     // installs it is hidden, and all elevated writes retain their existing
@@ -15173,12 +15174,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 timeout:18000,
                 onload:r=>{
                     const m=String(r.responseText||'').match(/^\/\/\s*@version\s+(\d+\.\d+\.\d+)\s*$/m);
-                    if(r.status>=200&&r.status<300&&m){
+                    const verified=r.status>=200&&r.status<300&&!!m;
+                    if(verified){
                         availableRelease=compareReleaseVersions(m[1],VERSION)>0?m[1]:'';
                         releaseCheckError='';
                     }else releaseCheckError='Unable to verify the currently published version.';
                     refreshInterfaceNotice();
-                    resolve(!!m);
+                    resolve(verified);
                 },
                 onerror:()=>{releaseCheckError='Update server unavailable.';refreshInterfaceNotice();resolve(false);},
                 ontimeout:()=>{releaseCheckError='Update check timed out.';refreshInterfaceNotice();resolve(false);}
@@ -15190,10 +15192,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         if(!el)return;
         el.innerHTML='';
         const note=document.createElement('span');
+        const nightly=loadJSON(MIDNIGHT_CHECK_KEY,{})||{};
         note.textContent=availableRelease?
             'New version '+availableRelease+' available. Install with Tampermonkey.':
             (releaseCheckError?'Midnight update check: '+releaseCheckError:
              'Automatic midnight checks active. Tampermonkey manages script installation.');
+        if(nightly.status==='partial')
+            note.textContent+=' Daily sync incomplete ('+
+                (Array.isArray(nightly.failed)?nightly.failed.join(', '):'unknown')+
+                '). Will retry when the Vector tab becomes active.';
         el.appendChild(note);
         if(availableRelease){
             const btn=makeButton('Install Update');
@@ -15227,7 +15234,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const newest=alerts[0];
                 const previous=loadJSON(LAST_ALERT_SEEN_KEY,null);
                 if(newest){
-                    if(previous?.id && previous.id!==newest.id && notify &&
+                    const newestTime=Date.parse(newest.occurredAt||'');
+                    const seenTime=Date.parse(previous?.at||'');
+                    const genuinelyNew=Number.isFinite(newestTime)&&
+                        Number.isFinite(seenTime)&&newestTime>seenTime;
+                    if(previous?.id && previous.id!==newest.id && genuinelyNew && notify &&
                         typeof Notification==='function'&&Notification.permission==='granted'){
                         try{
                             new Notification('Vector Rebel: new error received',{
@@ -15236,7 +15247,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             });
                         }catch{ /* Badge and inbox still work if OS notifications are blocked. */ }
                     }
-                    saveJSON(LAST_ALERT_SEEN_KEY,{id:newest.id,at:newest.occurredAt});
+                    // Do not move the cursor backwards when an older report
+                    // becomes the first result after a newer report is resolved.
+                    if(!previous?.id||genuinelyNew)
+                        saveJSON(LAST_ALERT_SEEN_KEY,{id:newest.id,at:newest.occurredAt});
                 }
                 refreshMasterAlertBadge();
                 return true;
@@ -15247,6 +15261,32 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }finally{errorInboxRequest=null;}
         })();
         return errorInboxRequest;
+    }
+    async function markMasterErrorReviewed(suggestionId){
+        // Explicit owner action. Server verifies the device pairing and
+        // updates the existing feedback record to REVIEWING, never deletes it.
+        if(!isMasterOwnerInstallation()||panelInterfaceMode()!=='master')
+            return false;
+        const id=clean(suggestionId);
+        if(!/^[A-Za-z0-9._:-]+$/.test(id))return false;
+        try{
+            const pair=rebelCommandPairing();
+            const res=await new Promise(resolve=>GM_xmlhttpRequest({
+                method:'POST',
+                url:REBEL_COMMAND_ENDPOINT+'?action=vr-review-error',
+                headers:{Authorization:'Bearer '+pair.token,
+                    'X-Rebel-Device-ID':pair.deviceId,
+                    'Content-Type':'application/json'},
+                data:JSON.stringify({suggestionId:id}),
+                timeout:16000,
+                onload:r=>resolve({status:r.status,body:r.responseText||''}),
+                onerror:()=>resolve({status:0,body:''}),
+                ontimeout:()=>resolve({status:0,body:''})
+            }));
+            let body={};try{body=JSON.parse(res.body||'{}');}catch{}
+            return res.status===200&&body.ok===true&&
+                body.suggestionId===id&&body.status==='reviewing';
+        }catch{return false;}
     }
     function refreshMasterAlertBadge(){
         const el=document.getElementById('vector-ppe-master-alert-badge-v1');
@@ -15300,7 +15340,30 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const details=document.createElement('div');
                 details.textContent=clean(alert.description||'').slice(0,2000);
                 details.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;';
-                item.append(title,meta,details);list.appendChild(item);
+                item.append(title,meta,details);
+                if(alert.id){
+                    const review=makeButton('Mark Reviewed');
+                    review.style.cssText+='margin-top:7px;padding:6px 9px;';
+                    const reviewStatus=document.createElement('span');
+                    reviewStatus.setAttribute('role','status');
+                    reviewStatus.style.cssText='font:11px Arial;color:#8a312b;margin-left:7px;';
+                    review.onclick=async()=>{
+                        review.disabled=true;
+                        reviewStatus.textContent='Confirming with Rebel Command...';
+                        const success=await markMasterErrorReviewed(alert.id);
+                        if(success){
+                            // No local optimistic removal: reread the exact
+                            // newly reviewed status through the server inbox.
+                            await refreshMasterErrorInbox();
+                            draw();
+                        }else{
+                            reviewStatus.textContent='Could not confirm reviewed. Report remains new.';
+                            review.disabled=false;
+                        }
+                    };
+                    item.append(review,reviewStatus);
+                }
+                list.appendChild(item);
             }
             if(!errorInbox.pending.length&&!errorInbox.error)
                 list.textContent='No new reports returned.';
@@ -15315,28 +15378,43 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             '-'+String(d.getDate()).padStart(2,'0');
     }
     async function runMidnightInterfaceReview(){
+        // A midnight check must not be marked complete while the update
+        // server, roster or error delivery failed. Recheck on tab return
+        // rather than suppressing retries for the rest of the calendar day.
+        if(midnightReviewRequest)return midnightReviewRequest;
         const today=localCalendarDate();
-        const last=loadJSON(MIDNIGHT_CHECK_KEY,{});
-        if(last.date===today)return false;
-        saveJSON(MIDNIGHT_CHECK_KEY,{date:today,at:new Date().toISOString(),status:'checking'});
-        await Promise.all([
-            checkManagedInterfaceRelease(),
-            refreshSharedRebelRoster(true),
-            flushPendingErrorReports(),
-            isMasterOwnerInstallation()?refreshMasterErrorInbox({notify:true}):Promise.resolve(false)
-        ]);
-        saveJSON(MIDNIGHT_CHECK_KEY,{date:today,at:new Date().toISOString(),status:'checked',
-            latest:availableRelease||VERSION,releaseCheckError});
-        renderPanelInterface();
-        return true;
+        const previous=loadJSON(MIDNIGHT_CHECK_KEY,{})||{};
+        if(previous.date===today&&previous.status==='checked')return false;
+        midnightReviewRequest=(async()=>{
+            saveJSON(MIDNIGHT_CHECK_KEY,{date:today,at:new Date().toISOString(),status:'checking'});
+            const jobs=[
+                ['release',checkManagedInterfaceRelease],
+                ['roster',()=>refreshSharedRebelRoster(true)],
+                ['errors',flushPendingErrorReports]
+            ];
+            if(isMasterOwnerInstallation())
+                jobs.push(['inbox',()=>refreshMasterErrorInbox({notify:true})]);
+            const results=await Promise.allSettled(jobs.map(([,run])=>run()));
+            const failed=jobs.filter((job,i)=>
+                results[i].status!=='fulfilled'||results[i].value!==true
+            ).map(([name])=>name);
+            const status=failed.length?'partial':'checked';
+            saveJSON(MIDNIGHT_CHECK_KEY,{
+                date:today,at:new Date().toISOString(),status,failed,
+                latest:availableRelease||VERSION,releaseCheckError
+            });
+            renderPanelInterface();
+            return status==='checked';
+        })().finally(()=>{midnightReviewRequest=null;});
+        return midnightReviewRequest;
     }
     function scheduleMidnightInterfaceReview(){
         if(midnightTimer)clearTimeout(midnightTimer);
         const now=new Date(),next=new Date(now);
         next.setHours(24,0,2,0); // 00:00:02 local, following calendar day
         midnightTimer=setTimeout(async()=>{
-            await runMidnightInterfaceReview();
-            scheduleMidnightInterfaceReview();
+            try{await runMidnightInterfaceReview();}
+            finally{scheduleMidnightInterfaceReview();}
         },Math.max(1000,next.getTime()-now.getTime()));
     }
     let lastInterfaceErrorInboxPoll=0;
@@ -15596,7 +15674,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         void flushPendingErrorReports();
         refreshPanelInfo();
     });
-    setInterval(()=>{void refreshSharedRebelRoster(false);},10*60*1000);
+    setInterval(()=>{
+        void refreshSharedRebelRoster(false);
+        // A partial midnight check gets an unattended retry while the tab
+        // stays open; a successfully completed day does no extra network work.
+        void runMidnightInterfaceReview();
+    },10*60*1000);
     setInterval(()=>{void flushPendingErrorReports();},5*60*1000);
 
     // Both panel layouts use the same installed userscript. At midnight local
