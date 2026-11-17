@@ -46,8 +46,9 @@ const js=String.raw`
  const sharedRosterSyncState=()=>({status:'synced',lastSuccess:'2026-11-16'});
  const refreshSharedRebelRoster=async()=>true;
  let errorInbox={count:1,error:'',checkedAt:'2026-11-16',pending:[
-    {title:'SCBA check error',description:'Form failed in test fixture',
-     source:'Vector Rebel',priority:'high',occurredAt:'2026-11-16T21:00:00Z'}]};
+    {id:'feedback:vr-error:123',title:'SCBA check error',description:'Form failed in test fixture',
+     source:'Vector Rebel',deviceName:'Baldree test device',sourceVersion:'3.2.53',
+     priority:'high',occurredAt:'2026-11-16T21:00:00Z'}]};
  const refreshMasterErrorInbox=async()=>true;
  /*INSERT_FUNCTIONS*/
  const actions=()=>Array.from(document.querySelectorAll(
@@ -80,8 +81,11 @@ const js=String.raw`
    result.rosterViewer=true;overlay.remove();
    button('Errors & Alerts').click();
    overlay=document.querySelector('[data-test-overlay]');
-   if(!overlay||!overlay.textContent.includes('SCBA check error'))
-      throw Error('Master error inbox did not render');
+   if(!overlay||!overlay.textContent.includes('SCBA check error')||
+      !overlay.textContent.includes('Baldree test device')||
+      !overlay.textContent.includes('3.2.53')||
+      !Array.from(overlay.querySelectorAll('button')).some(x=>x.textContent==='Mark Reviewed'))
+      throw Error('Master error inbox missing device identity or review control');
    result.errorInboxViewer=true;overlay.remove();
    owner=false;renderPanelInterface();assertLabels(actions(),user,'Non-admin user');
    if(switcher.style.display!=='none')throw Error('Non-admin can see Master toggle');

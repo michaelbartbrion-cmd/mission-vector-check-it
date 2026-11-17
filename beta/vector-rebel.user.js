@@ -15334,11 +15334,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const title=document.createElement('strong');
                 title.textContent=clean(alert.title||'Vector Rebel issue').slice(0,150);
                 const meta=document.createElement('div');
-                meta.textContent=clean(alert.occurredAt||'')+' · '+clean(alert.source||'Vector Rebel')+
+                meta.textContent=clean(alert.occurredAt||'')+' · '+
+                    clean(alert.deviceName||'Unknown reporting device')+
+                    ' · '+clean(alert.source||'Vector Rebel')+
+                    (alert.sourceVersion?' v'+clean(alert.sourceVersion):'')+
                     ' · '+clean(alert.priority||'high');
                 meta.style.cssText='font-size:10px;color:#6a7d8b;margin:3px 0;';
                 const details=document.createElement('div');
-                details.textContent=clean(alert.description||'').slice(0,2000);
+                details.textContent=clean(alert.description||'').slice(0,3900);
                 details.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;';
                 item.append(title,meta,details);
                 if(alert.id){
