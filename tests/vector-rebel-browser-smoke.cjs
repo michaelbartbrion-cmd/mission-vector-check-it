@@ -25,7 +25,7 @@ const js=String.raw`
 (function(){
  const PANEL_ID='vector-ppe-helper-v23',PANEL_MINIMIZED_KEY='vectorPpePanelMinimized_v1';
  const PANEL_INTERFACE_KEY='vectorRebelInterfaceModeV1',REBEL_COMMAND_PAIR_KEY='vectorRebelPairingV1';
- const VERSION='3.2.77',store=new Map();
+ const VERSION='3.2.78',store=new Map();
  let owner=true;
  const rebelCommandPaired=()=>owner;
  const GM_getValue=(key,fallback)=>key===REBEL_COMMAND_PAIR_KEY?
