@@ -436,13 +436,31 @@
             haystack.includes('userscript');
     }
 
+    // Exception reports previously contained the TypeError message but NO
+    // script-frame position, making repeated native 'undefined.props'
+    // errors hard to distinguish. Extract only file-relative line/column
+    // numbers from this userscript. Never transmit browser URLs, query
+    // strings, stack arguments, user identifiers or extension paths.
+    function vectorScriptFramePositions(stack){
+        const frames=[];
+        for(const line of String(stack||'').split(/\r?\n/).slice(1,16)){
+            const match=line.match(/(?:vector-rebel\.user\.js|userscript\.html?)(?:[^\s)]*?):(\d{1,5}):(\d{1,4})(?:\D|$)/i);
+            if(!match)continue;
+            const number=Number(match[1]),column=Number(match[2]);
+            if(number>0&&column>0)frames.push(number+':'+column);
+            if(frames.length===3)break;
+        }
+        return [...new Set(frames)].join(', ');
+    }
     let lastUnexpectedErrorSignature = '';
     let lastUnexpectedErrorAt = 0;
     function reportUnexpectedVectorRebelError(kind, error, source = '') {
         if (!looksLikeVectorRebelRuntime(error, source)) return;
         const message = telemetrySafeErrorMessage(error?.message || error || kind || 'Unexpected Vector Rebel runtime error.');
         if (!message) return;
-        const signature = `${kind}:${message}`;
+        const scriptPositions=vectorScriptFramePositions(error?.stack);
+        const debugReason=scriptPositions?message+' | Script positions '+scriptPositions:message;
+        const signature = `${kind}:${debugReason}`;
         const now = Date.now();
         if (signature === lastUnexpectedErrorSignature && now - lastUnexpectedErrorAt < 60000) return;
         lastUnexpectedErrorSignature = signature;
@@ -453,9 +471,9 @@
             description: 'Unexpected Vector Rebel runtime error.',
             errorType: kind,
             errorMessage: message,
-            metadata: { stage: 'global' }
+            metadata: { stage: 'global', scriptPositions }
         });
-        void reportRebelErrorToCommand(message,'runtime',kind);
+        void reportRebelErrorToCommand(debugReason,'runtime',kind);
     }
 
     window.addEventListener('error', event => {
