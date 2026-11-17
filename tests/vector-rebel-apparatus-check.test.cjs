@@ -107,7 +107,7 @@ test('Apparatus audit reads exact Standard pool and completed native SCBA logs o
 });
 test('Monthly Captain button and monthly criteria are removed from active Daily Captain audit',()=>{
  assert.doesNotMatch(src,/mainAction\("Captain's Monthly"/);
- assert.match(src,/mainAction\('Apparatus Check', showApparatusCheck, false\)/);
+ assert.match(src,/make\('Apparatus Check',showApparatusCheck\)/);
  const read=src.slice(src.indexOf('    async function readCaptainComplianceHistory(item) {'),
   src.indexOf('    function buildCaptainDailyReport(check) {'));
  assert.doesNotMatch(read,/getMode\('captain'\)/);

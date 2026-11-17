@@ -80,7 +80,7 @@ test('Failures report through both automatic event and optional incident feedbac
  assert.match(src,/submitRebelCommandFeedback\(item\.message,/);
  assert.match(src,/sourceContext:item\.context\|\|'automatic_error'/);
  assert.match(src,/const fillLastError=makeButton\('Use Last Error'\)/);
- assert.match(src,/mainAction\('Report Problem', showProblemReport, false\)/);
+ assert.match(src,/make\('Report Problem',showProblemReport\)/);
  assert.match(src,/Number\(receipt\.acceptedSuggestions\)>0/);
  assert.match(src,/telemetrySafeErrorMessage\(reason/);
  assert.match(src,/detailedProblemReport\(reason,workflow,stage\)/);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.75
+// @version      3.2.76
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -16,6 +16,7 @@
 // @grant        GM_openInTab
 // @grant        GM_setClipboard
 // @connect      base44.app
+// @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -32,7 +33,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.75',
+        version: '3.2.76',
         startedAt: Date.now()
     };
 
@@ -40,7 +41,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.75';
+    const VERSION = '3.2.76';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -2233,6 +2234,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         refreshPanelInfo();
     }
 
+    function isReportableVectorFailure(message){
+        const safe=telemetrySafeErrorMessage(message);
+        // Only actual helper failures, not normal attendance/absence results,
+        // user cancellations, or missing credentials during setup.
+        if(!safe||/^(?:no active|not assigned|nothing selected|run aborted)/i.test(safe))
+            return false;
+        return /\b(error|failed|failure|unexpected|crash(?:ed)?|exception)\b|\bstopped:|\bcould not (?:find|locate|load|verify)|\bexpected asset id\b/i.test(safe);
+    }
+
     function setStatus(message, ok = true) {
         const el = document.getElementById('vector-ppe-status-v2');
         if (el) {
@@ -2245,6 +2255,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 badge.textContent = '!';
                 badge.style.display = 'block';
             }
+            if(isReportableVectorFailure(message))
+                void reportRebelErrorToCommand(message,'ui_status','failure');
         }
     }
 
@@ -10545,6 +10557,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // ============================================================
 
     function showSettings(initialTab = 'profile') {
+        // The normal-user interface never exposes advanced configuration,
+        // even through an old tab link. Backend roster publishing separately
+        // enforces the administrator device's actual authorization.
+        if(initialTab==='admin' &&
+            (!isMasterOwnerInstallation() || panelInterfaceMode()==='user'))
+            initialTab='profile';
         const { overlay, box } = makeOverlayBox('920px');
         box.style.padding = '0';
         box.style.overflow = 'hidden';
@@ -10582,7 +10600,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ['history', 'History'],
             ['general', 'General']
         ];
-        tabs.push(['admin', 'Admin']);
+        if(isMasterOwnerInstallation() && panelInterfaceMode()==='master')
+            tabs.push(['admin', 'Admin']);
 
         let active = tabs.some(([key]) => key === initialTab) ? initialTab : 'profile';
 
@@ -11249,12 +11268,20 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
 
         function renderGeneral() {
+            if(!isMasterOwnerInstallation()){
+                const access=card('Master Interface Access',
+                    'Owner-only tools require an administrator-linked Rebel Command pairing. Ordinary user installations cannot activate Master by toggling a setting.');
+                const connect=makeButton('Connect Master Interface');
+                connect.onclick=()=>{overlay.remove();showMasterPairing();};
+                access.appendChild(connect);
+                content.appendChild(access);
+            }
             const updates = card('Production Build', 'This is the clean local Vector Rebel production build created from the preserved Tampermonkey baseline.');
             const line = document.createElement('div');
             line.style.cssText = 'font-size:12px;line-height:1.55;margin:8px 0;';
             line.innerHTML =
                 `<b>Installed:</b> v${escapeHtml(VERSION)}<br>` +
-                '<b>Update mode:</b> managed automatic updates<br>' +
+                '<b>Update mode:</b> Tampermonkey-managed installation; midnight release check<br>' +
                 '<b>Runtime holds:</b> none';
             updates.appendChild(line);
             const privacyNote = document.createElement('div');
@@ -11888,6 +11915,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             return;
         }
 
+        if(isMasterOwnerInstallation() && errorInbox.count>0){
+            mini.style.borderColor='#bf4230';
+            mini.style.boxShadow='0 0 0 3px rgba(191,66,48,.2),0 5px 18px rgba(13,50,72,.28)';
+            mini.setAttribute('aria-label','Expand Vector Rebel. '+errorInbox.count+' new error reports.');
+            mini.title='Vector Rebel: '+errorInbox.count+' error reports in Master';
+            return;
+        }
         mini.setAttribute('aria-label', 'Expand Vector Rebel.');
         mini.title = 'Vector Rebel';
     }
@@ -13478,7 +13512,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.75'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.76'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -13566,7 +13600,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // form if Vector rerenders or SPA navigation races the interval.
     function scbaAirpackSelectNativeTemplate() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' ||
             queue.chooserSelectionAttemptedAt || getRun())return false;
         const item=queue.items[queue.index];
@@ -13624,7 +13658,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>180000 || Date.now()<queue.openedAt)return false;
@@ -13773,7 +13807,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const q=scbaAirpackReadNativeQueue();
         if(!q || q.phase!=='form_prefilled' ||
             !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
-            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75'].includes(q.inspectionVersion) || getRun())return false;
+            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76'].includes(q.inspectionVersion) || getRun())return false;
         const item=q.items[q.index],ins=currentInspection();
         if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
             ins.instance!==q.formInstance || q.submitAttemptedAt)return false;
@@ -13901,7 +13935,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76'].includes(queue.inspectionVersion) ||
             !['form_prefilled','native_form_opened','native_submit_clicked'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -13969,7 +14003,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // authorization. Record a no-retry latch BEFORE the final click.
     function scbaAirpackFinalizeFailure() {
         const q=scbaAirpackReadNativeQueue();
-        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75'].includes(q.inspectionVersion) ||
+        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76'].includes(q.inspectionVersion) ||
            q.phase!=='native_submit_clicked' || !q.autoSubmitApproved ||
            !q.physicalInspectionConfirmedAt || q.failureFinalSubmitAt ||
            q.failureNotePreparedFor!==q.submittedFormInstance || getRun())return false;
@@ -14144,7 +14178,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         if(!fresh || fresh.items[fresh.index].href!==item.href ||
                            fresh.phase!=='form_prefilled')return;
                         sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
-                            JSON.stringify({...fresh,inspectionVersion:'3.2.75',
+                            JSON.stringify({...fresh,inspectionVersion:'3.2.76',
                                 autoSubmitApproved:true,
                                 physicalInspectionConfirmedAt:new Date().toISOString()}));
                         continueButton.disabled=true;
@@ -14985,6 +15019,370 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         box.append(header,body);
     }
 
+    // ============================================================
+    // USER INTERFACE / MASTER INTERFACE
+    // ============================================================
+    const PANEL_INTERFACE_KEY='vectorRebelInterfaceModeV1';
+    const MIDNIGHT_CHECK_KEY='vectorRebelMidnightReviewV1';
+    const LAST_ALERT_SEEN_KEY='vectorRebelMasterAlertSeenV1';
+    const ALERT_POLL_MS=2*60*1000;
+    let errorInbox={pending:[],count:0,truncated:false,error:'Not checked',checkedAt:''};
+    let errorInboxRequest=null;
+    let availableRelease='';
+    let releaseCheckError='';
+    let midnightTimer=null;
+
+    // A visual switch is NOT an authorization credential. On non-owner
+    // installs it is hidden, and all elevated writes retain their existing
+    // server-enforced administrator pairing requirements.
+    function isMasterOwnerInstallation(){
+        const raw=GM_getValue(REBEL_COMMAND_PAIR_KEY,{})||{};
+        return !!(clean(raw.deviceId)&&clean(raw.token)&&raw.autoEnrolled!==true);
+    }
+    function showMasterPairing(){
+        const {overlay,box}=makeOverlayBox('580px');
+        const title=document.createElement('h2');
+        title.textContent='Connect Master Interface';
+        title.style.cssText='font:800 20px Arial;color:#153e5c;';
+        const note=document.createElement('p');
+        note.style.cssText='font:12px/1.5 Arial;color:#526b7a;';
+        note.textContent='The Master Interface requires an administrator-linked Rebel Command device ID and private token. It cannot be enabled by changing a name or using a user installation. The credentials are verified with the administrator-only error inbox before saving them locally.';
+        const device=document.createElement('input'),token=document.createElement('input');
+        device.type='text';device.placeholder='Administrator device ID';
+        token.type='password';token.placeholder='Private administrator token';
+        for(const el of [device,token]){
+            el.style.cssText='display:block;width:100%;box-sizing:border-box;margin:8px 0;padding:10px;border:1px solid #bbccd7;border-radius:7px;font:13px Arial;';
+        }
+        const status=document.createElement('p');
+        status.setAttribute('role','status');
+        status.style.cssText='font:12px Arial;color:#516c7d;';
+        const connect=makeButton('Verify & Enable Master',{background:'#176b8e',color:'#fff'});
+        const cancel=makeButton('Cancel');
+        cancel.onclick=()=>overlay.remove();
+        connect.onclick=async()=>{
+            const id=clean(device.value),secret=clean(token.value);
+            if(!id||!secret){status.textContent='Enter both administrator credentials.';return;}
+            connect.disabled=true;status.textContent='Verifying administrator access with Rebel Command...';
+            try{
+                const result=await new Promise(resolve=>GM_xmlhttpRequest({
+                    method:'GET',
+                    url:REBEL_COMMAND_ENDPOINT+'?action=vr-error-inbox',
+                    headers:{Authorization:'Bearer '+secret,'X-Rebel-Device-ID':id},
+                    timeout:15000,
+                    onload:r=>resolve({status:r.status,text:r.responseText||''}),
+                    onerror:()=>resolve({status:0,text:''}),
+                    ontimeout:()=>resolve({status:0,text:''})
+                }));
+                let body={};try{body=JSON.parse(result.text||'{}');}catch{}
+                if(result.status!==200||body.ok!==true||
+                    body.readOnly!==true||!Array.isArray(body.alerts))
+                    throw Error('Administrator verification failed. No credentials saved.');
+                GM_setValue(REBEL_COMMAND_PAIR_KEY,{deviceId:id,token:secret,autoEnrolled:false});
+                token.value='';
+                overlay.remove();
+                renderPanelInterface();
+                void refreshMasterErrorInbox();
+                setStatus('Master Interface verified. Use the switch to preview the User Interface.');
+            }catch(error){
+                status.textContent=clean(error?.message||'Administrator access unavailable.');
+            }finally{connect.disabled=false;}
+        };
+        box.append(title,note,device,token,status,connect,cancel);
+    }
+    function panelInterfaceMode(){
+        if(!isMasterOwnerInstallation())return 'user';
+        return persistentGetRaw(PANEL_INTERFACE_KEY)==='user'?'user':'master';
+    }
+    function setPanelInterfaceMode(mode){
+        if(!isMasterOwnerInstallation())return false;
+        if(mode!=='master'&&mode!=='user')return false;
+        persistentSetRaw(PANEL_INTERFACE_KEY,mode);
+        renderPanelInterface();
+        return true;
+    }
+    function showSharedMasterList(){
+        const {overlay,box}=makeOverlayBox('750px');
+        const heading=document.createElement('h2');
+        heading.textContent='Master List';
+        heading.style.cssText='font:800 21px Arial;color:#153e5c;margin:0 0 6px;';
+        const note=document.createElement('p');
+        note.style.cssText='font:12px/1.5 Arial;color:#526c7e;margin:0 0 10px;';
+        note.textContent='Read-only list published by the Vector Rebel administrator. Changes to names and availability are maintained by the administrator; this view never changes PPE records.';
+        const state=document.createElement('p');
+        state.setAttribute('role','status');
+        state.style.cssText='font:12px/1.5 Arial;color:#315e79;margin:8px 0;';
+        const search=document.createElement('input');
+        search.type='search';search.placeholder='Find a person';
+        search.setAttribute('aria-label','Search published master list');
+        search.style.cssText='box-sizing:border-box;width:100%;padding:10px;border:1px solid #b8cad6;border-radius:7px;font:13px Arial;';
+        const rows=document.createElement('div');
+        rows.style.cssText='max-height:48vh;overflow:auto;margin:10px 0;background:#fff;border:1px solid #dde6ec;border-radius:7px;';
+        const controls=document.createElement('div');
+        controls.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
+        const refresh=makeButton('Refresh Master List',{background:'#176b8e',color:'#fff'});
+        const close=makeButton('Close');
+        controls.append(refresh,close);close.onclick=()=>overlay.remove();
+        const render=()=>{
+            const roster=sharedRosterFromCache();
+            const sync=sharedRosterSyncState();
+            rows.innerHTML='';
+            if(!roster){
+                state.textContent='No administrator-published Master List is available on this installation. '+(sync.error||'Select Refresh Master List to check again.');
+                return;
+            }
+            const stamp=sync.lastSuccess||roster.updatedAt||'not recorded';
+            state.textContent=roster.people.length+' published people · Version '+roster.version+' · Last verified: '+stamp+(sync.status==='unavailable'?' · OFFLINE CACHED COPY':'');
+            const q=clean(search.value).toLowerCase();
+            const visible=roster.people.filter(person=>clean(person.name).toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name));
+            for(const person of visible){
+                const row=document.createElement('div');
+                row.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid #e5edf2;font:13px Arial;';
+                const name=document.createElement('span');
+                name.textContent=person.name;
+                const status=document.createElement('small');
+                status.textContent=person.active===false?'Inactive':'Active';
+                status.style.color=person.active===false?'#9b5c25':'#176b42';
+                row.append(name,status);rows.appendChild(row);
+            }
+            if(!visible.length)rows.textContent='No matching people.';
+        };
+        const doRefresh=async()=>{
+            refresh.disabled=true;state.textContent='Checking the administrator-published Master List...';
+            await refreshSharedRebelRoster(true);
+            refresh.disabled=false;render();
+        };
+        refresh.onclick=()=>{void doRefresh();};
+        search.oninput=render;
+        box.append(heading,note,state,search,rows,controls);
+        render();
+        void doRefresh();
+    }
+    function compareReleaseVersions(a,b){
+        const x=String(a||'').split('.').map(Number);
+        const y=String(b||'').split('.').map(Number);
+        if(![...x,...y].every(Number.isFinite))return 0;
+        for(let i=0;i<Math.max(x.length,y.length);i++){
+            if((x[i]||0)!==(y[i]||0))return Math.sign((x[i]||0)-(y[i]||0));
+        }
+        return 0;
+    }
+    async function checkManagedInterfaceRelease(){
+        return new Promise(resolve=>{
+            GM_xmlhttpRequest({
+                method:'GET',url:MANAGED_UPDATE_URL+'?check='+Date.now(),
+                timeout:18000,
+                onload:r=>{
+                    const m=String(r.responseText||'').match(/^\/\/\s*@version\s+(\d+\.\d+\.\d+)\s*$/m);
+                    if(r.status>=200&&r.status<300&&m){
+                        availableRelease=compareReleaseVersions(m[1],VERSION)>0?m[1]:'';
+                        releaseCheckError='';
+                    }else releaseCheckError='Unable to verify the currently published version.';
+                    refreshInterfaceNotice();
+                    resolve(!!m);
+                },
+                onerror:()=>{releaseCheckError='Update server unavailable.';refreshInterfaceNotice();resolve(false);},
+                ontimeout:()=>{releaseCheckError='Update check timed out.';refreshInterfaceNotice();resolve(false);}
+            });
+        });
+    }
+    function refreshInterfaceNotice(){
+        const el=document.getElementById('vector-ppe-interface-updates-v1');
+        if(!el)return;
+        el.innerHTML='';
+        const note=document.createElement('span');
+        note.textContent=availableRelease?
+            'New version '+availableRelease+' available. Install with Tampermonkey.':
+            (releaseCheckError?'Midnight update check: '+releaseCheckError:
+             'Automatic midnight checks active. Tampermonkey manages script installation.');
+        el.appendChild(note);
+        if(availableRelease){
+            const btn=makeButton('Install Update');
+            btn.style.cssText+='margin-left:7px;padding:4px 7px;';
+            btn.onclick=openManagedUpdate;
+            el.appendChild(btn);
+        }
+    }
+    async function refreshMasterErrorInbox({notify=false}={}){
+        if(!isMasterOwnerInstallation()||errorInboxRequest)return errorInboxRequest||false;
+        errorInboxRequest=(async()=>{
+            try{
+                const pair=rebelCommandPairing();
+                const res=await new Promise(resolve=>GM_xmlhttpRequest({
+                    method:'GET',
+                    url:REBEL_COMMAND_ENDPOINT+'?action=vr-error-inbox',
+                    headers:{Authorization:'Bearer '+pair.token,
+                        'X-Rebel-Device-ID':pair.deviceId},
+                    timeout:16000,
+                    onload:r=>resolve({status:r.status,body:r.responseText||''}),
+                    onerror:()=>resolve({status:0,body:''}),
+                    ontimeout:()=>resolve({status:0,body:''})
+                }));
+                const body=JSON.parse(res.body||'{}');
+                if(res.status!==200||body.ok!==true||
+                    !Array.isArray(body.alerts))
+                    throw Error(clean(body.error||'Master error inbox unavailable.'));
+                const alerts=body.alerts.slice(0,50);
+                errorInbox={pending:alerts,count:Number(body.count)||alerts.length,
+                    truncated:body.truncated===true,error:'',checkedAt:new Date().toISOString()};
+                const newest=alerts[0];
+                const previous=loadJSON(LAST_ALERT_SEEN_KEY,null);
+                if(newest){
+                    if(previous?.id && previous.id!==newest.id && notify &&
+                        typeof Notification==='function'&&Notification.permission==='granted'){
+                        try{
+                            new Notification('Vector Rebel: new error received',{
+                                body:clean(newest.title||'Review the Master error inbox.').slice(0,130),
+                                tag:'vector-rebel-new-errors'
+                            });
+                        }catch{ /* Badge and inbox still work if OS notifications are blocked. */ }
+                    }
+                    saveJSON(LAST_ALERT_SEEN_KEY,{id:newest.id,at:newest.occurredAt});
+                }
+                refreshMasterAlertBadge();
+                return true;
+            }catch(error){
+                errorInbox={...errorInbox,error:clean(error?.message||String(error))};
+                refreshMasterAlertBadge();
+                return false;
+            }finally{errorInboxRequest=null;}
+        })();
+        return errorInboxRequest;
+    }
+    function refreshMasterAlertBadge(){
+        const el=document.getElementById('vector-ppe-master-alert-badge-v1');
+        if(el){
+            const visible=isMasterOwnerInstallation()&&panelInterfaceMode()==='master';
+            el.style.display=visible?'block':'none';
+            if(visible)el.textContent=errorInbox.error?
+                'Error inbox unavailable':(errorInbox.truncated?'Latest ':'')+errorInbox.count+' pending report'+(errorInbox.count===1?'':'s');
+        }
+        updateMinimizedPanelBadge();
+    }
+    function showMasterErrorInbox(){
+        if(!isMasterOwnerInstallation()||panelInterfaceMode()!=='master'){
+            setStatus('The error inbox is available only on the master installation.',false);
+            return;
+        }
+        const {overlay,box}=makeOverlayBox('780px');
+        const heading=document.createElement('h2');
+        heading.textContent='Errors & Alerts';
+        heading.style.cssText='font:800 21px Arial;color:#153e5c;margin:0 0 8px;';
+        const summary=document.createElement('p');
+        summary.setAttribute('role','status');
+        summary.style.cssText='font:12px Arial;color:#47677b;';
+        const list=document.createElement('div');
+        list.style.cssText='max-height:50vh;overflow:auto;border:1px solid #d6e4ed;border-radius:7px;';
+        const buttons=document.createElement('div');
+        buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;';
+        const refresh=makeButton('Refresh Error Inbox',{background:'#176b8e',color:'#fff'});
+        const notify=makeButton('Enable Desktop Alerts');
+        const close=makeButton('Close');
+        buttons.append(refresh,notify,close);close.onclick=()=>overlay.remove();
+        notify.onclick=async()=>{
+            if(typeof Notification!=='function'){setStatus('Desktop notifications are not supported here.',false);return;}
+            const permission=await Notification.requestPermission();
+            notify.textContent=permission==='granted'?'Desktop Alerts Enabled':'Desktop Alerts Not Enabled';
+        };
+        const draw=()=>{
+            summary.textContent=errorInbox.error?
+                'Rebel Command error inbox unavailable: '+errorInbox.error:
+                (errorInbox.truncated?'Latest ':'')+errorInbox.count+' new error report(s) · Last checked '+(errorInbox.checkedAt||'not yet');
+            list.innerHTML='';
+            for(const alert of errorInbox.pending){
+                const item=document.createElement('div');
+                item.style.cssText='padding:9px 11px;border-bottom:1px solid #e3eaf0;font:12px/1.45 Arial;';
+                const title=document.createElement('strong');
+                title.textContent=clean(alert.title||'Vector Rebel issue').slice(0,150);
+                const meta=document.createElement('div');
+                meta.textContent=clean(alert.occurredAt||'')+' · '+clean(alert.source||'Vector Rebel')+
+                    ' · '+clean(alert.priority||'high');
+                meta.style.cssText='font-size:10px;color:#6a7d8b;margin:3px 0;';
+                const details=document.createElement('div');
+                details.textContent=clean(alert.description||'').slice(0,2000);
+                details.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;';
+                item.append(title,meta,details);list.appendChild(item);
+            }
+            if(!errorInbox.pending.length&&!errorInbox.error)
+                list.textContent='No new reports returned.';
+        };
+        refresh.onclick=async()=>{refresh.disabled=true;await refreshMasterErrorInbox();refresh.disabled=false;draw();};
+        box.append(heading,summary,list,buttons);
+        draw();void refresh.onclick();
+    }
+    function localCalendarDate(){
+        const d=new Date();
+        return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+
+            '-'+String(d.getDate()).padStart(2,'0');
+    }
+    async function runMidnightInterfaceReview(){
+        const today=localCalendarDate();
+        const last=loadJSON(MIDNIGHT_CHECK_KEY,{});
+        if(last.date===today)return false;
+        saveJSON(MIDNIGHT_CHECK_KEY,{date:today,at:new Date().toISOString(),status:'checking'});
+        await Promise.all([
+            checkManagedInterfaceRelease(),
+            refreshSharedRebelRoster(true),
+            flushPendingErrorReports(),
+            isMasterOwnerInstallation()?refreshMasterErrorInbox({notify:true}):Promise.resolve(false)
+        ]);
+        saveJSON(MIDNIGHT_CHECK_KEY,{date:today,at:new Date().toISOString(),status:'checked',
+            latest:availableRelease||VERSION,releaseCheckError});
+        renderPanelInterface();
+        return true;
+    }
+    function scheduleMidnightInterfaceReview(){
+        if(midnightTimer)clearTimeout(midnightTimer);
+        const now=new Date(),next=new Date(now);
+        next.setHours(24,0,2,0); // 00:00:02 local, following calendar day
+        midnightTimer=setTimeout(async()=>{
+            await runMidnightInterfaceReview();
+            scheduleMidnightInterfaceReview();
+        },Math.max(1000,next.getTime()-now.getTime()));
+    }
+    let lastInterfaceErrorInboxPoll=0;
+    function renderPanelInterface(){
+        const panel=document.getElementById(PANEL_ID);
+        if(!panel)return;
+        const actions=panel.querySelector('[data-vector-ppe-actions]');
+        const label=panel.querySelector('[data-vector-ppe-interface-label]');
+        const switcher=panel.querySelector('[data-vector-ppe-interface-switch]');
+        if(!actions||!label||!switcher)return;
+        const master=panelInterfaceMode()==='master';
+        const authorized=isMasterOwnerInstallation();
+        label.textContent=master?'MASTER INTERFACE':'USER INTERFACE';
+        switcher.style.display=authorized?'block':'none';
+        switcher.textContent=master?'Preview User Interface':'Return to Master Interface';
+        actions.innerHTML='';
+        const make=(label,onClick,primary=false)=>{
+            const b=document.createElement('button');
+            b.type='button';b.textContent=label;
+            b.setAttribute('data-vector-rebel-action',label);
+            b.style.cssText='min-height:45px;padding:10px 9px;border-radius:8px;cursor:pointer;'+
+              'border:1px solid '+(primary?'#176b8e':'#b8c8d6')+';'+
+              'background:'+(primary?'#176b8e':'#fff')+';'+
+              'color:'+(primary?'#fff':'#153e5c')+';'+
+              'font:700 12px/1.2 Arial;box-shadow:0 1px 2px rgba(15,43,62,.08);';
+            b.onclick=onClick;actions.appendChild(b);
+        };
+        // User interface always shows exactly the six approved entry points.
+        make('Tour PPE',()=>launchMyInspectionFromAnywhere('tour'),true);
+        make('After Fire',()=>launchMyInspectionFromAnywhere('afterFire'),true);
+        make('PPE Form',showPpeCleanRepairForm);
+        make('Daily Captain Check',launchCaptainDailyCheckFromAnywhere);
+        make('Settings',()=>showSettings('profile'));
+        make('Master List',showSharedMasterList);
+        if(master){
+            make('SCBA Airpacks',showStation4ScbaAirpackCheck);
+            make('Apparatus Check',showApparatusCheck);
+            make('Manage Master List',()=>showSettings('admin'));
+            make('Errors & Alerts',showMasterErrorInbox);
+            make('Report Problem',showProblemReport);
+            make('Check for Update',()=>{void checkManagedInterfaceRelease();});
+        }
+        refreshMasterAlertBadge();
+        refreshInterfaceNotice();
+    }
+
     function installPanel() {
         if (document.getElementById(PANEL_ID)) return;
 
@@ -15036,6 +15434,20 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         minimize.onclick = () => applyPanelMinimizedState(true);
         titleRow.append(titleWrap, minimize);
 
+        const modeRow=document.createElement('div');
+        modeRow.style.cssText='display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:7px;padding:8px 13px;background:#eaf3f7;border-bottom:1px solid #d3e1eb;';
+        const modeLabel=document.createElement('strong');
+        modeLabel.setAttribute('data-vector-ppe-interface-label','1');
+        modeLabel.style.cssText='font:800 11px Arial;letter-spacing:.8px;color:#173f59;';
+        const modeSwitch=document.createElement('button');
+        modeSwitch.type='button';
+        modeSwitch.setAttribute('data-vector-ppe-interface-switch','1');
+        modeSwitch.style.cssText='padding:6px 8px;border:1px solid #9cbacd;border-radius:6px;background:#fff;color:#155171;font:700 10px Arial;cursor:pointer;';
+        modeSwitch.onclick=()=>{
+            setPanelInterfaceMode(panelInterfaceMode()==='master'?'user':'master');
+        };
+        modeRow.append(modeLabel,modeSwitch);
+
         const body = document.createElement('div');
         body.style.cssText = 'padding:12px 13px 13px;background:#fff;';
 
@@ -15046,33 +15458,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             'background:#f3f7f9;border:1px solid #e0e8ed;border-radius:8px;color:#4f6878;';
 
         const actions = document.createElement('div');
+        actions.setAttribute('data-vector-ppe-actions','1');
         actions.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:7px;';
-
-        function mainAction(label, onClick, primary = true) {
-            const b = document.createElement('button');
-            b.type = 'button';
-            b.textContent = label;
-            b.style.cssText =
-                'min-height:44px;padding:10px 9px;border-radius:8px;cursor:pointer;' +
-                `border:1px solid ${primary ? '#176b8e' : '#b8c8d6'};` +
-                `background:${primary ? '#176b8e' : '#fff'};` +
-                `color:${primary ? '#fff' : '#153e5c'};` +
-                'font:700 12px/1.2 Arial,sans-serif;' +
-                'box-shadow:0 1px 2px rgba(15,43,62,.08);';
-            b.onclick = onClick;
-            return b;
-        }
-
-        actions.append(
-            mainAction('My Tour PPE', () => launchMyInspectionFromAnywhere('tour')),
-            mainAction('SCBA Airpacks', showStation4ScbaAirpackCheck, false),
-            mainAction('My After-Fire', () => launchMyInspectionFromAnywhere('afterFire')),
-            mainAction('Daily Captain Check', launchCaptainDailyCheckFromAnywhere, false),
-            mainAction('Apparatus Check', showApparatusCheck, false),
-            mainAction('PPE Clean / Repair Form', showPpeCleanRepairForm, false),
-            mainAction('Report Problem', showProblemReport, false),
-            mainAction('Settings', () => showSettings('profile'), false)
-        );
 
         const statusBox = document.createElement('div');
         statusBox.id = 'vector-ppe-status-v2';
@@ -15081,8 +15468,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             'font-size:11px;line-height:1.4;color:#607483;border-radius:6px;';
         statusBox.textContent = 'Ready.';
 
-        body.append(info, actions, statusBox);
-        full.append(titleRow, body);
+        const alertBadge=document.createElement('div');
+        alertBadge.id='vector-ppe-master-alert-badge-v1';
+        alertBadge.style.cssText='font:700 11px Arial;color:#9b2d22;margin:9px 0 0;';
+        const releaseNotice=document.createElement('div');
+        releaseNotice.id='vector-ppe-interface-updates-v1';
+        releaseNotice.style.cssText='font:11px/1.4 Arial;color:#607483;margin:8px 0 0;';
+        body.append(info, actions, alertBadge, releaseNotice, statusBox);
+        full.append(titleRow, modeRow, body);
 
         const mini = document.createElement('button');
         mini.type = 'button';
@@ -15107,6 +15500,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         panel.append(full, mini);
         document.body.appendChild(panel);
         applyPanelMinimizedState(true, false);
+        renderPanelInterface();
         refreshPanelInfo();
     }
 
@@ -15204,6 +15598,30 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     });
     setInterval(()=>{void refreshSharedRebelRoster(false);},10*60*1000);
     setInterval(()=>{void flushPendingErrorReports();},5*60*1000);
+
+    // Both panel layouts use the same installed userscript. At midnight local
+    // time, check the published version, refresh the approved roster and the
+    // master error inbox. Tampermonkey remains responsible for installing
+    // new script bytes; never hot-swap code during a PPE inspection.
+    scheduleMidnightInterfaceReview();
+    void runMidnightInterfaceReview();
+    setInterval(()=>{
+        if(isMasterOwnerInstallation()&&
+            Date.now()-lastInterfaceErrorInboxPoll>=ALERT_POLL_MS){
+            lastInterfaceErrorInboxPoll=Date.now();
+            void refreshMasterErrorInbox({notify:true});
+        }
+    },ALERT_POLL_MS);
+    document.addEventListener('visibilitychange',()=>{
+        if(document.visibilityState==='visible'){
+            void runMidnightInterfaceReview();
+            if(isMasterOwnerInstallation()&&
+                Date.now()-lastInterfaceErrorInboxPoll>=ALERT_POLL_MS){
+                lastInterfaceErrorInboxPoll=Date.now();
+                void refreshMasterErrorInbox({notify:true});
+            }
+        }
+    });
 
     const migrationNotice = loadJSON(MIGRATION_NOTICE_KEY, null);
     if (migrationNotice?.message) {
