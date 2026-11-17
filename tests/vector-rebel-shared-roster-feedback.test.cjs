@@ -92,7 +92,7 @@ test('Master List buttons expose local publish and recipient download without PP
  assert.match(src,/action=vr-publish-roster/);
  assert.match(src,/if\(!rebelCommandPairing\(\)\?\.autoEnrolled\)rosterCard.append\(shareRoster\)/);
  assert.match(src,/setInterval\(\(\)=>\{\s*void refreshSharedRebelRoster\(false\);/);
- assert.match(src,/void runMidnightInterfaceReview\(\);\s*\},10\*60\*1000\)/);
+ assert.match(src,/void runMidnightInterfaceReview\(\);\s*void verifyMasterOwnerInstallation\(\);\s*\},10\*60\*1000\)/);
 });
 test('admin-roster publication sends approved names only and confirms server receipt',async()=>{
  stored.localMaster={people:[

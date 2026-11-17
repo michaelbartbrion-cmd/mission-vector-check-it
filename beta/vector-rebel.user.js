@@ -15067,12 +15067,52 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     let midnightTimer=null;
     let midnightReviewRequest=null;
 
-    // A visual switch is NOT an authorization credential. On non-owner
-    // installs it is hidden, and all elevated writes retain their existing
-    // server-enforced administrator pairing requirements.
+    // The interface must not derive administrator authority from an
+    // inspector name, a local autoEnrolled flag, or editable local storage.
+    // An administrator-linked device may have originally auto-enrolled;
+    // verify the ACTIVE device credentials against the owner-only endpoint.
+    let masterServerVerified=false;
+    let masterAuthorizationRequest=null;
+    let lastMasterVerificationAt=0;
     function isMasterOwnerInstallation(){
-        const raw=GM_getValue(REBEL_COMMAND_PAIR_KEY,{})||{};
-        return !!(clean(raw.deviceId)&&clean(raw.token)&&raw.autoEnrolled!==true);
+        return masterServerVerified===true&&rebelCommandPaired();
+    }
+    async function verifyMasterOwnerInstallation(force=false){
+        if(masterAuthorizationRequest)return masterAuthorizationRequest;
+        if(!force&&Date.now()-lastMasterVerificationAt<5*60*1000)
+            return masterServerVerified;
+        lastMasterVerificationAt=Date.now();
+        const pair=rebelCommandPairing();
+        if(!clean(pair.deviceId)||!clean(pair.token)){
+            masterServerVerified=false;
+            return false;
+        }
+        masterAuthorizationRequest=(async()=>{
+            let valid=false;
+            try{
+                const result=await new Promise(resolve=>GM_xmlhttpRequest({
+                    method:'GET',
+                    url:REBEL_COMMAND_ENDPOINT+'?action=vr-error-inbox',
+                    headers:{Authorization:'Bearer '+pair.token,
+                        'X-Rebel-Device-ID':pair.deviceId},
+                    timeout:15000,
+                    onload:r=>resolve({status:r.status,text:r.responseText||''}),
+                    onerror:()=>resolve({status:0,text:''}),
+                    ontimeout:()=>resolve({status:0,text:''})
+                }));
+                let body={};try{body=JSON.parse(result.text||'{}');}catch{}
+                valid=result.status===200&&body.ok===true&&
+                    body.readOnly===true&&Array.isArray(body.alerts);
+            }catch{}
+            const changed=masterServerVerified!==valid;
+            masterServerVerified=valid;
+            if(changed){
+                renderPanelInterface();
+                if(valid)void refreshMasterErrorInbox();
+            }
+            return valid;
+        })().finally(()=>{masterAuthorizationRequest=null;});
+        return masterAuthorizationRequest;
     }
     function showMasterPairing(){
         const {overlay,box}=makeOverlayBox('580px');
@@ -15113,6 +15153,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     body.readOnly!==true||!Array.isArray(body.alerts))
                     throw Error('Administrator verification failed. No credentials saved.');
                 GM_setValue(REBEL_COMMAND_PAIR_KEY,{deviceId:id,token:secret,autoEnrolled:false});
+                masterServerVerified=true;
                 token.value='';
                 overlay.remove();
                 renderPanelInterface();
@@ -15259,8 +15300,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     ontimeout:()=>resolve({status:0,body:''})
                 }));
                 const body=JSON.parse(res.body||'{}');
+                if(res.status===401||res.status===403){
+                    masterServerVerified=false;
+                    renderPanelInterface();
+                }
                 if(res.status!==200||body.ok!==true||
-                    !Array.isArray(body.alerts))
+                    body.readOnly!==true||!Array.isArray(body.alerts))
                     throw Error(clean(body.error||'Master error inbox unavailable.'));
                 const alerts=body.alerts.slice(0,50);
                 errorInbox={pending:alerts,count:Number(body.count)||alerts.length,
@@ -15716,6 +15761,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         rebelCommandEvent('app_loaded', { success: true, description: 'Vector Rebel loaded.' });
         void refreshSharedRebelRoster(false);
         void flushPendingErrorReports();
+        // Only the backend owner-linked identity may unlock Master.
+        void verifyMasterOwnerInstallation();
         refreshPanelInfo();
     });
     setInterval(()=>{
@@ -15723,6 +15770,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         // A partial midnight check gets an unattended retry while the tab
         // stays open; a successfully completed day does no extra network work.
         void runMidnightInterfaceReview();
+        void verifyMasterOwnerInstallation();
     },10*60*1000);
     setInterval(()=>{void flushPendingErrorReports();},5*60*1000);
 
@@ -15741,6 +15789,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     },ALERT_POLL_MS);
     document.addEventListener('visibilitychange',()=>{
         if(document.visibilityState==='visible'){
+            void verifyMasterOwnerInstallation();
             void runMidnightInterfaceReview();
             if(isMasterOwnerInstallation()&&
                 Date.now()-lastInterfaceErrorInboxPoll>=ALERT_POLL_MS){

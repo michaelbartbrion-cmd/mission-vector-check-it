@@ -7,7 +7,7 @@ function part(a,b){
  assert.ok(i>=0&&j>i,'missing source '+a);return src.slice(i,j);
 }
 const extracted=[
- part('    function isMasterOwnerInstallation(){','    function showMasterPairing(){'),
+ part('    let masterServerVerified=false;','    function showMasterPairing(){'),
  part('    function panelInterfaceMode(){','    function showSharedMasterList(){'),
  part('    function showSharedMasterList(){','    function compareReleaseVersions('),
  part('    function showMasterErrorInbox(){','    function localCalendarDate(){'),
@@ -27,6 +27,7 @@ const js=String.raw`
  const PANEL_INTERFACE_KEY='vectorRebelInterfaceModeV1',REBEL_COMMAND_PAIR_KEY='vectorRebelPairingV1';
  const VERSION='3.2.76',store=new Map();
  let owner=true;
+ const rebelCommandPaired=()=>owner;
  const GM_getValue=(key,fallback)=>key===REBEL_COMMAND_PAIR_KEY?
    {deviceId:'test-device',token:'test-token',autoEnrolled:!owner}:fallback;
  const persistentGetRaw=key=>store.get(key);
@@ -66,6 +67,9 @@ const js=String.raw`
               'Errors & Alerts','Report Problem','Check for Update'];
  const result={};
  try{
+   // Owner role is granted by the server-only authenticated probe; never
+   // inferred from an editable local pair token during the test.
+   masterServerVerified=true;
    installPanel();applyPanelMinimizedState(false,false);
    updateMinimizedPanelBadge();
    const miniBadge=document.getElementById('vector-ppe-mini-badge-v1');
@@ -107,7 +111,8 @@ const js=String.raw`
       !Array.from(overlay.querySelectorAll('button')).some(x=>x.textContent==='Mark Reviewed'))
       throw Error('Master error inbox missing device identity or review control');
    result.errorInboxViewer=true;overlay.remove();
-   owner=false;renderPanelInterface();assertLabels(actions(),user,'Non-admin user');
+   owner=false;masterServerVerified=false;
+   renderPanelInterface();assertLabels(actions(),user,'Non-admin user');
    if(switcher.style.display!=='none')throw Error('Non-admin can see Master toggle');
    result.nonAdminSwitchHidden=true;result.panelCount=document.querySelectorAll('#'+PANEL_ID).length;
    if(result.panelCount!==1)throw Error('Duplicate panel');

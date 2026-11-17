@@ -55,26 +55,41 @@ test('Master Interface keeps user actions and exposes additional owner tools',()
  assert.equal(v.mode,'MASTER INTERFACE');
  assert.equal(v.switch.textContent,'Preview User Interface');
 });
-test('non-owner is always forced to User mode regardless of locally stored master flag',()=>{
- const logic=part('    function isMasterOwnerInstallation(){','    function showSharedMasterList(){');
+test('Master requires backend owner verification, not local pairing or autoEnrolled flag',async()=>{
+ const logic=part('    let masterServerVerified=false;','    function showMasterPairing(){')+
+   part('    function panelInterfaceMode(){','    function showSharedMasterList(){');
  const store=new Map([['vectorRebelInterfaceModeV1','master']]);
- const evaluate=(raw)=>{
-  const f=new Function('GM_getValue','REBEL_COMMAND_PAIR_KEY','clean',
+ let server={status:403,body:{ok:false}},calls=0,renderCount=0,paired=true;
+ const api=new Function('rebelCommandPaired','rebelCommandPairing','clean',
    'persistentGetRaw','persistentSetRaw','renderPanelInterface',
-   'PANEL_INTERFACE_KEY',logic+'\nreturn {mode:panelInterfaceMode,set:setPanelInterfaceMode};')(
-    ()=>raw,'pairing',x=>String(x||'').trim(),k=>store.get(k),
-    (k,v)=>store.set(k,v),()=>{},'vectorRebelInterfaceModeV1');
-  return f;
- };
- const basic=evaluate({});
- assert.equal(basic.mode(),'user');assert.equal(basic.set('master'),false);
- const self=evaluate({deviceId:'A',token:'B',autoEnrolled:true});
- assert.equal(self.mode(),'user');assert.equal(self.set('master'),false);
- const admin=evaluate({deviceId:'A',token:'B',autoEnrolled:false});
- assert.equal(admin.mode(),'master');
- assert.equal(admin.set('user'),true);
- assert.equal(admin.mode(),'user');
- assert.equal(admin.set('master'),true);
+   'PANEL_INTERFACE_KEY','REBEL_COMMAND_ENDPOINT','GM_xmlhttpRequest',
+   'refreshMasterErrorInbox',logic+
+   '\nreturn {mode:panelInterfaceMode,set:setPanelInterfaceMode,'+
+   'verify:verifyMasterOwnerInstallation,owner:isMasterOwnerInstallation};')(
+    ()=>paired,()=>({deviceId:'ID',token:'SECRET',autoEnrolled:true}),
+    v=>String(v||'').trim(),key=>store.get(key),
+    (key,value)=>store.set(key,value),()=>{renderCount++},
+    'vectorRebelInterfaceModeV1','https://example.test/telemetry',
+    request=>{calls++;request.onload({status:server.status,responseText:JSON.stringify(server.body)});},
+    ()=>{}
+ );
+ assert.equal(api.mode(),'user');
+ assert.equal(api.set('master'),false,'locally paired user cannot enable Master');
+ assert.equal(await api.verify(true),false);
+ assert.equal(api.mode(),'user','backend denies ordinary self-enrolled user');
+ server={status:200,body:{ok:true,readOnly:true,alerts:[]}};
+ assert.equal(await api.verify(true),true);
+ assert.equal(api.mode(),'master','server linked owner can use Master, even after auto enrollment');
+ assert.equal(api.set('user'),true);
+ assert.equal(api.mode(),'user');
+ assert.equal(api.set('master'),true);
+ server={status:403,body:{ok:false}};
+ assert.equal(await api.verify(true),false);
+ assert.equal(api.mode(),'user','revoked backend pairing must revoke Master immediately');
+ assert.equal(renderCount,4,'role transitions and explicit interface switches render changes');
+ assert.equal(calls,3);
+ paired=false;
+ assert.equal(api.owner(),false);
 });
 test('Settings admin tab is hidden in User mode and available in Master mode',()=>{
  const settings=part('    function showSettings(initialTab','    function abortActiveRun() {');
@@ -186,7 +201,7 @@ test('error inbox excludes user devices and delivers new admin alerts only once'
     ()=>owner,()=>({token:'dummy',deviceId:'device-id'}),
     'https://example.test/telemetry',
     args=>{requestCount++;args.onload({status:200,responseText:JSON.stringify({
-      ok:true,count:1,alerts:[last]})});},
+      ok:true,readOnly:true,count:1,alerts:[last]})});},
     (key,fallback)=>saved.get(key)??fallback,
     (key,value)=>saved.set(key,value),'seen',
     ()=>{},Notice,x=>String(x||'').trim()
