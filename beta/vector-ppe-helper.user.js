@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.11
+// @version      3.2.78
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -16,6 +16,7 @@
 // @grant        GM_openInTab
 // @grant        GM_setClipboard
 // @connect      base44.app
+// @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -27,12 +28,12 @@
     // uses the clean production identity after the September 2026 Tampermonkey reset.
     if (window.__vectorRebelInstance) {
         console.warn(
-            `Vector Rebel 3.2.9: another instance (${window.__vectorRebelInstance.version || 'unknown'}) is already active on this page.`
+            `Vector Rebel: another instance (${window.__vectorRebelInstance.version || 'unknown'}) is already active on this page.`
         );
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.9',
+        version: '3.2.78',
         startedAt: Date.now()
     };
 
@@ -40,7 +41,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.11';
+    const VERSION = '3.2.78';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -60,6 +61,9 @@
     const CAPTAIN_LAST_SET_KEY = 'vectorRebelCaptainLastSet_v1';
     const CAPTAIN_DAILY_CHECK_KEY = 'vectorRebelCaptainDailyCheck_v1';
     const CAPTAIN_DAILY_REPORT_KEY = 'vectorRebelCaptainDailyReport_v1';
+    const CAPTAIN_HISTORICAL_OFF_KEY = 'vectorRebelCaptainHistoricalOff_v1';
+    const CAPTAIN_DAILY_TIMING_KEY = 'vectorRebelCaptainTimingV1';
+    const CAPTAIN_DAILY_DEFERRED_KEY = 'vectorRebelCaptainDailyDeferred_v1';
     const MASTER_ROSTER_OVERRIDE_KEY = 'vectorRebelMasterRosterOverride_v1';
     const MASTER_ROSTER_REVIEW_KEY = 'vectorRebelMasterRosterReview_v1';
     const RUN_OWNER_KEY = 'vectorRebelRunOwner_v1';
@@ -73,6 +77,7 @@
         LAST_SUMMARY_KEY, LEGACY_LAST_SUMMARY_KEY, RUN_HISTORY_KEY, GEAR_SNAPSHOTS_KEY,
         LAST_DIAGNOSTIC_KEY, STOPPED_RUN_KEY, MIGRATION_NOTICE_KEY, PANEL_MINIMIZED_KEY,
         CAPTAIN_LAST_SET_KEY, CAPTAIN_DAILY_CHECK_KEY, CAPTAIN_DAILY_REPORT_KEY,
+        CAPTAIN_HISTORICAL_OFF_KEY, CAPTAIN_DAILY_TIMING_KEY,
         MASTER_ROSTER_OVERRIDE_KEY, MASTER_ROSTER_REVIEW_KEY
     ];
 
@@ -260,8 +265,8 @@
         });
     }
 
-    async function submitRebelCommandFeedback(details) {
-        const message = String(details == null ? '' : details).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 2000);
+    async function submitRebelCommandFeedback(details, options={}) {
+        const message = String(details == null ? '' : details).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 3900);
         if (!message) return false;
         if (!rebelCommandPaired()) {
             const enrolled = await ensureRebelCommandEnrollment(false);
@@ -271,13 +276,13 @@
         const body = {
             version: VERSION,
             suggestions: [{
-                suggestionId: `feedback:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`,
-                title: 'Vector Rebel feedback',
+                suggestionId: clean(options.suggestionId || `feedback:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`).slice(0,140),
+                title: clean(options.title||'Vector Rebel feedback').slice(0,160),
                 details: message,
                 sourceVersion: VERSION,
                 category: 'feedback',
-                priority: 'medium',
-                sourceContext: 'settings_general',
+                priority: options.priority==='high'?'high':'medium',
+                sourceContext: clean(options.sourceContext||'settings_general').slice(0,120),
                 timestamp: new Date().toISOString()
             }]
         };
@@ -292,7 +297,14 @@
                 },
                 data: JSON.stringify(body),
                 timeout: 12000,
-                onload: response => resolve(response.status >= 200 && response.status < 300),
+                onload: response => {
+                    try{
+                        const receipt=JSON.parse(response.responseText||'{}');
+                        resolve(response.status>=200&&response.status<300&&receipt.ok===true&&
+                            (Number(receipt.acceptedSuggestions)>0||
+                             Number(receipt.duplicateSuggestions)>0));
+                    }catch{resolve(false);}
+                },
                 onerror: () => resolve(false),
                 ontimeout: () => resolve(false)
             });
@@ -309,6 +321,112 @@
             .slice(0, 300);
     }
 
+
+    // Read-only troubleshooting snapshot. Sends only the selected PPE identity
+    // and a few page-structure clues; no signatures, notes, full DOM or credentials.
+    function detailedProblemReport(reason = '', workflow = '', stage = '') {
+        const stopped = loadJSON(STOPPED_RUN_KEY, null);
+        const run = getRun() || stopped;
+        const item = run?.items?.[run?.index] || null;
+        const last = loadJSON(LAST_DIAGNOSTIC_KEY, null);
+        const inExpectedPage = !!(item && isAssetPageFor(item));
+        const sampledHeadings = [...document.querySelectorAll('h1,h2,h3,h4,[data-testid*="title"]')]
+            .filter(visible)
+            .filter(el => !el.closest('#' + PANEL_ID + ', #' + OVERLAY_ID))
+            .map(el => clean(el.textContent || '').slice(0, 120))
+            .filter(Boolean).slice(0, 12);
+        const identityLabels = [...document.querySelectorAll('label,dt,th,strong,b')]
+            .filter(visible)
+            .filter(el => !el.closest('#' + PANEL_ID + ', #' + OVERLAY_ID))
+            .map(el => clean(el.textContent || '').slice(0, 120))
+            .filter(value => /serial|PPE name|asset|responsible party|equipment/i.test(value))
+            .slice(0, 12);
+        let serialInDetail = '';
+        if (inExpectedPage) {
+            try { serialInDetail = clean(repairReadDetailDocument(document).serial).slice(0, 100); }
+            catch { serialInDetail = '[serial parser error]'; }
+        }
+        const lastItem = last?.run?.currentItem || null;
+        const info = {
+            report: 'Vector Rebel PPE incident',
+            at: new Date().toISOString(),
+            version: VERSION,
+            issue: telemetrySafeErrorMessage(reason || stopped?.stopReason || last?.message || 'Manual report'),
+            workflow: clean(workflow || run?.modeKey || last?.run?.modeKey || 'unknown'),
+            stage: clean(stage || run?.stoppedFromPhase || run?.phase || last?.run?.phase || 'unknown'),
+            run: run ? { phase: run.phase || '', index: run.index, total: run.items?.length || 0 } : null,
+            target: item ? {
+                assetId: clean(item.assetId).slice(0, 100), pool: clean(item.pool),
+                itemId: clean(item.itemId), serial: clean(item.serial).slice(0, 100),
+                type: clean(item.type).slice(0, 80)
+            } : lastItem ? {
+                assetId: clean(lastItem.assetId).slice(0, 100), pool: clean(lastItem.pool),
+                itemId: clean(lastItem.itemId), type: clean(lastItem.type).slice(0, 80)
+            } : null,
+            observed: {
+                path: location.pathname.slice(0, 200),
+                expectedPoolItemPath: inExpectedPage,
+                exactPpeNameOrSerialMatch: inExpectedPage ? !!findAssetIdentityElement(item) : false,
+                serialInDetail, headings: sampledHeadings, identityLabels
+            },
+            lastStop: last ? {
+                time: last.at || '',
+                path: (() => { try { return new URL(last.url).pathname; } catch { return ''; } })(),
+                expectedAssetIdVisible: last.pageSignals?.expectedAssetIdVisible ?? null,
+                isExpectedAssetPage: last.pageSignals?.isExpectedAssetPage ?? null,
+                failure: telemetrySafeErrorMessage(last.message || '')
+            } : null
+        };
+        return 'VECTOR REBEL DETAILED PROBLEM REPORT\n' + JSON.stringify(info).slice(0, 3800);
+    }
+
+    const ERROR_FEEDBACK_THROTTLE_KEY='vectorRebelErrorFeedbackThrottleV1';
+    const PENDING_ERROR_REPORTS_KEY='vectorRebelPendingErrorReportsV1';
+    let errorReportSending=false;
+    function errorFeedbackText(reason,workflow='unknown',stage='unknown'){
+        const safeReason=telemetrySafeErrorMessage(reason||'Unexpected Vector Rebel error.');
+        return 'Automatic Vector Rebel error report | Version '+VERSION+
+            ' | Workflow '+clean(workflow).slice(0,60)+
+            ' | Stage '+clean(stage).slice(0,60)+
+            ' | Error '+safeReason;
+    }
+    function pendingErrorReports(){
+        const stored=loadJSON(PENDING_ERROR_REPORTS_KEY,[]);
+        return Array.isArray(stored)?stored.filter(x=>x&&
+            typeof x.id==='string'&&typeof x.message==='string').slice(-20):[];
+    }
+    // Offline incidents remain on the local installation until the existing
+    // Rebel Command feedback intake confirms them; retries reuse the same ID.
+    async function flushPendingErrorReports(){
+        if(errorReportSending)return false;
+        errorReportSending=true;
+        try{
+            for(const item of pendingErrorReports()){
+                const received=await submitRebelCommandFeedback(item.message,{
+                    title:item.title||'Vector Rebel error report',priority:'high',
+                    sourceContext:item.context||'automatic_error',suggestionId:item.id
+                });
+                if(!received)return false;
+                saveJSON(PENDING_ERROR_REPORTS_KEY,
+                    pendingErrorReports().filter(x=>x.id!==item.id));
+                saveJSON(ERROR_FEEDBACK_THROTTLE_KEY,{key:item.message,at:Date.now()});
+            }
+            return true;
+        }finally{errorReportSending=false;}
+    }
+    async function reportRebelErrorToCommand(reason,workflow='',stage=''){
+        const message=(errorFeedbackText(reason,workflow,stage)+' | '+
+            detailedProblemReport(reason,workflow,stage)).slice(0,3900),now=Date.now();
+        const last=loadJSON(ERROR_FEEDBACK_THROTTLE_KEY,{})||{};
+        if(last.key===message&&now-Number(last.at||0)<10*60*1000)return false;
+        const pending=pendingErrorReports();
+        if(pending.some(x=>x.message===message&&now-Number(x.at||0)<10*60*1000))return false;
+        pending.push({id:'feedback:vr-error:'+now+':'+Math.random().toString(36).slice(2,10),
+            message,at:now});
+        saveJSON(PENDING_ERROR_REPORTS_KEY,pending.slice(-20));
+        return flushPendingErrorReports();
+    }
+
     function looksLikeVectorRebelRuntime(error, source = '') {
         const haystack = `${source || ''} ${error?.stack || ''} ${error?.fileName || ''}`.toLowerCase();
         if (!haystack.trim()) return false;
@@ -318,13 +436,31 @@
             haystack.includes('userscript');
     }
 
+    // Exception reports previously contained the TypeError message but NO
+    // script-frame position, making repeated native 'undefined.props'
+    // errors hard to distinguish. Extract only file-relative line/column
+    // numbers from this userscript. Never transmit browser URLs, query
+    // strings, stack arguments, user identifiers or extension paths.
+    function vectorScriptFramePositions(stack){
+        const frames=[];
+        for(const line of String(stack||'').split(/\r?\n/).slice(1,16)){
+            const match=line.match(/(?:vector-rebel\.user\.js|userscript\.html?)(?:[^\s)]*?):(\d{1,5}):(\d{1,4})(?:\D|$)/i);
+            if(!match)continue;
+            const number=Number(match[1]),column=Number(match[2]);
+            if(number>0&&column>0)frames.push(number+':'+column);
+            if(frames.length===3)break;
+        }
+        return [...new Set(frames)].join(', ');
+    }
     let lastUnexpectedErrorSignature = '';
     let lastUnexpectedErrorAt = 0;
     function reportUnexpectedVectorRebelError(kind, error, source = '') {
         if (!looksLikeVectorRebelRuntime(error, source)) return;
         const message = telemetrySafeErrorMessage(error?.message || error || kind || 'Unexpected Vector Rebel runtime error.');
         if (!message) return;
-        const signature = `${kind}:${message}`;
+        const scriptPositions=vectorScriptFramePositions(error?.stack);
+        const debugReason=scriptPositions?message+' | Script positions '+scriptPositions:message;
+        const signature = `${kind}:${debugReason}`;
         const now = Date.now();
         if (signature === lastUnexpectedErrorSignature && now - lastUnexpectedErrorAt < 60000) return;
         lastUnexpectedErrorSignature = signature;
@@ -335,8 +471,9 @@
             description: 'Unexpected Vector Rebel runtime error.',
             errorType: kind,
             errorMessage: message,
-            metadata: { stage: 'global' }
+            metadata: { stage: 'global', scriptPositions }
         });
+        void reportRebelErrorToCommand(debugReason,'runtime',kind);
     }
 
     window.addEventListener('error', event => {
@@ -346,6 +483,77 @@
     window.addEventListener('unhandledrejection', event => {
         reportUnexpectedVectorRebelError('UnhandledRejection', event?.reason || '', '');
     });
+
+    const SHARED_ROSTER_KEY = 'vectorRebelApprovedRosterV1';
+    const SHARED_ROSTER_SYNC_KEY = 'vectorRebelRosterSyncStateV1';
+    let sharedRosterRequest = null;
+    function sharedRosterSyncState() {
+        return loadJSON(SHARED_ROSTER_SYNC_KEY, {}) || {};
+    }
+    function sharedRosterFromCache() {
+        const stored=loadJSON(SHARED_ROSTER_KEY,null);
+        if(!stored||!stored.version||!Array.isArray(stored.people)||!stored.people.length)return null;
+        const normalized=normalizeMasterRoster(stored.people);
+        if(normalized.people.length!==stored.people.length)return null;
+        return {source:'shared-command',version:clean(stored.version),
+            updatedAt:clean(stored.publishedAt),people:normalized.people};
+    }
+    // Fetch administrator-approved names using the current per-device bearer token.
+    // This is read-only; no Source Vector records or PPE inspections are changed.
+    async function refreshSharedRebelRoster(force=false){
+        if(sharedRosterRequest)return sharedRosterRequest;
+        const previous=sharedRosterSyncState(),now=Date.now();
+        if(!force&&Number(previous.lastAttempt||0)>now-10*60*1000)return !!sharedRosterFromCache();
+        saveJSON(SHARED_ROSTER_SYNC_KEY,{...previous,lastAttempt:now});
+        sharedRosterRequest=(async()=>{
+            try{
+                if(!rebelCommandPaired()&&!await ensureRebelCommandEnrollment(false)){
+                    throw Error('This installation is not paired with Rebel Command.');
+                }
+                const pair=rebelCommandPairing();
+                const response=await new Promise(resolve=>GM_xmlhttpRequest({
+                    method:'GET',
+                    url:REBEL_COMMAND_ENDPOINT+'?action=vr-shared-roster',
+                    headers:{Authorization:'Bearer '+pair.token,'X-Rebel-Device-ID':pair.deviceId},
+                    timeout:14000,
+                    onload:r=>resolve({status:r.status,text:r.responseText||''}),
+                    onerror:()=>resolve({status:0,text:''}),
+                    ontimeout:()=>resolve({status:0,text:''})
+                }));
+                let data;
+                try{data=JSON.parse(response.text||'{}');}catch{data={};}
+                if(response.status!==200||data?.ok!==true){
+                    if(response.status===401||response.status===403||response.status===409){
+                        // A revoked, disabled or unpublished roster may not remain
+                        // accepted as a previously approved shared publication.
+                        persistentRemoveRaw(SHARED_ROSTER_KEY);
+                    }
+                    throw Error(clean(data?.error||('Roster service HTTP '+response.status)).slice(0,150));
+                }
+                if(!Array.isArray(data.people)||data.people.length<1||data.people.length>500||
+                    !clean(data.version)||data.scope!=='vector-rebel-shared-roster'){
+                    throw Error('Shared roster response was incomplete or invalid.');
+                }
+                const normalized=normalizeMasterRoster(data.people);
+                if(normalized.people.length!==data.people.length||normalized.rejected.length||
+                    normalized.merged.length)throw Error('Shared roster names or personnel keys were ambiguous.');
+                saveJSON(SHARED_ROSTER_KEY,{
+                    version:clean(data.version),publishedAt:clean(data.publishedAt),
+                    people:normalized.people,receivedAt:new Date().toISOString()
+                });
+                saveJSON(SHARED_ROSTER_SYNC_KEY,{lastAttempt:now,
+                    lastSuccess:new Date().toISOString(),status:'synced',error:''});
+                return true;
+            }catch(error){
+                saveJSON(SHARED_ROSTER_SYNC_KEY,{
+                    ...sharedRosterSyncState(),lastAttempt:now,status:'unavailable',
+                    error:clean(error?.message||String(error)).slice(0,180)
+                });
+                return false;
+            }finally{sharedRosterRequest=null;}
+        })();
+        return sharedRosterRequest;
+    }
 
     function verifyRebelCommandPairing() {
         if (!rebelCommandPaired()) return Promise.resolve(false);
@@ -403,7 +611,26 @@
     // Existing proven single-signature key from the earlier helper.
     const LEGACY_SIGNATURE_KEY = 'vectorPpeSavedSignature_v1';
 
+    const SCBA_FACE_MASK_POOL = '299947';
+    const SCBA_TOUR_TEMPLATE = '119122';
+    // Verified on the live SCBA Face Mask Tour Checklist, October 22, 2026.
+    const SCBA_TOUR_QUESTIONS = [
+        'Proper seal while breathing air; no unusual noises/evidence of leaking',
+        'Bypass valve checked for damage, flow tested and returned to the off position.',
+        'Overall assembly, free from deterioration, dust, and damage',
+        'Headnet and Harness: Functions and undamaged. All buckles working properly.',
+        'Regulator Connection: All components accounted for; free of wear, cracks, and damage.',
+        'Lens: Free of cracks, dirt, and damage.',
+        'Heads Up Display (HUD): Operational Check, free of damage, replace batteries as needed.'
+    ];
+
     const BUILTIN_MODES = {
+        scbaTour: {
+            key: 'scbaTour',
+            title: 'SCBA Face Mask Tour Checklist',
+            short: 'SCBA Face Mask Tour',
+            templates: { [SCBA_FACE_MASK_POOL]: SCBA_TOUR_TEMPLATE }
+        },
         tour: {
             key: 'tour',
             title: 'Tour PPE Routine Inspection',
@@ -451,7 +678,8 @@
         '299879': 'Structural Gloves',
         '299882': 'Structural Helmet',
         '299900': 'Hood',
-        '299881': 'Structural Boot'
+        '299881': 'Structural Boot',
+        [SCBA_FACE_MASK_POOL]: 'SCBA Face Mask'
     };
 
     const DEFAULT_DEPARTMENT_PROFILE = {
@@ -462,6 +690,7 @@
         expectedGearCount: 10,
         poolTypes: deepCloneSafe(BUILTIN_POOL_TYPES),
         modeTemplates: {
+            scbaTour: deepCloneSafe(BUILTIN_MODES.scbaTour.templates),
             tour: deepCloneSafe(BUILTIN_MODES.tour.templates),
             afterFire: deepCloneSafe(BUILTIN_MODES.afterFire.templates),
             captain: deepCloneSafe(BUILTIN_MODES.captain.templates)
@@ -473,10 +702,12 @@
         initialized: false,
         inspectorName: '',
         selfPrefix: '',
+        ppeRepairProfile: {idNumber:'',shift:'',pickupStation:'',deliveryStation:''},
         tourCoatComment: '',
         peopleDirectory: [],
         captainRosterPrefixes: [],
         captainSets: [],
+        linkedPpeAssets: {},
         localAssetRules: {},
         departmentProfile: DEFAULT_DEPARTMENT_PROFILE
     };
@@ -677,13 +908,24 @@
     const MANAGED_UPDATE_URL = 'https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js';
 
     function openManagedUpdate() {
-        const tmUtilities = 'chrome-extension://dhdgffkkebhmkfjojejmpbldmpobfkfo/options.html#nav=utils';
+        // Chrome deliberately isolates extension pages from website userscripts,
+        // so we cannot type into the Utilities import field. Directly opening a
+        // .user.js file invokes Tampermonkey's native Install/Reinstall flow
+        // when script-URL detection is enabled. The clipboard is a fallback.
         try { GM_setClipboard(MANAGED_UPDATE_URL, 'text'); } catch {}
         try {
-            GM_openInTab(tmUtilities, { active: true, insert: true, setParent: true });
-            setStatus('Update URL copied. In Tampermonkey Utilities, paste into Import from URL and click Install.');
+            const tab = GM_openInTab(MANAGED_UPDATE_URL, {
+                active: true, insert: true, setParent: true
+            });
+            if (!tab) throw new Error('Tampermonkey did not open the install URL.');
+            setStatus('Opened the direct Vector Rebel installer. Approve Install/Reinstall in Tampermonkey. If the browser displays raw script text instead, the update URL is copied for Utilities → Import from URL.');
         } catch (error) {
-            alert('Update URL copied to your clipboard. Open Tampermonkey → Utilities → Import from URL, paste, then click Install.');
+            try {
+                window.open(MANAGED_UPDATE_URL, '_blank', 'noopener,noreferrer');
+                setStatus('Opened the Vector Rebel update link. If direct installation is unavailable, use the copied URL in Tampermonkey Utilities.');
+            } catch {
+                setStatus('Direct installer blocked by the browser. Update URL copied; use Tampermonkey Utilities → Import from URL.', false);
+            }
         }
     }
 
@@ -753,6 +995,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const prefix = clean(person?.prefix).toUpperCase();
         if (!name || !prefix) return null;
 
+        if (rosterHasPersonSpecificPrefix(person)) return null;
         const expected = expectedSurnamePrefix(name);
         const reasons = [];
 
@@ -788,6 +1031,27 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 ? person.equipmentSamples.slice(0, 8)
                 : []
         };
+    }
+
+    // Legacy PPE gear discovery uses a surname-style unique equipment prefix.
+    // Generic inventory series are NOT a person's identity and must not be
+    // auto-linked to a firefighter without verified assignment evidence.
+    // Synthetic personnel identity, never an equipment serial prefix.
+    function ownerRosterKey(name) {
+        const key = masterNameKey(name);
+        if (!key) return '';
+        function h(seed) {
+            let n = seed >>> 0;
+            for (let i = 0; i < key.length; i++) {
+                n = Math.imul(n ^ key.charCodeAt(i), 16777619) >>> 0;
+            }
+            return n.toString(16).toUpperCase().padStart(8, '0');
+        }
+        return 'PERSON-' + h(2166136261) + h(0x9e3779b9);
+    }
+    function rosterHasPersonSpecificPrefix(person) {
+        return !!clean(person?.name) &&
+            clean(person?.prefix).toUpperCase() === ownerRosterKey(person.name);
     }
 
     function rosterNeedsReview(people) {
@@ -964,7 +1228,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ...set,
             memberPrefixes: [...new Set((set.memberPrefixes || []).map(prefix =>
                 prefix === oldPrefixNormalized ? nextPrefix : prefix
-            ))]
+            ))],
+            assignmentWindows: Object.fromEntries(
+                Object.entries(set.assignmentWindows || {}).map(([prefix,range]) =>
+                    [prefix === oldPrefixNormalized ? nextPrefix : prefix,range])
+            )
         }));
         config.captainRosterPrefixes = [...new Set(
             (config.captainRosterPrefixes || []).map(prefix =>
@@ -1261,6 +1529,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     function getMasterRosterState() {
+        const shared=sharedRosterFromCache();
+        if(shared)return shared;
         const local = loadJSON(MASTER_ROSTER_OVERRIDE_KEY, null);
         const normalizedLocal = normalizeMasterRoster(local?.people || []);
         if (local && normalizedLocal.people.length) {
@@ -1281,8 +1551,34 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         };
     }
 
+    // Local administrator edits must remain visible before they are published.
+    function getLocallyMaintainedMasterRosterState(){
+        const local=loadJSON(MASTER_ROSTER_OVERRIDE_KEY,null);
+        const normalized=normalizeMasterRoster(local?.people||[]);
+        if(normalized.people.length)return {
+            source:'local-admin',version:clean(local.version)||'local',
+            updatedAt:clean(local.updatedAt),people:normalized.people
+        };
+        return getMasterRosterState();
+    }
+
+    // Retain legitimate PERSON identities while allowing a legacy master list
+    // to be selected WITHOUT treating its former gear prefix as ownership.
+    // Migration is a display/identity projection only; stored configuration and
+    // equipment records are not modified until the user saves a new roster/set.
     function getActiveMasterRoster() {
-        return getMasterRosterState().people.filter(person => person.active !== false);
+        const seen = new Set();
+        return getMasterRosterState().people
+            .filter(person => person.active !== false)
+            .map(person => rosterHasPersonSpecificPrefix(person)
+                ? person
+                : { ...person, legacyPrefix: person.prefix,
+                    prefix: ownerRosterKey(person.name) })
+            .filter(person => {
+                if (!person.prefix || seen.has(person.prefix)) return false;
+                seen.add(person.prefix);
+                return true;
+            });
     }
 
     function saveLocalMasterRoster(people, metadata = {}) {
@@ -1307,18 +1603,117 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         persistentRemoveRaw(MASTER_ROSTER_REVIEW_KEY);
     }
 
+    // Captain Sets are local to each install. Do not require a shared
+    // administrator-only master roster to let another captain define a crew.
+    // Names are just identity selections: all PPE is discovered through the
+    // exact live Vector Responsible Party owner check.
+    async function readCaptainStationCrew(shift,station){
+        const selectedShift=captainShiftLabel(shift);
+        const stationNumber=Number(station);
+        if(!Number.isInteger(stationNumber)||stationNumber<1||stationNumber>7)
+            throw Error('Choose station 1 through 7.');
+        if(!rebelCommandPaired()&&!await ensureRebelCommandEnrollment(false))
+            throw Error('Connect Rebel Command in Settings before importing a station crew.');
+        const pair=rebelCommandPairing();
+        const args='?action=vr-station-crew&shift='+encodeURIComponent(selectedShift)+
+            '&station='+stationNumber;
+        const result=await new Promise(resolve=>GM_xmlhttpRequest({
+            method:'GET',url:REBEL_COMMAND_ENDPOINT+args,
+            headers:{Authorization:'Bearer '+pair.token,
+                'X-Rebel-Device-ID':pair.deviceId},
+            timeout:15000,
+            onload:r=>resolve({status:r.status,text:r.responseText||''}),
+            onerror:()=>resolve({status:0,text:''}),
+            ontimeout:()=>resolve({status:0,text:''})
+        }));
+        let data={};
+        try{data=JSON.parse(result.text||'{}');}catch{}
+        if(result.status!==200||data.ok!==true)
+            throw Error(clean(data.error||'Station crew service unavailable.').slice(0,160));
+        if(data.scope!=='vector-rebel-dated-station-crew'||
+            data.readOnly!==true||data.shift!==selectedShift||
+            data.station!==stationNumber||data.snapshotDate!=='2026-11-10'||
+            !Array.isArray(data.people)||!Array.isArray(data.unresolved)||
+            !Number.isInteger(data.sourceCount)||data.sourceCount!==
+                data.people.length+data.unresolved.length)
+            throw Error('Station crew response was inconsistent.');
+        // The approved central roster remains authoritative for selection.
+        const approved=new Map(getCaptainPersonOptions().map(p=>[p.prefix,p]));
+        const seen=new Set();
+        for(const raw of data.people){
+            const prefix=clean(raw.prefix).toUpperCase();
+            const candidate=approved.get(prefix);
+            if(!candidate||masterNameKey(candidate.name)!==masterNameKey(raw.name)||
+                seen.has(prefix))
+                throw Error('Station crew contains an unresolved Vector identity. Refresh the approved roster.');
+            seen.add(prefix);
+        }
+        return{...data,people:data.people.map(person=>approved.get(
+            clean(person.prefix).toUpperCase()))};
+    }
+
+    function getCaptainPersonOptions() {
+        const config=getConfig();
+        const published=getMasterRosterState();
+        if(published.source==='shared-command')return getActiveMasterRoster()
+            .map(p=>({name:p.name,prefix:p.prefix}))
+            .sort((a,b)=>a.name.localeCompare(b.name));
+        const sources=[...getActiveMasterRoster(),
+            ...normalizePeopleDirectory(config.peopleDirectory||[]),
+            ...repairSavedPersonNames(),
+            {name:config.inspectorName}];
+        const byName=new Map();
+        for(const raw of sources){
+            const name=clean(raw?.name);
+            if(!name||isOrganizationOrBadRosterName(name))continue;
+            const key=masterNameKey(name);
+            if(!key||byName.has(key))continue;
+            byName.set(key,{name,prefix:ownerRosterKey(name)});
+        }
+        return [...byName.values()].sort((a,b)=>a.name.localeCompare(b.name));
+    }
     function rosterPersonByPrefix(prefix) {
         const wanted = clean(prefix).toUpperCase();
         if (!wanted) return null;
-        const master = getMasterRosterState().people.find(p => p.prefix === wanted);
-        if (master) return master;
-        return getConfig().peopleDirectory.find(p => p.prefix === wanted) || null;
+        const active = getActiveMasterRoster();
+        const current = active.filter(person => person.prefix === wanted);
+        if (current.length === 1) return current[0];
+        // Old Captain Sets may use surname equipment prefixes. Resolve only
+        // their PERSON names, and only when the name points to one active
+        // person. Never use an old prefix as proof of PPE ownership.
+        const legacy = active.filter(person => person.legacyPrefix === wanted);
+        if (legacy.length === 1) return legacy[0];
+        const oldPeople = getConfig().peopleDirectory.filter(p => p.prefix === wanted);
+        if (oldPeople.length === 1) {
+            const samePerson = active.filter(person =>
+                masterNameKey(person.name) === masterNameKey(oldPeople[0].name));
+            if(samePerson.length===1)return samePerson[0];
+        }
+        const personal=(typeof getCaptainPersonOptions==='function' ?
+            getCaptainPersonOptions() : []).filter(person=>person.prefix===wanted);
+        return personal.length===1?personal[0]:null;
     }
 
     function resolveCaptainSetPeople(set, config = getConfig()) {
+        const seen = new Set();
         return (set?.memberPrefixes || [])
-            .map(prefix => rosterPersonByPrefix(prefix) || config.peopleDirectory.find(p => p.prefix === prefix))
-            .filter(Boolean);
+            .map(prefix => {
+                const person = rosterPersonByPrefix(prefix);
+                if (!person) return null;
+                return {
+                    ...person,
+                    gearSearchPrefix: clean(
+                        set?.gearSearchPrefixes?.[person.prefix] ||
+                        set?.gearSearchPrefixes?.[prefix] ||
+                        person.gearSearchPrefix
+                    ).toUpperCase()
+                };
+            })
+            .filter(person => {
+                if (!person || seen.has(person.prefix)) return false;
+                seen.add(person.prefix);
+                return true;
+            });
     }
 
     function masterRosterExportPayload(people = getMasterRosterState().people) {
@@ -1333,6 +1728,37 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 active: person.active !== false
             }))
         };
+    }
+
+    // Only the owner's existing admin-paired Vector Rebel installation can
+    // publish. Firefighters receive the approved names read-only.
+    async function publishLocalMasterRoster(){
+        const local=loadJSON(MASTER_ROSTER_OVERRIDE_KEY,null);
+        if(!Array.isArray(local?.people)||!local.people.length)
+            throw Error('Save your local Master Roster before sharing it.');
+        const normalized=normalizeMasterRoster(local.people);
+        if(!normalized.people.length||normalized.rejected.length||normalized.merged.length||
+           normalized.people.length!==local.people.length)
+            throw Error('Review the master list: invalid or duplicate people cannot be shared.');
+        if(!rebelCommandPaired()||rebelCommandPairing()?.autoEnrolled)
+            throw Error('Only the administrator-paired installation can share the master list.');
+        const pair=rebelCommandPairing();
+        const response=await new Promise(resolve=>GM_xmlhttpRequest({
+            method:'POST',url:REBEL_COMMAND_ENDPOINT+'?action=vr-publish-roster',
+            headers:{Authorization:'Bearer '+pair.token,
+                'X-Rebel-Device-ID':pair.deviceId,'Content-Type':'application/json'},
+            data:JSON.stringify({people:masterRosterExportPayload(normalized.people).people}),
+            timeout:15000,
+            onload:r=>resolve({status:r.status,text:r.responseText||''}),
+            onerror:()=>resolve({status:0,text:''}),
+            ontimeout:()=>resolve({status:0,text:''})
+        }));
+        let receipt;
+        try{receipt=JSON.parse(response.text||'{}');}catch{receipt={};}
+        if(response.status!==200||receipt.ok!==true||!receipt.version||
+           receipt.count!==normalized.people.length)
+            throw Error(clean(receipt.error||'Could not confirm that the roster was published.'));
+        return receipt;
     }
 
     function prefixesOverlap(aRaw, bRaw) {
@@ -1373,7 +1799,29 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             out.push({
                 id: clean(raw?.id) || `set-${Date.now()}-${out.length}-${Math.random().toString(36).slice(2, 8)}`,
                 name,
+                // Older Captain Sets are C-shift sets. Never infer A/B from
+                // the saved firefighter names or this browser's account.
+                shift: ['A','B','C'].includes(clean(raw?.shift).toUpperCase())?
+                    clean(raw.shift).toUpperCase():'C',
                 memberPrefixes: members,
+                // Date-scoped temporary Captain Set members are not permanent
+                // historical roster members. Store precise tour-start bounds.
+                assignmentWindows: Object.fromEntries(
+                    Object.entries(raw?.assignmentWindows || {})
+                        .map(([prefix,range]) => [clean(prefix).toUpperCase(), {
+                            startDate: validDateKey(range?.startDate) || '',
+                            endDate: validDateKey(range?.endDate) || ''
+                        }])
+                        .filter(([prefix,range]) => members.includes(prefix) &&
+                            range.startDate && (!range.endDate ||
+                            range.endDate >= range.startDate))
+                ),
+                gearSearchPrefixes: Object.fromEntries(
+                    Object.entries(raw?.gearSearchPrefixes || {})
+                        .map(([id,term]) => [clean(id).toUpperCase(), clean(term).toUpperCase()])
+                        .filter(([id,term]) => id && term && term.length <= 60 &&
+                            /^[A-Z0-9._-]+$/.test(term) && !term.startsWith('PERSON-'))
+                ),
                 orphanedPrefixes: members.filter(prefix => !validPrefixes.has(prefix))
             });
             seenNames.add(name.toLowerCase());
@@ -1484,6 +1932,122 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         };
     }
 
+    // Exact-ID supplemental gear directory. This is a verified LOCAL lookup
+    // index, not Vector's assignment database or an inspection completion.
+    // Importantly these entries must not be mixed into Tour/After-Fire/Captain
+    // inspection templates without mapping the appropriate Vector check.
+    function normalizeLinkedPpeAssets(raw) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+        const result = {};
+        let total = 0;
+        for (const [nameRaw, records] of Object.entries(raw)) {
+            const key = masterNameKey(nameRaw);
+            if (!key || !Array.isArray(records) || total >= 1000) continue;
+            const distinct = new Set();
+            const list = [];
+            for (const record of records) {
+                const assetId = clean(record?.assetId).toUpperCase();
+                const pool = clean(record?.pool);
+                const itemId = clean(record?.itemId);
+                const ownerName = clean(record?.ownerName);
+                if (!assetId || assetId.length > 160 ||
+                    !/[A-Z0-9]/.test(assetId) ||
+                    /[\u0000-\u001F\u007F]/.test(assetId) ||
+                    !/^\d+$/.test(pool) || !/^\d+$/.test(itemId) ||
+                    masterNameKey(ownerName) !== key ||
+                    distinct.has(pool + ':' + itemId)) continue;
+                distinct.add(pool + ':' + itemId);
+                list.push({
+                    assetId, pool, itemId, ownerName,
+                    type: clean(record.type).slice(0, 100),
+                    status: clean(record.status).slice(0, 100),
+                    verifiedAt: clean(record.verifiedAt).slice(0, 50)
+                });
+                total++;
+                if (list.length >= 30 || total >= 1000) break;
+            }
+            if (list.length) result[key] = list;
+        }
+        return result;
+    }
+
+    function linkedPpeForPerson(name, config = getConfig()) {
+        return normalizeLinkedPpeAssets(config?.linkedPpeAssets || {})[masterNameKey(name)] || [];
+    }
+
+    function linkVerifiedPpeAsset(config, ownerName, item, expectedId) {
+        const key = masterNameKey(ownerName);
+        const expected = clean(expectedId).toUpperCase();
+        if (!key || !expected || expected.length > 160 ||
+            /[\u0000-\u001F\u007F]/.test(expected) ||
+            !/[A-Z0-9]/.test(expected)) {
+            throw new Error('Select a person and enter a valid exact PPE equipment name.');
+        }
+        if (clean(item?.assetId).toUpperCase() !== expected ||
+            masterNameKey(item?.ownerName) !== key ||
+            !/^\d+$/.test(clean(item?.pool)) ||
+            !/^\d+$/.test(clean(item?.itemId))) {
+            throw new Error('The exact PPE ID and Responsible Party did not both match. No link was saved.');
+        }
+        if (clean(item?.status).toLowerCase() !== 'in service') {
+            throw new Error(expected + ' is not In Service. No active PPE link was saved.');
+        }
+        const directory = normalizeLinkedPpeAssets(config?.linkedPpeAssets || {});
+        // Never silently attach a single item to two different people.
+        for (const [name, records] of Object.entries(directory)) {
+            if (name !== key && records.some(record =>
+                record.pool === clean(item.pool) && record.itemId === clean(item.itemId))) {
+                throw new Error('This PPE item is already linked locally to another person. Remove that old link after verifying the Vector assignment.');
+            }
+        }
+        const current = directory[key] || [];
+        const filtered = current.filter(record => !(
+            record.pool === clean(item.pool) && record.itemId === clean(item.itemId)));
+        if (filtered.length >= 30) throw new Error('30 saved exact-ID links per person is the limit.');
+        directory[key] = [...filtered, {
+            assetId: expected,
+            pool: clean(item.pool), itemId: clean(item.itemId),
+            ownerName: clean(item.ownerName),
+            type: clean(item.type).slice(0, 100),
+            status: clean(item.status).slice(0, 100),
+            verifiedAt: new Date().toISOString()
+        }];
+        config.linkedPpeAssets = directory;
+        return directory[key].length;
+    }
+
+    function unlinkPpeAsset(config, name, pool, itemId) {
+        const directory = normalizeLinkedPpeAssets(config?.linkedPpeAssets || {});
+        const key = masterNameKey(name);
+        if (!key || !directory[key]) return false;
+        const oldLength = directory[key].length;
+        directory[key] = directory[key].filter(record =>
+            record.pool !== clean(pool) || record.itemId !== clean(itemId));
+        if (!directory[key].length) delete directory[key];
+        config.linkedPpeAssets = directory;
+        return (directory[key]?.length || 0) !== oldLength;
+    }
+
+    async function verifyExactPpeOwnership(ownerName, assetId, progress = null) {
+        const name = clean(ownerName);
+        const id = clean(assetId).toUpperCase();
+        if (!name || !id || id.length > 160 || !/[A-Z0-9]/.test(id) ||
+            /[\u0000-\u001F\u007F]/.test(id)) {
+            throw new Error('Choose a valid person and enter the complete equipment ID.');
+        }
+        // This is ONE exact-item search, not a department crawl. The shared
+        // searcher checks Responsible Party before returning any gear.
+        const result = await scanPpeOwnerSearch({ name, prefix: id }, progress);
+        const matches = result.items.filter(item =>
+            clean(item.assetId).toUpperCase() === id &&
+            masterNameKey(item.ownerName) === masterNameKey(name));
+        if (matches.length !== 1) {
+            throw new Error('Vector did not confirm exactly one item named ' + id +
+                ' assigned to ' + name + '. No link was saved.');
+        }
+        return matches[0];
+    }
+
     function migrateV2Config() {
         const existingV3 = loadJSON(CONFIG_KEY, null);
         if (existingV3) return existingV3;
@@ -1532,6 +2096,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             peopleDirectory: people,
             captainRosterPrefixes: deriveCaptainRosterPrefixes(legacy, people, captainSets),
             captainSets,
+            linkedPpeAssets: {},
             localAssetRules: legacyRules,
             departmentProfile: normalizeDepartmentProfile(legacy.departmentProfile)
         };
@@ -1557,11 +2122,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ...stored,
             schemaVersion: 7,
             inspectorName: clean(stored.inspectorName),
+            ppeRepairProfile: Object.fromEntries(
+                ['idNumber','shift','pickupStation','deliveryStation'].map(key=>
+                    [key,clean(String(stored.ppeRepairProfile?.[key]||''))])),
             selfPrefix,
             tourCoatComment: clean(stored.tourCoatComment),
             peopleDirectory: people,
             captainRosterPrefixes: captainSets.length ? deriveCaptainRosterPrefixes(stored, people, captainSets) : [],
             captainSets,
+            linkedPpeAssets: normalizeLinkedPpeAssets(stored.linkedPpeAssets),
             localAssetRules: normalizeLocalAssetRules(
                 stored.localAssetRules || stored.defaultFailures || {},
                 selfPrefix
@@ -1586,6 +2155,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ...builtin,
             templates: deepClone(config.departmentProfile?.modeTemplates?.[modeKey] || {})
         };
+    }
+
+    // Each Tour run may contain both structural gear and a SCBA Face Mask.
+    // Their official Vector checklist titles and form schemas are different.
+    function getItemInspectionMode(run, item) {
+        const key = item?.inspectionModeKey || run?.modeKey;
+        const mode = getMode(key);
+        if (!mode) throw new Error('No inspection mode mapped for ' + (item?.assetId || 'equipment'));
+        return mode;
     }
 
     function getPoolType(pool, config = getConfig()) {
@@ -1621,7 +2199,31 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     });
 
     function getRun() {
-        return loadJSON(RUN_KEY, null);
+        const run = loadJSON(RUN_KEY, null);
+        if (!run || typeof run !== 'object' || Array.isArray(run)) return null;
+        // A different open Vector tab can still hold an old localStorage run.
+        // Previously, clearing the GM key let that tab resurrect an already
+        // completed inspection after the last item was archived. Retire only
+        // an exact run already present in the verified local archive.
+        const summary = loadJSON(LAST_SUMMARY_KEY, null);
+        const verifiedItems = summary?.groups && typeof summary.groups === 'object'
+            ? Object.values(summary.groups).reduce(
+                (count, group) => count + (Array.isArray(group?.items) ? group.items.length : 0), 0)
+            : -1;
+        if (run.runId && summary?.runId === run.runId &&
+            summary.startedAt === run.startedAt &&
+            summary.modeKey === run.modeKey &&
+            summary.completedAt &&
+            Number(summary.total) === run.items?.length &&
+            verifiedItems === run.items?.length &&
+            run.items?.length > 0) {
+            // JSON null is a durable cross-tab tombstone, not a missing key.
+            // Never rewrite unverified in-flight inspection data.
+            persistentSetRaw(RUN_KEY, 'null');
+            releaseRunOwnership();
+            return null;
+        }
+        return run;
     }
 
     function getRunOwner() {
@@ -1692,9 +2294,20 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     function clearRun() {
-        persistentRemoveRaw(RUN_KEY);
+        // A missing GM value allows another open Check It tab's stale localStorage
+        // to rehydrate and resurrect this run. Persist JSON null instead.
+        persistentSetRaw(RUN_KEY, 'null');
         releaseRunOwnership();
         refreshPanelInfo();
+    }
+
+    function isReportableVectorFailure(message){
+        const safe=telemetrySafeErrorMessage(message);
+        // Only actual helper failures, not normal attendance/absence results,
+        // user cancellations, or missing credentials during setup.
+        if(!safe||/^(?:no active|not assigned|nothing selected|run aborted)/i.test(safe))
+            return false;
+        return /\b(error|failed|failure|unexpected|crash(?:ed)?|exception)\b|\bstopped:|\bcould not (?:find|locate|load|verify)|\bexpected asset id\b/i.test(safe);
     }
 
     function setStatus(message, ok = true) {
@@ -1706,8 +2319,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         if (!ok) {
             const badge = document.getElementById('vector-ppe-mini-badge-v1');
             if (badge) {
+                badge.dataset.failure='1';
                 badge.textContent = '!';
-                badge.style.display = 'block';
+                badge.style.display = 'flex';
+            }
+            if(isReportableVectorFailure(message))
+                void reportRebelErrorToCommand(message,'ui_status','failure');
+        }else{
+            const badge=document.getElementById('vector-ppe-mini-badge-v1');
+            if(badge?.dataset.failure==='1'){
+                badge.dataset.failure='0';
+                updateMinimizedPanelBadge();
             }
         }
     }
@@ -1872,7 +2494,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function buildDiagnostic(message, run = getRun()) {
         const item = run?.items?.[run?.index] || null;
-        const mode = run?.modeKey ? getMode(run.modeKey) : null;
+        const mode = run?.modeKey ? getItemInspectionMode(run, item) : null;
         const inspection = currentInspection();
         const config = getConfig();
         const privateNameNeedles = [config.inspectorName, ...(config.peopleDirectory || []).map(p => p.name)]
@@ -1971,7 +2593,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             metadata: { stage: run?.phase || 'unknown', itemCount: run?.items?.length || 0 }
         });
         saveDiagnostic(message, run);
+        void reportRebelErrorToCommand(message,run?.modeKey||'ppe',run?.phase||'stopped');
         if (run) {
+            const deferred = loadJSON(CAPTAIN_DAILY_DEFERRED_KEY, null);
+            if (deferred?.runId === run.runId) persistentRemoveRaw(CAPTAIN_DAILY_DEFERRED_KEY);
             const priorPhase = run.phase;
             run.phase = 'stopped';
             run.stoppedFromPhase = priorPhase;
@@ -2335,7 +2960,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const owner = item.ownerName || run.ownerName || 'Unknown';
             groups[owner] ||= { total: 0, failed: 0, items: [] };
             groups[owner].total += 1;
-            const failed = item.q1 === 'fail' || item.q2 === 'fail';
+            const failed = item.inspectionModeKey === 'scbaTour'
+                ? (item.scbaAnswers || []).includes('fail')
+                : item.q1 === 'fail' || item.q2 === 'fail';
             if (failed) groups[owner].failed += 1;
             const completion = (run.completed || []).find(c => c.assetId === item.assetId);
             groups[owner].items.push({
@@ -2343,6 +2970,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 type: item.type,
                 q1: item.q1,
                 q2: item.q2,
+                inspectionModeKey: item.inspectionModeKey || run.modeKey,
+                scbaAnswers: Array.isArray(item.scbaAnswers) ? item.scbaAnswers.slice() : null,
                 failureNote: item.failureNote || '',
                 signatureLabel: completion?.signatureLabel || '',
                 evidence: completion?.evidence || '',
@@ -2549,14 +3178,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     details.appendChild(header);
 
                     for (const item of group.items || []) {
-                        const failed = item.q1 === 'fail' || item.q2 === 'fail';
+                        const failed = item.scbaAnswers
+                            ? item.scbaAnswers.includes('fail')
+                            : item.q1 === 'fail' || item.q2 === 'fail';
                         const row = document.createElement('div');
                         row.style.cssText =
                             `padding:7px 9px;margin:3px 0;border:1px solid #e0e6ea;border-radius:6px;${failed ? 'background:#fff4f4;' : ''}`;
                         row.innerHTML =
                             `<b>${escapeHtml(item.assetId || '')}</b> — ${escapeHtml(item.type || '')}` +
-                            `<br>Age/label: <b>${escapeHtml((item.q1 || '').toUpperCase())}</b> · ` +
-                            `Damage: <b>${escapeHtml((item.q2 || '').toUpperCase())}</b>` +
+                            (item.scbaAnswers
+                                ? `<br><b>SCBA Face Mask Tour:</b> ${item.scbaAnswers.length} question(s) — ${item.scbaAnswers.map(v => escapeHtml(v.toUpperCase())).join(', ')}`
+                                : `<br>Age/label: <b>${escapeHtml((item.q1 || '').toUpperCase())}</b> · ` +
+                                  `Damage: <b>${escapeHtml((item.q2 || '').toUpperCase())}</b>`) +
                             (item.failureNote
                                 ? `<br><b>Failure note:</b> ${escapeHtml(item.failureNote)}`
                                 : '') +
@@ -2717,6 +3350,26 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const anchors = getVisiblePpeAnchors(root);
             report.checks.searchInputFound = true;
             report.checks.visiblePpeAnchorCount = anchors.length;
+            // Local-only read-only evidence of the actual assignment column layout.
+            // Do not transmit to telemetry or change any Vector record.
+            report.checks.ownerColumnDiagnostics = anchors.slice(0, 8).map(a => {
+                const row = ppeRowForAnchor(a);
+                const cells = row ? [...row.querySelectorAll(':scope > td, :scope > [role="cell"]')] : [];
+                const table = row?.closest('table');
+                const headers = table ? [...table.querySelectorAll('thead th')].map(h => clean(h.innerText || h.textContent || '').slice(0, 90)) : [];
+                const ni = headers.findIndex(h => h.toLowerCase() === 'name');
+                const assetId = ni >= 0 ? clean(cells[ni]?.innerText || cells[ni]?.textContent || '') : '';
+                return {
+                    assetId,
+                    columns: cells.map((cell, index) => ({
+                        index,
+                        heading: headers[index] || '',
+                        dataLabel: clean(cell.getAttribute('data-label') || cell.getAttribute('aria-label') || '').slice(0, 90),
+                        text: clean(cell.innerText || cell.textContent || '').slice(0, 180)
+                    })),
+                    candidateName: likelyPersonFromPpeRow(row, assetId)
+                };
+            });
             report.checks.anchorSamples = anchors.slice(0, 8).map(a => ({
                 ariaLabel: clean(a.getAttribute('aria-label') || ''),
                 title: clean(a.getAttribute('title') || ''),
@@ -2751,6 +3404,80 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const close = makeButton('Close');
         close.onclick = () => overlay.remove();
         box.append(copy, download, close);
+    }
+
+
+    // "Report Problem" is an immediate, authenticated incident submission, not
+    // a shortcut to Settings. The receipt is required before claiming delivery.
+    function showProblemReport() {
+        const stopped = loadJSON(STOPPED_RUN_KEY, null);
+        const last = loadJSON(LAST_DIAGNOSTIC_KEY, null);
+        const run = getRun() || stopped;
+        const message = stopped?.stopReason || last?.message || 'Manual problem report';
+        const details = detailedProblemReport(message, run?.modeKey || '', run?.stoppedFromPhase || run?.phase || '');
+        const reportId = 'feedback:vr-manual:' + Date.now() + ':' + Math.random().toString(36).slice(2, 10);
+        const { overlay, box } = makeOverlayBox('850px');
+        const title = document.createElement('h2');
+        title.textContent = 'Report Vector Rebel Problem';
+        title.style.cssText = 'font:700 20px Arial;color:#153e5c;margin:0 0 8px;';
+        const explanation = document.createElement('p');
+        explanation.textContent = 'Sending the last failure, software version, inspection stage, expected PPE item, and read-only page identity evidence to Rebel Command. No signatures, inspection answers, or credentials are included.';
+        explanation.style.cssText = 'font:12px/1.45 Arial;color:#425d6f;margin:4px 0 10px;';
+        const status = document.createElement('p');
+        status.setAttribute('role', 'status');
+        status.style.cssText = 'font:700 13px Arial;color:#285872;background:#eef5fb;padding:10px;border-radius:7px;';
+        status.textContent = 'Sending detailed report to Rebel Command...';
+        const preview = document.createElement('textarea');
+        preview.value = details;
+        preview.readOnly = true;
+        preview.style.cssText = 'width:100%;height:200px;box-sizing:border-box;font:11px/1.4 Consolas,monospace;margin:8px 0;';
+        const retry = makeButton('Retry Sending', { background: '#176b8e', color: '#fff' });
+        retry.disabled = true;
+        const copy = makeButton('Copy Report');
+        copy.onclick = async () => {
+            status.textContent = await copyText(details) ?
+                'Diagnostic copied. It can be shared with the maintainer.' :
+                'Could not copy the diagnostic. Select the report text to copy manually.';
+        };
+        const close = makeButton('Close');
+        close.onclick = () => overlay.remove();
+        box.append(title, explanation, status, preview, retry, copy, close);
+        const deliver = async () => {
+            retry.disabled = true;
+            status.textContent = 'Sending detailed report to Rebel Command...';
+            let received = false;
+            try {
+                received = await submitRebelCommandFeedback(details, {
+                    suggestionId: reportId,
+                    title: 'Vector Rebel detailed problem report',
+                    priority: 'high',
+                    sourceContext: 'manual_problem_report'
+                });
+            } catch { received = false; }
+            if (received) {
+                saveJSON(PENDING_ERROR_REPORTS_KEY,
+                    pendingErrorReports().filter(item => item.id !== reportId));
+                status.textContent = 'RECEIVED by Rebel Command. Report ID: ' + reportId;
+                setStatus('Detailed problem report received by Rebel Command.');
+                retry.disabled = true;
+            } else {
+                const pending = pendingErrorReports();
+                if (!pending.some(item => item.id === reportId)) {
+                    pending.push({
+                        id: reportId, message: details, at: Date.now(),
+                        title: 'Vector Rebel detailed problem report',
+                        context: 'manual_problem_report'
+                    });
+                    saveJSON(PENDING_ERROR_REPORTS_KEY, pending.slice(-20));
+                }
+                status.textContent = 'Delivery NOT confirmed. Report saved locally for automatic retry. ' +
+                    'You may copy the report here if needed.';
+                setStatus('Problem report queued; Rebel Command has not confirmed receipt.', false);
+                retry.disabled = false;
+            }
+        };
+        retry.onclick = deliver;
+        void deliver();
     }
 
     function showDiagnostics() {
@@ -3190,7 +3917,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             'no items found',
             'no equipment found',
             'no records found',
-            'nothing found'
+            'nothing found',
+            'no ppe item found'
         ].some(needle => text.includes(needle));
     }
 
@@ -3376,23 +4104,65 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         );
     }
 
-    async function discoverOwnerGear(prefix, modeKey) {
-        const searchResult = await searchPrefix(prefix);
-        const items = searchResult.items || [];
+    async function discoverOwnerGear(owner, modeKey, inventory) {
+        if (!inventory || inventory.source !== 'Vector PPE Responsible Party column' ||
+            !Array.isArray(inventory.items)) {
+            throw new Error('Fresh PPE Responsible Party scan is required.');
+        }
+        const ownerKey = masterNameKey(owner?.name);
+        if (!ownerKey) throw new Error('Missing inspector-selected owner name.');
+        const items = inventory.items.filter(item => item.ownerName &&
+            masterNameKey(item.ownerName) === ownerKey &&
+            clean(item.status).toLowerCase() === 'in service');
         const mode = getMode(modeKey);
-
-        const unknown = items.filter(item => !mode?.templates?.[item.pool] || getPoolType(item.pool) === 'UNKNOWN');
-        const mapped = items
-            .filter(item => !unknown.some(u => u.pool === item.pool && u.itemId === item.itemId))
-            .map(item => ({
-                ...item,
-                template: mode.templates[item.pool]
-            }));
-
+        const scba = modeKey === 'tour' ? getMode('scbaTour') : null;
+        if (scba && items.some(item => item.pool === '299947') &&
+            scba.templates['299947'] !== '119122') {
+            throw new Error('SCBA Face Mask Tour Checklist template mapping is not the verified 119122. Inspection blocked.');
+        }
+        const applicableTemplate = item => item.pool === '299947' && scba
+            ? { template: scba.templates[item.pool], inspectionModeKey: 'scbaTour' }
+            : mode?.templates?.[item.pool]
+                ? { template: mode.templates[item.pool], inspectionModeKey: modeKey }
+                : null;
+        const unmatched = items.filter(item =>
+            !applicableTemplate(item) || getPoolType(item.pool) === 'UNKNOWN');
+        // Responsible Party covers ALL assigned equipment. SCBA, water-rescue,
+        // and other distinct equipment pools have their own inspections and
+        // must not block a routine structural PPE mode, but a newly introduced
+        // structural PPE pool without a mapped template MUST block.
+        // These live-confirmed pool names are distinct from structural bunker PPE.
+        // Recognize ONLY the matching pool + type combination; do not infer that
+        // any other unmapped coat, pant, or helmet can be skipped. They remain
+        // visible as other assigned equipment, never auto-inspected or certified.
+        const distinctPpePoolTypes = {
+            '299896': /^dual certification coat\b/i,
+            '299897': /^dual certification pant\b/i,
+            '300006': /^wildland helmet\b/i
+        };
+        const structural = /\b(?:bunker|structural|turnout|hood|helmet|glove|boot|coat|pant)\b/i;
+        const supplemental = unmatched.filter(item => {
+            const type = clean(item.type);
+            if (!type || type.toUpperCase() === 'UNKNOWN') return false;
+            const recognized = distinctPpePoolTypes[clean(item.pool)];
+            if (recognized && recognized.test(type)) return true;
+            return !structural.test(type);
+        });
+        const supplementalIds = new Set(supplemental.map(item =>
+            item.pool + ':' + item.itemId));
+        const unknown = unmatched.filter(item =>
+            !supplementalIds.has(item.pool + ':' + item.itemId));
+        const blocked = new Set(unmatched.map(item => item.pool + ':' + item.itemId));
+        const mapped = items.filter(item => !blocked.has(item.pool + ':' + item.itemId))
+            .map(item => ({...item, ...applicableTemplate(item)}));
         return {
-            items: mapped,
-            unknown,
-            searchMeta: searchResult
+            items: mapped, unknown, supplemental,
+            searchMeta: {
+                source: inventory.source,
+                capturedAt: inventory.capturedAt,
+                pageCount: inventory.pageCount,
+                verifiedBy: 'Responsible Party'
+            }
         };
     }
 
@@ -3511,7 +4281,83 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return !!m && m[1] === item.pool && m[2] === item.itemId;
     }
 
+
+    // When Vector clips a table PPE Name like BALDREE-10948322-F...,
+    // or adds a display ellipsis to an already complete name (BU...),
+    // recover the full value ONLY from this same pool/item detail heading
+    // plus its exact labeled serial. Never guess the missing suffix.
+    function resolveClippedPpeNameFromVerifiedDetail(item) {
+        if (!item || !isAssetPageFor(item)) return '';
+        const clipped = clean(item.assetId).toUpperCase();
+        if (!/(?:\.{3}|\u2026)$/.test(clipped)) return '';
+        const stem = clipped.replace(/(?:\.{3}|\u2026)$/, '');
+        if (stem.length < 8) return '';
+        // Real SCBA mask serials can be ALPHANUMERIC, e.g. E004015306F73814.
+        // A numeric-only extraction misidentifies the digits embedded inside
+        // that serial and rejects the correct equipment page.
+        // Use the independent, labeled Vector Serial Number exactly. Accept
+        // it only as a COMPLETE token in the listed clipped name stem.
+        let observedSerial = '';
+        try {
+            observedSerial = clean(repairReadDetailDocument(document).serial).toUpperCase();
+        } catch { return ''; }
+        if (observedSerial.length < 6 || observedSerial.length > 100 ||
+            !/^[A-Z0-9-]+$/.test(observedSerial) || !/\d/.test(observedSerial)) return '';
+        const serialToken = observedSerial;
+        const exactSerialToken = new RegExp(
+            `(?:^|[^A-Z0-9])${escapeRegex(serialToken)}(?=$|[^A-Z0-9])`, 'i'
+        );
+        if (!exactSerialToken.test(stem)) return '';
+
+        const headings = [...document.querySelectorAll('h1,h2,h3,h4,[data-testid*="title"]')]
+            .filter(visible)
+            .filter(el => !el.closest('#' + PANEL_ID + ', #' + OVERLAY_ID))
+            .map(el => uiText(el.textContent || ''))
+            .filter(Boolean);
+        const fullNames = new Set();
+        for (const title of headings) {
+            const match = title.match(
+                /^(Bunker (?:Coat|Pant)|Structural (?:Gloves|Helmet|Boots?)|SCBA (?:Face )?Mask|PPE (?:Coat|Pant|Hood)|Hood|Helmet|Boots)\s*:\s*([A-Z0-9_. -]+)$/i
+            );
+            if (!match) continue;
+            const expectedType = normalizedPpeTypeText(item.type);
+            const observedType = normalizedPpeTypeText(match[1]);
+            if (expectedType && observedType && expectedType !== observedType) return '';
+            const full = clean(match[2]).toUpperCase();
+            if (full.startsWith(stem) && full.length >= stem.length &&
+                full.length <= 160 && !/(?:\.{3}|\u2026)$/.test(full) &&
+                exactSerialToken.test(full)) fullNames.add(full);
+        }
+        // Ambiguous or conflicting headings fail closed.
+        return fullNames.size === 1 ? [...fullNames][0] : '';
+    }
+
     let identityElementCache = { key: '', element: null };
+
+    function findAssetSerialEvidence(item) {
+        if (!item || !isAssetPageFor(item)) return null;
+        const expected=clean(item.assetId).toUpperCase();
+        const suffix=expected.match(/(?:^|[-_])([A-Z0-9]{6,})(?:[-_](?:FL|BU))?$/i)?.[1]||'';
+        const listed=clean(item.serial).toUpperCase();
+        const accepted=[expected,suffix,listed].filter(value =>
+            value.length>=6 && /\d/.test(value) &&
+            !/^(TAGS?|UNKNOWN|SERIAL)$/i.test(value));
+        if(!accepted.length) return null;
+        const serial=clean(repairReadDetailDocument(document).serial).toUpperCase();
+        if(!serial || !accepted.includes(serial)) return null;
+
+        // A conflicting explicit equipment title overrides a matching serial.
+        // A URL alone, table row elsewhere, or partial asset prefix is NOT enough.
+        const titles=[...document.querySelectorAll('h1,h2,h3,h4,[data-testid*="title"]')]
+            .filter(visible)
+            .map(node=>uiText(node.textContent||''));
+        for(const title of titles){
+            const match=title.match(/^(?:Bunker (?:Coat|Pant)|Structural (?:Gloves|Helmet|Boots?)|SCBA (?:Face )?Mask|PPE (?:Coat|Pant|Hood)|Hood|Helmet|Boots)\s*:\s*([A-Z0-9_.-]+)/i);
+            if(match && match[1].toUpperCase()!==expected) return null;
+        }
+        const proof=document.querySelector('main') || document.querySelector('h1') || document.body;
+        return visible(proof)?proof:null;
+    }
 
     function findAssetIdentityElement(item) {
         if (!item || !isAssetPageFor(item)) return null;
@@ -3540,15 +4386,20 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             .filter(visible)
             .filter(el => !el.closest(`#${PANEL_ID}, #${OVERLAY_ID}, table, [role="table"], [role="grid"]`))
             .map(el => ({ el, text: uiText(el.textContent || '') }))
-            .filter(x => x.text.length > 0 && x.text.length <= 220 && tokenPattern.test(x.text.toUpperCase()))
+            .filter(x => x.text.length > 0 && x.text.length <= 1000 && tokenPattern.test(x.text.toUpperCase()))
             .sort((a, b) => a.text.length - b.text.length);
 
         let candidates = scan(primarySelectors);
-        // Compatibility fallback for a Vector markup change. This runs only if
-        // targeted heading/title selectors failed, and the result is then cached.
-        if (!candidates.length) candidates = scan('div,span,strong,b');
+        // Compatibility fallback when a real Vector item heading is nested
+        // inside an unexpected wrapper. Still require a standalone full ID.
+        if (!candidates.length) candidates = scan('div,span,strong,b,p,a');
 
-        const found = candidates[0]?.el || null;
+        // Some Vector PPE item pages show the serial number but omit the PPE
+        // Name string from the header. Accept the page only when BOTH the
+        // exact pool/item URL and a labeled Serial Number match the verified
+        // Responsible Party row. A conflicting explicit PPE heading rejects
+        // this fallback rather than guessing ownership.
+        const found = candidates[0]?.el || findAssetSerialEvidence(item);
         identityElementCache = { key: cacheKey, element: found };
         return found;
     }
@@ -3560,10 +4411,37 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function verifyExpectedAssetPage(item) {
         if (!isAssetPageFor(item)) return false;
         try {
-            await waitFor(() => findAssetIdentityElement(item), 10000, 150);
+            await waitFor(() => findAssetIdentityElement(item), 18000, 180);
             return true;
         } catch {
             return false;
+        }
+    }
+
+    // One verification path for Tour and READ-ONLY Captain checks.
+    // PPE list labels can be clipped (e.g. BALDREE-10948322-F...).
+    // Recheck evidence WHILE Vector hydrates this exact pool/item detail page:
+    // neither a clipped label nor a guessed suffix may certify identity.
+    async function verifyPpeDetailIdentity(item) {
+        if (!item || !isAssetPageFor(item)) return null;
+        const clipped = /(?:\.{3}|\u2026)$/.test(clean(item.assetId));
+        if (!clipped) {
+            return await verifyExpectedAssetPage(item)
+                ? { verifiedItem: item, restoredName: '' } : null;
+        }
+        try {
+            return await waitFor(() => {
+                if (!isAssetPageFor(item)) return null;
+                const restoredName = resolveClippedPpeNameFromVerifiedDetail(item);
+                if (!restoredName) return null;
+                const verifiedItem = { ...item, assetId: restoredName };
+                // BOTH recovered exact name AND visible exact-page identity
+                // are necessary in the SAME poll. Never trust a clipped name.
+                return findAssetIdentityElement(verifiedItem)
+                    ? { verifiedItem, restoredName } : null;
+            }, 18000, 180);
+        } catch {
+            return null;
         }
     }
 
@@ -3875,12 +4753,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function rowLooksLikeCompletedModeEntry(row, modeTitle) {
         const text = itemLogRowText(row);
-        return !!(
-            text &&
-            uiIncludes(text, modeTitle) &&
-            /\bCOMPLETED?\b/i.test(text) &&
-            !/\bINCOMPLETE\b/i.test(text)
-        );
+        if(!text || !uiIncludes(text,modeTitle) ||
+           /\bINCOMPLETE\b/i.test(text))return false;
+        // Vector's real native Item Log renders adjacent title/status text
+        // as "SCBA InspectionCOMPLETE" with no word boundary. Preserve
+        // positive COMPLETE detection for that layout without accepting
+        // INCOMPLETE or another form's completion badge.
+        const completedBesideTitle=new RegExp(
+            escapeRegex(uiText(modeTitle))+'\\s*COMPLETED?\\b','i').test(text);
+        return /\bCOMPLETED?\b/i.test(text) || completedBesideTitle;
     }
 
     // Returns { rows, parserPath } or null when the history region cannot be read
@@ -4285,13 +5166,23 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     let captainDailyBusy = false;
     let captainDailyCancelSerial = 0;
 
-    // Michael's normal 48/96 rotation is two consecutive 24-hour shifts followed
-    // by four days off. Sep 22, 2026 is a verified first-shift anchor from the
-    // current CrewSense/Scout schedule. The picker always exposes the inferred
-    // start date so a trade or special assignment can be audited explicitly.
+    // Verified staffing rule: 48/96 with ordered cycle C,C,A,A,B,B, based
+    // on its 2026-01-07 C anchor. Sep 22, 2026 is also a C-shift start.
+    // Captain Sets select their OWN regular shift; cross-shift swaps, trades,
+    // deployments and leave remain individual daily attendance exceptions.
     const CAPTAIN_TOUR_ANCHOR_DATE = '2026-09-22';
     const CAPTAIN_TOUR_CYCLE_DAYS = 6;
     const CAPTAIN_TOUR_SHIFT_DAYS = 2;
+    const CAPTAIN_SHIFT_OFFSETS = Object.freeze({C:0,A:2,B:4});
+    function captainShiftLabel(raw){
+        const shift=clean(raw).toUpperCase();
+        return Object.prototype.hasOwnProperty.call(CAPTAIN_SHIFT_OFFSETS,shift)
+            ?shift:'C';
+    }
+    function captainTourAnchorDate(shift='C'){
+        return addDateKeyDays(CAPTAIN_TOUR_ANCHOR_DATE,
+            CAPTAIN_SHIFT_OFFSETS[captainShiftLabel(shift)]);
+    }
 
     function getCaptainDailyCheck() {
         const value = loadJSON(CAPTAIN_DAILY_CHECK_KEY, null);
@@ -4307,6 +5198,110 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     function clearCaptainDailyCheck() {
         persistentRemoveRaw(CAPTAIN_DAILY_CHECK_KEY);
     }
+
+    // Only learn from actually elapsed native Item Log reads, never a fixed
+    // guessed speed or success claim. Samples are local anonymous durations
+    // by asset inspection type; native PPE IDs/names are not stored here.
+    function captainDailyTimeHistory() {
+        const raw=loadJSON(CAPTAIN_DAILY_TIMING_KEY,null);
+        if(raw?.schemaVersion!==1||!raw.byMode||typeof raw.byMode!=='object')
+            return {schemaVersion:1,byMode:{},samples:0,setupMs:[]};
+        return raw;
+    }
+    function captainDailyMode(item) {
+        return item?.inspectionModeKey==='scbaTour'?'scbaTour':'tour';
+    }
+    function captainDailyMedian(values) {
+        const valid=(values||[]).map(Number)
+            .filter(x=>Number.isFinite(x)&&x>=500&&x<=15*60*1000)
+            .sort((a,b)=>a-b);
+        if(!valid.length)return null;
+        return valid.length%2?valid[Math.floor(valid.length/2)]:
+            Math.round((valid[valid.length/2-1]+valid[valid.length/2])/2);
+    }
+    function captainDailyTimingPredict(items,history=captainDailyTimeHistory()) {
+        const byMode=history.byMode||{};
+        const fallback=captainDailyMedian(Object.values(byMode).flat());
+        const estimates=(items||[]).map(item=>
+            captainDailyMedian(byMode[captainDailyMode(item)])||fallback);
+        const known=estimates.filter(v=>v!=null);
+        return {estimates,knownCount:known.length,totalItems:estimates.length,
+            totalMs:known.length===estimates.length&&known.length?
+                estimates.reduce((a,b)=>a+b,0):null,
+            samples:Number(history.samples||0)};
+    }
+    function captainDailyRememberDuration(item,durationMs) {
+        const duration=Number(durationMs);
+        if(!Number.isFinite(duration)||duration<500||duration>15*60*1000)
+            return false;
+        const history=captainDailyTimeHistory(),mode=captainDailyMode(item);
+        history.byMode[mode]=[...(history.byMode[mode]||[]),Math.round(duration)].slice(-32);
+        history.samples=Math.min(100000,Number(history.samples||0)+1);
+        saveJSON(CAPTAIN_DAILY_TIMING_KEY,history);
+        return true;
+    }
+    function captainDailyRememberSetup(durationMs) {
+        const ms=Number(durationMs);
+        if(!Number.isFinite(ms)||ms<500||ms>20*60*1000)return false;
+        const history=captainDailyTimeHistory();
+        history.setupMs=[...(history.setupMs||[]),Math.round(ms)].slice(-16);
+        saveJSON(CAPTAIN_DAILY_TIMING_KEY,history);
+        return true;
+    }
+    function captainDailyFormatDuration(ms) {
+        const seconds=Math.max(0,Math.round(Number(ms||0)/1000));
+        return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0');
+    }
+    function captainDailyEta(check,now=Date.now(),history=captainDailyTimeHistory()){
+        if(!check || !Array.isArray(check.items) || !check.items.length)
+            return null;
+        const index=Math.max(0,Math.min(Number(check.index||0),check.items.length));
+        const prediction=captainDailyTimingPredict(check.items,history);
+        const elapsed=Date.parse(check.startedAt||'');
+        const elapsedMs=Number.isFinite(elapsed)?Math.max(0,now-elapsed):0;
+        const itemElapsed=Number(check.itemStartedAtMs)>0?
+            Math.max(0,now-Number(check.itemStartedAtMs)):0;
+        const remaining=prediction.totalMs==null?null:
+            prediction.estimates.slice(index).reduce((sum,x,i)=>
+                sum+(i===0?Math.max(0,x-itemElapsed):x),0);
+        const overrun=prediction.estimates[index]!=null&&
+            itemElapsed>prediction.estimates[index]*1.5;
+        return{index,total:check.items.length,elapsedMs,remainingMs:remaining,
+            overrun,samples:prediction.samples,
+            completedPercent:Math.round(100*index/check.items.length)};
+    }
+    function captainDailyProgressPulse(){
+        const old=document.getElementById('vector-captain-daily-progress-v1');
+        const check=getCaptainDailyCheck();
+        if(!check||!['running','returning'].includes(check.status)){
+            if(old)old.remove();
+            return;
+        }
+        if(!document.body)return;
+        const estimate=captainDailyEta(check);
+        if(!estimate)return;
+        const el=old||document.createElement('div');
+        if(!old){
+            el.id='vector-captain-daily-progress-v1';
+            el.setAttribute('role','status');
+            el.setAttribute('aria-live','off');
+            el.style.cssText='position:fixed;right:12px;bottom:12px;z-index:2147483000;max-width:min(340px,calc(100vw - 24px));padding:8px 10px;border-radius:8px;background:#16374a;color:#fff;box-shadow:0 3px 13px #0004;font:600 11px/1.45 Arial;pointer-events:none;';
+            document.body.appendChild(el);
+        }
+        const left=estimate.remainingMs==null?
+            'ETA learning ('+estimate.samples+' timed item'+(estimate.samples===1?'':'s')+')':
+            (estimate.overrun?'~ running slower than typical · ':'~ ')+
+            captainDailyFormatDuration(estimate.remainingMs)+' remaining';
+        const text='Daily Captain Check · '+estimate.index+'/'+estimate.total+
+            ' items · '+captainDailyFormatDuration(estimate.elapsedMs)+' elapsed · '+left;
+        if(el.dataset.status!==text){
+            el.dataset.status=text;
+            el.textContent=text;
+        }
+    }
+    // The userscript is reloaded on each native asset navigation. An epoch
+    // stored with the active check makes the displayed countdown continuous.
+    setInterval(captainDailyProgressPulse,1000);
 
     async function cancelCaptainDailyCheckForRealInspection() {
         const active = getCaptainDailyCheck();
@@ -4385,10 +5380,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
     }
 
-    function inferRegularTourWindow(referenceDate = new Date()) {
+    function inferRegularTourWindow(referenceDate = new Date(),shift='C') {
         const todayKey = localTodayKey(referenceDate);
         const todayDay = utcDayNumber(todayKey);
-        const anchorDay = utcDayNumber(CAPTAIN_TOUR_ANCHOR_DATE);
+        const anchorDay = utcDayNumber(captainTourAnchorDate(shift));
         if (!Number.isFinite(todayDay) || !Number.isFinite(anchorDay)) {
             return { startDate: todayKey, endDate: addDateKeyDays(todayKey, 1), isActiveTour: true, source: 'fallback' };
         }
@@ -4401,7 +5396,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             startDate,
             endDate: addDateKeyDays(startDate, CAPTAIN_TOUR_SHIFT_DAYS - 1),
             isActiveTour: offset >= 0 && offset < CAPTAIN_TOUR_SHIFT_DAYS,
-            source: '48/96-anchor'
+            source: '48/96-'+captainShiftLabel(shift)+'-anchor'
         };
     }
 
@@ -4429,7 +5424,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
     }
 
-    function captainAuditWindow(asOfDateKey) {
+    function captainAuditWindow(asOfDateKey,shift='C') {
+        const selectedShift=captainShiftLabel(shift);
         const asOfDate = validDateKey(asOfDateKey) || localTodayKey();
         const currentMonth = asOfDate.slice(0, 7);
         const priorMonth = previousMonthKey(asOfDate);
@@ -4441,7 +5437,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const startDay = utcDayNumber(startDate);
         const endDay = utcDayNumber(endDate);
         const asOfDay = utcDayNumber(asOfDate);
-        const anchorDay = utcDayNumber(CAPTAIN_TOUR_ANCHOR_DATE);
+        const anchorDay = utcDayNumber(captainTourAnchorDate(selectedShift));
         const now = new Date();
         const todayKey = localTodayKey(now);
         const shiftStartReached = asOfDate < todayKey || (asOfDate === todayKey && now.getHours() >= 7);
@@ -4473,6 +5469,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             asOfDate,
             startDate,
             endDate,
+            shift:selectedShift,
             shiftStartHour: 7,
             months: [priorMonth, currentMonth],
             tours
@@ -4520,88 +5517,342 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     async function readCaptainComplianceHistory(item) {
-        const captainMode = getMode('captain');
-        if (!captainMode) throw new Error('Captain inspection mode is unavailable.');
-        if (!isAssetPageFor(item)) throw new Error(`${item.assetId}: wrong PPE asset page.`);
-        if (!(await verifyExpectedAssetPage(item))) throw new Error(`${item.assetId}: asset identity could not be verified.`);
+        if (!isAssetPageFor(item)) throw new Error(item.assetId + ': wrong PPE asset page.');
+        const proof = await verifyPpeDetailIdentity(item);
+        if (!proof) throw new Error(item.assetId + ': asset identity could not be verified.');
+        const {verifiedItem} = proof;
+        const modeKey = item.inspectionModeKey === 'scbaTour' ? 'scbaTour' : 'tour';
+        const mode = getMode(modeKey);
+        if (!mode) throw new Error(modeKey + ': Tour inspection mode unavailable.');
+        if (modeKey === 'scbaTour' &&
+            (item.pool !== SCBA_FACE_MASK_POOL ||
+             item.template !== mode.templates[item.pool]))
+            throw new Error(item.assetId + ': SCBA Tour pool/template mismatch.');
+        await revealAssetHistory(verifiedItem, mode.title, 600);
+        const tour = await readModeCompletionHistory(verifiedItem, modeKey);
+        return {tour};
+    }
 
-        await revealAssetHistory(item, captainMode.title, 600);
-        const captain = await readModeCompletionHistory(item, 'captain');
-        const tour = await readModeCompletionHistory(item, 'tour');
-        return { captain, tour };
+    // Historical attendance is a CAPTAIN-ENTERED EXCEPTION, not an inspection
+    // record, a Scout capture, or a modification to official Vector or CrewSense.
+    // Never mark a person absent automatically based on a missing inspection.
+    function captainHistoricalTourEnded(tour, now = new Date()) {
+        const end=validDateKey(tour?.endDate);
+        if(!end)return false;
+        const shiftEnd=addDateKeyDays(end,1);
+        const today=localTodayKey(now);
+        return shiftEnd<today || (shiftEnd===today&&now.getHours()>=7);
+    }
+
+    function getCaptainHistoricalOffTours() {
+        const value=loadJSON(CAPTAIN_HISTORICAL_OFF_KEY,null);
+        return value?.schemaVersion===1 && value.entries &&
+            typeof value.entries==='object'&&!Array.isArray(value.entries)?
+                value:{schemaVersion:1,entries:{}};
+    }
+
+    function captainHistoricalOffKey(prefix,tourStart) {
+        return clean(prefix).toUpperCase()+'|'+(validDateKey(tourStart)||'');
+    }
+
+    function captainHistoricalOffFor(owner,tour,ledger=getCaptainHistoricalOffTours()) {
+        if(!owner?.prefix || !captainHistoricalTourEnded(tour))return null;
+        const key=captainHistoricalOffKey(owner.prefix,tour.startDate);
+        const entry=ledger?.entries?.[key];
+        if(!entry||entry.source!=='captain_manual'||
+           entry.prefix!==clean(owner.prefix).toUpperCase()||
+           entry.startDate!==tour.startDate||entry.endDate!==tour.endDate||
+           !clean(entry.reason))return null;
+        return entry;
+    }
+
+    function captainRecordHistoricalOff(owner,tour,reason,note='') {
+        if(!captainHistoricalTourEnded(tour))
+            throw new Error('Cannot mark a tour off until both shifts have finished.');
+        const prefix=clean(owner?.prefix).toUpperCase();
+        if(!prefix||!validDateKey(tour.startDate)||
+           addDateKeyDays(tour.startDate,1)!==tour.endDate)
+            throw new Error('The person or two-day tour identity is invalid.');
+        const why=clean(reason).slice(0,65);
+        if(!why)throw new Error('Select a reason before recording a historical absence.');
+        const ledger=getCaptainHistoricalOffTours();
+        const key=captainHistoricalOffKey(prefix,tour.startDate);
+        const existing=ledger.entries[key];
+        const now=new Date().toISOString();
+        const config=getConfig();
+        ledger.entries[key]={
+            source:'captain_manual',
+            prefix,startDate:tour.startDate,endDate:tour.endDate,
+            reason:why,note:clean(note).slice(0,220),
+            recordedBy:clean(config.inspectorName||'Captain'),
+            recordedAt:existing?.recordedAt||now,updatedAt:now
+        };
+        saveJSON(CAPTAIN_HISTORICAL_OFF_KEY,ledger);
+        return ledger.entries[key];
+    }
+
+    function captainClearHistoricalOff(owner,tour) {
+        const ledger=getCaptainHistoricalOffTours();
+        const key=captainHistoricalOffKey(owner?.prefix,tour?.startDate);
+        const old=ledger.entries[key];
+        if(!old||old.endDate!==tour?.endDate)return false;
+        delete ledger.entries[key];
+        saveJSON(CAPTAIN_HISTORICAL_OFF_KEY,ledger);
+        return true;
+    }
+
+    function captainRebuildStoredDailyReport(report,attendanceRecords=undefined) {
+        const original=report?.sourceSnapshot||{};
+        const owners=original.owners?.length?original.owners:
+            (report?.owners||[]).map(o=>({name:o.name,prefix:o.prefix}));
+        const items=original.items?.length?original.items:
+            (report?.owners||[]).flatMap(o=>(o.items||[]).map(item=>({
+                ownerPrefix:o.prefix,ownerName:o.name,
+                assetId:item.assetId,type:item.type,
+                inspectionModeKey:item.inspectionModeKey||'tour'
+            })));
+        const results=original.results?.length?original.results:
+            captainDailySourceResults(report);
+        const discovery=original.discovery||((report?.owners||[]).map(o=>({
+            prefix:o.prefix,error:o.discoveryError||'',
+            unknown:o.unknownAssets||[]
+        })));
+        const updated=buildCaptainDailyReport({
+            checkId:report.reportId,setId:report.setId,setName:report.setName,
+            shift:original.shift||report.shift||report.auditWindow?.shift||'C',
+            auditAsOfDate:original.auditAsOfDate||report.auditWindow?.asOfDate,
+            owners,items,results,discovery,
+            tourRoster:original.tourRoster||report.tourRoster||null,
+            attendanceRecords:attendanceRecords===undefined?
+                (original.attendanceRecords||report.attendanceRecords||null):
+                attendanceRecords,
+            attendanceCheckedAt:attendanceRecords===undefined?
+                report.attendanceCheckedAt:new Date().toISOString(),
+            recheckCount:report.recheckCount,
+            recheckTargets:[],
+            recheckErrors:report.recheckErrors||[],
+            displayGeneratedAt:report.generatedAt
+        });
+        // Correct attendance without pretending another native inspection was
+        // read. Preserve any true earlier Recheck receipt summary as recorded.
+        updated.recheckSummary=report.recheckSummary||null;
+        updated.recheckedAssets=report.recheckedAssets||[];
+        updated.elapsedMs=report.elapsedMs;
+        updated.timingSampleCount=report.timingSampleCount;
+        updated.attendanceEditedAt=new Date().toISOString();
+        return updated;
+    }
+
+    // A temporary two-day roster changes only this audit, NOT saved Captain
+    // Sets or Vector/CrewSense assignments. Historic tours retain the usual
+    // Captain Set. A swing is responsible only for explicitly selected days
+    // on the selected tour; an off person has no requirement on that day.
+    // CrewSense's *actual* unit assignment determines duty. Truck 504,
+    // Engine 501, Medic 504 or ANY other real unit all create a required
+    // PPE tour check. Only explicit verified 24-hour OFF/leave/deployment
+    // for BOTH tour shifts makes a full tour non-required. Missing Scout
+    // rows are UNKNOWN, never proof that the employee was off.
+    function captainScoutTourDuty(owner,tour,auditWindow,records) {
+        if(!Array.isArray(records)||!captainHistoricalTourEnded(tour))
+            return null;
+        const name=masterNameKey(owner?.name);
+        if(!name)return{due:false,off:false,unknown:true,
+            assignmentSource:'scout_unresolved_identity'};
+        const days=[tour.startDate,tour.endDate].map(date=>
+            records.find(r=>r?.date===date&&masterNameKey(r.name)===name));
+        const trusted=r=>r?.sourceQuality==='good_direct_capture';
+        const working=days.some(r=>trusted(r)&&r.status==='work_evidence');
+        if(working)return{due:tour.due===true,off:false,
+            assignmentSource:'scout_any_unit',
+            dutyDates:days.filter(r=>trusted(r)&&r.status==='work_evidence')
+                .map(r=>r.date)};
+        const offStates=['full_leave_evidence','deployment_evidence'];
+        const bothOff=days.every(r=>trusted(r)&&offStates.includes(r.status));
+        if(bothOff)return{due:false,off:true,offSource:'scout_verified_absence',
+            offReason:days.some(r=>r.status==='deployment_evidence')?
+                'Deployed/off for both shifts':'Off for both shifts',
+            assignmentSource:'scout_full_tour_absence'};
+        return{due:false,off:false,unknown:true,
+            assignmentSource:'scout_attendance_incomplete'};
+    }
+
+    // Temporary swings belong to THIS Captain Set only for the explicitly
+    // selected shift day(s). Their other-shift historical roster is outside
+    // the scope of this Captain audit. Native positive past PPE completions
+    // can still be shown green, but no historical red X, OFF, or ? is inferred.
+    function captainIsTemporarySwing(owner, roster) {
+        if(!owner?.prefix||!roster||!Array.isArray(roster.basePrefixes))
+            return false;
+        return !roster.basePrefixes.includes(owner.prefix) &&
+            (roster.swingPrefixes||[]).includes(owner.prefix);
+    }
+
+    function captainTemporarySwingDuty(owner,tour,auditWindow,roster) {
+        if(!captainIsTemporarySwing(owner,roster))return null;
+        if(tour.startDate!==roster.startDate)
+            return {due:false,off:false,unknown:false,notAssigned:true,
+                assignmentSource:'swing_outside_selected_tour'};
+        const dates=[roster.startDate,roster.endDate].filter(date=>
+            (roster.onByDate?.[date]||[]).includes(owner.prefix));
+        if(!dates.length)return{due:false,off:false,notAssigned:true,
+            assignmentSource:'swing_not_selected'};
+        const asOf=auditWindow.asOfDate,today=localTodayKey();
+        const begun=date=>date<asOf ||
+            (date===asOf&&(asOf<today || new Date().getHours()>=7));
+        return {due:tour.due===true&&dates.some(begun),
+            off:false,dutyDates:dates,
+            assignmentSource:'swing_selected_tour'};
+    }
+
+    function captainOwnerTourDuty(owner, tour, auditWindow, roster,
+            historicalOff=null,scoutRecords=null) {
+        // A temporary multi-tour assignment has a defined FIRST/LAST tour,
+        // even though the member is kept in this Captain Set for easy daily
+        // selection. Never turn verified work on unrelated earlier shifts
+        // into falsely missed Captain checks. Genuine native green history
+        // is rendered independently by buildCaptainDailyReport.
+        const assignment=roster?.basePrefixes?.includes(owner?.prefix)?
+            roster.assignmentWindows?.[owner.prefix]:null;
+        if(assignment?.startDate &&
+                (tour.startDate<assignment.startDate ||
+                (assignment.endDate && tour.startDate>assignment.endDate)))
+            return {due:false,off:false,unknown:false,notAssigned:true,
+                assignmentSource:'outside_temporary_assignment'};
+        // Apply the explicit per-day swing selection before ANY inferred
+        // Scout duty. Working another unit in an old tour is not a reason
+        // to generate missing Captain checks in this temporary crew report.
+        const swing=captainTemporarySwingDuty(owner,tour,auditWindow,roster);
+        if(swing)return swing;
+        const scout=captainScoutTourDuty(owner,tour,auditWindow,scoutRecords);
+        const recorded=captainHistoricalOffFor(owner,tour,historicalOff);
+        // Proof that a person worked ANY unit beats a stale exception from
+        // earlier versions, including the now-retired 'different shift' reason.
+        if(scout?.due)return{...scout,
+            attendanceConflict:!!recorded};
+        if(recorded&&recorded.reason!=='Different shift / other captain')
+            return{due:false,off:true,
+                offSource:'captain_manual',offReason:recorded.reason,
+                offNote:recorded.note,offRecordedAt:recorded.recordedAt,
+                offRecordedBy:recorded.recordedBy};
+        if(scout)return scout;
+        // An old manual 'different shift' note no longer waives inspection:
+        // working on another shift's apparatus still counts as work.
+        if(!roster || !roster.startDate || !Array.isArray(roster.basePrefixes))
+            return {due:tour.due===true, off:false};
+        const isBase=roster.basePrefixes.includes(owner.prefix);
+        if(tour.startDate!==roster.startDate)
+            // Do not invent old obligations for someone who was brought in
+            // as a swing from another shift. Still search their actual native
+            // check history and show completed inspections, if any.
+            return {due:isBase&&tour.due===true,off:false,
+                notAssigned:!isBase,assignmentSource:!isBase?'swing_other_shift':''};
+        const chosen=[roster.startDate,roster.endDate]
+            .filter(date=>(roster.onByDate?.[date]||[]).includes(owner.prefix));
+        if(!chosen.length)return isBase?{due:false,off:true}:
+            {due:false,off:false,notAssigned:true,
+                assignmentSource:'swing_not_selected'};
+        const asOf=auditWindow.asOfDate;
+        const today=localTodayKey();
+        const firstShiftReached=asOf<today || (asOf===today&&new Date().getHours()>=7);
+        const due=chosen.some(date=>date<asOf || (date===asOf&&firstShiftReached));
+        return {due,off:false,dutyDates:chosen};
+    }
+
+    function captainDailyMissingTargets(report) {
+        return (report?.owners||[]).flatMap(owner=>(owner.items||[])
+            .filter(item=>(item.tourChecks||[]).some(check=>check.due&&!check.ok) ||
+                (item.status!=='ok' &&
+                  (item.tourChecks||[]).some(check=>check.due)))
+            .map(item=>({ownerPrefix:owner.prefix,ownerName:owner.name,
+                assetId:item.assetId,type:item.type})));
+    }
+
+    function captainDailySourceResults(report) {
+        // Old v7 reports have no stored URLs/history source snapshot. Rebuild
+        // only their history RESULTS, then find URLs through a fresh,
+        // bounded Responsible Party scan before a targeted recheck.
+        return (report?.owners||[]).flatMap(owner=>(owner.items||[]).map(item=>({
+            ownerName:owner.name,ownerPrefix:owner.prefix,
+            assetId:item.assetId,type:item.type,status:item.status||'error',
+            tour:{dates:[...(item.tourDates||[])],latestDate:item.latestTourDate||''},
+            error:item.error||''
+        })));
     }
 
     function buildCaptainDailyReport(check) {
-        const window = captainAuditWindow(check.auditAsOfDate || localTodayKey());
-        const monthKeys = window.months;
-        const tourWindows = window.tours;
-        const dueTourWindows = tourWindows.filter(tourWindow => tourWindow.due === true);
-
+        const shift=['A','B','C'].includes(check.shift||check.tourRoster?.shift)?
+            (check.shift||check.tourRoster?.shift):'C';
+        const window = captainAuditWindow(check.auditAsOfDate || localTodayKey(),shift);
+        const historicalOff=getCaptainHistoricalOffTours();
+        const scoutRecords=Array.isArray(check.attendanceRecords)?
+            check.attendanceRecords:null;
         const owners = (check.owners || []).map(owner => {
-            const items = (check.items || []).filter(item => item.ownerPrefix === owner.prefix);
+            const items = (check.fullItems || check.items || [])
+                .filter(item => item.ownerPrefix === owner.prefix);
             const results = (check.results || []).filter(result => result.ownerPrefix === owner.prefix);
             const byAsset = new Map(results.map(result => [result.assetId, result]));
             const itemRows = items.map(item => {
                 const result = byAsset.get(item.assetId);
-                const captainDates = Array.isArray(result?.captain?.dates) ? result.captain.dates : [];
-                const tourHistoryDates = Array.isArray(result?.tour?.dates) ? result.tour.dates : [];
+                const tourDates = Array.isArray(result?.tour?.dates) ? result.tour.dates : [];
                 const readable = result?.status === 'ok';
-                const monthlyChecks = monthKeys.map(month => {
-                    const date = captainDates.find(value => value.startsWith(`${month}-`) && value <= window.asOfDate) || '';
-                    return { month, date, ok: readable && !!date };
-                });
-                const tourChecks = tourWindows.map(tourWindow => {
+                const tourChecks = window.tours.map(tourWindow => {
+                    const duty=captainOwnerTourDuty(owner,tourWindow,window,check.tourRoster,
+                        historicalOff,scoutRecords);
                     const eligible = new Set(tourWindow.eligibleDates || []);
-                    const date = tourHistoryDates.find(value => eligible.has(value)) || '';
+                    const date = tourDates.find(value => eligible.has(value)) || '';
                     return {
                         month: tourWindow.month || tourWindow.startDate.slice(0, 7),
                         startDate: tourWindow.startDate,
                         endDate: tourWindow.endDate,
                         eligibleDates: tourWindow.eligibleDates || [],
-                        due: tourWindow.due === true,
+                        due: duty.due === true,
+                        off: duty.off === true,
+                        unknown:duty.unknown===true,
+                        attendanceConflict:duty.attendanceConflict===true,
+                        notAssigned:duty.notAssigned===true,
+                        assignmentSource:duty.assignmentSource||'',
+                        offSource:duty.offSource||'',
+                        offReason:duty.offReason||'',
+                        offNote:duty.offNote||'',
+                        offRecordedAt:duty.offRecordedAt||'',
+                        offRecordedBy:duty.offRecordedBy||'',
+                        dutyDates:duty.dutyDates||[],
                         date,
                         ok: readable && !!date
                     };
                 });
-                const monthlyOk = readable && monthlyChecks.every(checkRow => checkRow.ok);
-                const toursOk = readable && tourChecks.filter(checkRow => checkRow.due).every(checkRow => checkRow.ok);
+                const required=tourChecks.filter(row=>row.due);
+                const toursOk=(!required.length||readable)&&required.every(row=>row.ok);
                 return {
                     assetId: item.assetId,
                     type: item.type,
+                    inspectionModeKey: item.inspectionModeKey || 'tour',
                     status: result?.status || 'missing',
-                    latestCaptainDate: result?.captain?.latestDate || '',
-                    captainDates,
                     latestTourDate: result?.tour?.latestDate || '',
-                    tourDates: tourHistoryDates,
-                    monthlyChecks,
+                    tourDates,
                     tourChecks,
-                    captainMonthlyOk: monthlyOk,
                     tourCheckOk: toursOk,
-                    compliant: readable && monthlyOk && toursOk,
+                    compliant: toursOk,
                     error: result?.error || ''
                 };
             });
-
             const discovery = (check.discovery || []).find(x => x.prefix === owner.prefix) || {};
-            const allReadable = itemRows.length > 0 && itemRows.every(row => row.status === 'ok') && !(discovery.unknown || []).length && !discovery.error;
-            const monthlyRequirementCount = itemRows.length * monthKeys.length;
-            const tourRequirementCount = itemRows.length * dueTourWindows.length;
-            const monthlyPassedCount = itemRows.reduce((sum, row) => sum + row.monthlyChecks.filter(x => x.ok).length, 0);
-            const tourPassedCount = itemRows.reduce((sum, row) => sum + row.tourChecks.filter(x => x.due && x.ok).length, 0);
-            const captainMonthlyOk = allReadable && monthlyPassedCount === monthlyRequirementCount;
+            const allReadable = itemRows.length > 0 &&
+                itemRows.every(row=>row.status==='ok'||
+                    !(row.tourChecks||[]).some(check=>check.due)) &&
+                !(discovery.unknown || []).length && !discovery.error;
+            const tourRequirementCount = itemRows.reduce((sum,row)=>
+                sum+row.tourChecks.filter(check=>check.due).length,0);
+            const tourPassedCount = itemRows.reduce((sum, row) =>
+                sum + row.tourChecks.filter(x => x.due && x.ok).length, 0);
             const tourCheckOk = allReadable && tourPassedCount === tourRequirementCount;
-            const compliant = allReadable && captainMonthlyOk && tourCheckOk;
-
             return {
                 name: owner.name,
                 prefix: owner.prefix,
                 gearCount: itemRows.length,
                 allReadable,
-                captainMonthlyOk,
                 tourCheckOk,
-                compliant,
-                monthlyPassedCount,
-                monthlyRequirementCount,
+                compliant: tourCheckOk,
                 tourPassedCount,
                 tourRequirementCount,
                 discoveryError: discovery.error || '',
@@ -4609,17 +5860,357 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 items: itemRows
             };
         });
-
+        const remainingTargets=owners.flatMap(owner=>(owner.items||[])
+            .filter(item=>(item.tourChecks||[]).some(x=>x.due&&!x.ok))
+            .map(item=>owner.prefix+'|'+item.assetId));
+        const remaining=new Set(remainingTargets);
+        const recheckTargets=check.recheckTargets||[];
+        const newlyCleared=recheckTargets.filter(t=>
+            !remaining.has(t.ownerPrefix+'|'+t.assetId)).length;
         return {
-            schemaVersion: 5,
+            schemaVersion: 8,
             reportId: check.checkId,
-            generatedAt: new Date().toISOString(),
+            generatedAt: check.displayGeneratedAt||new Date().toISOString(),
             setId: check.setId,
             setName: check.setName,
+            shift,
             ownerCount: owners.length,
             auditWindow: window,
+            tourRoster:check.tourRoster||null,
+            swingHistoryLimited:true,
+            recheckCount:Number(check.recheckCount||0),
+            recheckedAssets:recheckTargets,
+            recheckErrors:check.recheckErrors||[],
+            recheckSummary:recheckTargets.length?{
+                itemsQueried:recheckTargets.length,
+                newlyCleared,
+                itemsStillMissing:recheckTargets.length-newlyCleared,
+                readErrors:(check.recheckErrors||[]).length
+            }:null,
+            sourceSnapshot:{
+                owners:check.owners||[],discovery:check.discovery||[],
+                items:check.fullItems||check.items||[],
+                results:check.results||[],auditAsOfDate:check.auditAsOfDate,
+                shift,tourRoster:check.tourRoster||null,
+                attendanceRecords:scoutRecords
+            },
+            attendanceRecords:scoutRecords,
+            attendanceCheckedAt:check.attendanceCheckedAt||'',
             owners
         };
+    }
+
+    function showCaptainHistoricalOffEditor(report,reportOverlay,
+            initialPrefix='',initialTourStart='') {
+        const tours=(report?.auditWindow?.tours||[])
+            .filter(tour=>captainHistoricalTourEnded(tour));
+        if(!tours.length){
+            setStatus('No fully completed past tours are shown in this report yet.',false);
+            return;
+        }
+        const people=(report.owners||[]).filter(p=>p.prefix);
+        if(!people.length){
+            setStatus('This report contains no identifiable Captain Set members.',false);
+            return;
+        }
+        const {overlay,box}=makeOverlayBox('540px');
+        const head=document.createElement('h3');
+        head.style.cssText='margin:0 0 5px;color:#153e5c;font:800 19px Arial;';
+        head.textContent='Past Tour: Correct Attendance';
+        const explanation=document.createElement('p');
+        explanation.style.cssText='margin:5px 0 13px;color:#547184;font:12px/1.55 Arial;';
+        explanation.textContent='Required PPE checks follow any unit assignment, including other shifts and apparatus. Mark OFF only when the firefighter was off or deployed BOTH days. A person who worked on any unit during either day owes the tour check. This is captain-entered attendance, not a Vector inspection or verified CrewSense record.';
+        const label=(text,control)=>{
+            const wrap=document.createElement('label');
+            wrap.style.cssText='display:block;margin:8px 0;color:#2f566d;font:700 11px Arial;';
+            const title=document.createElement('div');
+            title.textContent=text;title.style.marginBottom='5px';
+            control.style.cssText='width:100%;box-sizing:border-box;padding:9px;border:1px solid #aebfcb;border-radius:6px;background:#fff;color:#1d3b51;font:12px Arial;';
+            wrap.append(title,control);return wrap;
+        };
+        const personSelect=document.createElement('select');
+        people.forEach(person=>{
+            const opt=document.createElement('option');
+            opt.value=person.prefix;opt.textContent=person.name;
+            personSelect.appendChild(opt);
+        });
+        if(people.some(p=>p.prefix===initialPrefix))personSelect.value=initialPrefix;
+        const tourSelect=document.createElement('select');
+        tours.forEach(tour=>{
+            const opt=document.createElement('option');
+            opt.value=tour.startDate;
+            opt.textContent=tour.startDate+' + '+tour.endDate;
+            tourSelect.appendChild(opt);
+        });
+        if(tours.some(t=>t.startDate===initialTourStart))tourSelect.value=initialTourStart;
+        const reasonSelect=document.createElement('select');
+        const reasons=[
+            ['','Choose a reason'],
+            ['Regular days off / not assigned','Regular days off / not assigned'],
+            ['Vacation','Vacation'],['Sick','Sick'],['Holiday','Holiday'],
+            ['Deployed elsewhere','Deployed elsewhere'],
+            ['Training / off-unit entire tour','Training / off-unit entire tour'],
+            ['Other confirmed absence','Other confirmed absence']
+        ];
+        reasons.forEach(([value,text])=>{
+            const opt=document.createElement('option');
+            opt.value=value;opt.textContent=text;reasonSelect.appendChild(opt);
+        });
+        const noteInput=document.createElement('input');
+        noteInput.type='text';noteInput.maxLength=220;
+        noteInput.placeholder='Optional note (example: approved vacation)';
+        const existingInfo=document.createElement('div');
+        existingInfo.style.cssText='margin:7px 0;min-height:18px;color:#607688;font:11px/1.5 Arial;';
+        const confirmation=document.createElement('label');
+        confirmation.style.cssText='display:flex;align-items:flex-start;gap:8px;margin:12px 0;padding:9px;background:#fff5e4;border:1px solid #ebd8ad;border-radius:6px;font:12px/1.4 Arial;color:#63471e;cursor:pointer;';
+        const confirmed=document.createElement('input');
+        confirmed.type='checkbox';confirmed.style.cssText='margin-top:2px;';
+        const confirmText=document.createElement('span');
+        confirmText.textContent='I confirm this firefighter was off or assigned to a different crew for BOTH shifts of the selected tour.';
+        confirmation.append(confirmed,confirmText);
+        const save=makeButton('Save attendance exception',{background:'#176b8e',color:'#fff'});
+        const restore=makeButton('Restore Requirement',{background:'#e8edf0',color:'#284656'});
+        const cancel=makeButton('Cancel');
+        const buttons=document.createElement('div');
+        buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;';
+        buttons.append(save,restore,cancel);
+        box.append(head,explanation,label('Firefighter',personSelect),
+            label('Past two-day tour',tourSelect),
+            label('Attendance exception reason',reasonSelect),
+            label('Optional detail',noteInput),
+            existingInfo,confirmation,buttons);
+        const selected=()=>({
+            owner:people.find(p=>p.prefix===personSelect.value),
+            tour:tours.find(t=>t.startDate===tourSelect.value)
+        });
+        const refresh=()=>{
+            const {owner,tour}=selected();
+            const off=owner&&tour?captainHistoricalOffFor(owner,tour):null;
+            reasonSelect.value=off?.reason||'';
+            noteInput.value=off?.note||'';
+            confirmed.checked=false;
+            restore.disabled=!off;
+            existingInfo.textContent=off?
+                (off.reason==='Different shift / other captain'?
+                    'Already marked DIFFERENT SHIFT (blank when no native inspection)':
+                    'Already marked OFF*')+' by '+(off.recordedBy||'Captain')+
+                ' on '+new Date(off.updatedAt||off.recordedAt).toLocaleString()+
+                '. This is manually entered, not verified by Vector.' :
+                'No historical attendance exception saved for this person/tour.';
+        };
+        personSelect.onchange=refresh;tourSelect.onchange=refresh;
+        refresh();
+        const reDisplay=()=>{
+            const updated=captainRebuildStoredDailyReport(report);
+            saveJSON(CAPTAIN_DAILY_REPORT_KEY,updated);
+            overlay.remove();if(reportOverlay)reportOverlay.remove();
+            showCaptainDailyReport(updated);
+        };
+        save.onclick=()=>{
+            const {owner,tour}=selected();
+            if(!owner||!tour)return;
+            if(!confirmed.checked){
+                setStatus('Confirm attendance for both shifts of this past tour before saving.',false);
+                return;
+            }
+            if(!reasonSelect.value){
+                setStatus('Select an attendance exception reason for this past tour.',false);
+                return;
+            }
+            try{
+                captainRecordHistoricalOff(owner,tour,reasonSelect.value,noteInput.value);
+                setStatus(owner.name+' attendance exception recorded for '+
+                    tour.startDate+' + '+tour.endDate+
+                    ' (captain-entered). No Vector inspection record changed.');
+                reDisplay();
+            }catch(error){setStatus(error.message||String(error),false);}
+        };
+        restore.onclick=()=>{
+            const {owner,tour}=selected();
+            if(!owner||!tour)return;
+            if(!confirm('Remove the manual attendance exception for '+owner.name+
+                ' on '+tour.startDate+' + '+tour.endDate+
+                '? This restores the normal Captain Set requirement for that tour.'))return;
+            if(captainClearHistoricalOff(owner,tour)){
+                setStatus('Manual attendance exception removed; tour requirements restored.');
+                reDisplay();
+            }
+        };
+        cancel.onclick=()=>overlay.remove();
+    }
+
+    // Authenticated, read-only Rebel Command/Scout attendance evidence. The
+    // API never gives a compliance verdict: even two full-day leave entries
+    // require explicit confirmation by the captain before a red X is cleared.
+    // A missing CrewSense employee row is UNKNOWN, never proof of absence.
+    function captainCommandAttendanceCandidates(report,records) {
+        const byKey=new Map((records||[]).map(x=>
+            [masterNameKey(x.name)+'|'+x.date,x]));
+        const output=[];
+        for(const owner of report?.owners||[]){
+            if(captainIsTemporarySwing(owner,report.tourRoster))continue;
+            for(const tour of report?.auditWindow?.tours||[]){
+                if(!captainHistoricalTourEnded(tour))continue;
+                const days=[tour.startDate,tour.endDate].map(date=>
+                    byKey.get(masterNameKey(owner.name)+'|'+date));
+                const trusted=day=>day?.sourceQuality==='good_direct_capture';
+                const worked=days.some(day=>trusted(day)&&
+                    day.status==='work_evidence');
+                const fullyOff=days.every(day=>trusted(day)&&
+                    ['full_leave_evidence','deployment_evidence'].includes(day.status));
+                const relevant=(owner.items||[]).some(item=>
+                    (item.tourChecks||[]).some(check=>
+                        check.startDate===tour.startDate && check.due && !check.ok));
+                if(!relevant)continue;
+                if(worked)continue; // Actual unit duty is required, not an excuse.
+                if(fullyOff)continue; // Report already displays source-verified OFF.
+                const partial=days.some(day=>trusted(day)&&
+                    ['full_leave_evidence','deployment_evidence',
+                     'partial_or_uncertain'].includes(day.status));
+                if(partial)output.push({owner,tour,confidence:'incomplete',days,
+                    reason:'Incomplete leave/deployment evidence. Verify before excusing.'});
+            }
+        }
+        return output;
+    }
+
+    async function captainReadCommandAttendance(report) {
+        const dates=[...new Set((report?.auditWindow?.tours||[])
+            .filter(tour=>captainHistoricalTourEnded(tour))
+            .flatMap(tour=>[tour.startDate,tour.endDate]))].filter(validDateKey);
+        const people=[...new Set((report?.owners||[])
+            .filter(owner=>!captainIsTemporarySwing(owner,report.tourRoster))
+            .map(owner=>clean(owner.name)).filter(Boolean))];
+        if(!dates.length||!people.length)return{ok:false,error:'No completed tours or people to compare'};
+        if(dates.length>32||people.length>14)return{ok:false,error:'Attendance evidence scope too large'};
+        if(!rebelCommandPaired()&&!await ensureRebelCommandEnrollment(false))
+            return{ok:false,error:'Rebel Command is not paired on this Vector Rebel installation'};
+        const pair=rebelCommandPairing();
+        const params='?action=vr-captain-attendance&dates='+
+            encodeURIComponent(dates.join(','))+'&people='+
+            encodeURIComponent(JSON.stringify(people));
+        const response=await new Promise(resolve=>GM_xmlhttpRequest({
+            method:'GET',url:REBEL_COMMAND_ENDPOINT+params,
+            headers:{Authorization:'Bearer '+pair.token,
+                'X-Rebel-Device-ID':pair.deviceId},
+            timeout:16000,
+            onload:r=>resolve({status:r.status,text:r.responseText||''}),
+            onerror:()=>resolve({status:0,text:''}),
+            ontimeout:()=>resolve({status:0,text:''})
+        }));
+        let data={};
+        try{data=JSON.parse(response.text||'{}');}catch{}
+        if(response.status!==200||data.ok!==true||
+           data.scope!=='captain-attendance-evidence'||data.readOnly!==true)
+            return{ok:false,error:clean(data.error||
+                ('Command attendance service '+(response.status||'unreachable'))).slice(0,120)};
+        const expected=dates.length*people.length;
+        if(!Array.isArray(data.records)||data.records.length!==expected)
+            return{ok:false,error:'Command returned incomplete attendance evidence'};
+        const dateSet=new Set(dates),nameSet=new Set(people.map(masterNameKey));
+        if(data.records.some(rec=>!dateSet.has(rec.date)||
+            !nameSet.has(masterNameKey(rec.name))||
+            !['full_leave_evidence','deployment_evidence','work_evidence',
+              'partial_or_uncertain','unknown'].includes(rec.status)))
+            return{ok:false,error:'Command attendance identities or statuses did not match request'};
+        return{ok:true,records:data.records,candidates:
+            captainCommandAttendanceCandidates(report,data.records)};
+    }
+
+    async function captainShowCommandAttendance(report,container,reportOverlay){
+        if(!container?.isConnected)return;
+        container.textContent='Checking Scout assignments for every unit, not just Truck 504...';
+        let result;
+        try{
+            if(Array.isArray(report.attendanceRecords)&&report.attendanceCheckedAt)
+                result={ok:true,records:report.attendanceRecords,
+                    candidates:captainCommandAttendanceCandidates(
+                        report,report.attendanceRecords)};
+            else result=await captainReadCommandAttendance(report);
+        }catch(error){
+            result={ok:false,error:clean(error?.message||error)};
+        }
+        if(!container.isConnected)return;
+        container.innerHTML='';
+        if(!result.ok){
+            const warning=document.createElement('span');
+            warning.textContent='Scout assignment evidence unavailable: '+result.error+
+                '. Existing audit remains unchanged. Do not assume an absent row means OFF.';
+            warning.style.color='#755725';container.appendChild(warning);
+            return;
+        }
+        if(!report.attendanceCheckedAt){
+            // Rebuild only the LOCAL read-only report: no new inspection or
+            // CrewSense write. The old report's Item Log dates remain intact.
+            const updated=captainRebuildStoredDailyReport(report,result.records);
+            saveJSON(CAPTAIN_DAILY_REPORT_KEY,updated);
+            reportOverlay.remove();
+            showCaptainDailyReport(updated);
+            return;
+        }
+        const byKey=new Map(result.records.map(rec=>
+            [masterNameKey(rec.name)+'|'+rec.date,rec]));
+        const completedTours=(report.auditWindow?.tours||[])
+            .filter(tour=>captainHistoricalTourEnded(tour));
+        let workedTours=0,offTours=0,unknownTours=0;
+        const allTourStates=[];
+        for(const owner of report.owners||[]){
+            if(captainIsTemporarySwing(owner,report.tourRoster))continue;
+            for(const tour of completedTours){
+                const days=[tour.startDate,tour.endDate].map(date=>
+                    byKey.get(masterNameKey(owner.name)+'|'+date));
+                const trusted=r=>r?.sourceQuality==='good_direct_capture';
+                const work=days.some(r=>trusted(r)&&r.status==='work_evidence');
+                const off=days.every(r=>trusted(r)&&
+                    ['full_leave_evidence','deployment_evidence'].includes(r.status));
+                if(work)workedTours++;
+                else if(off)offTours++;
+                else unknownTours++;
+                allTourStates.push({owner,tour,days,status:work?'WORKED':
+                    off?'OFF / DEPLOYED':'UNVERIFIED'});
+            }
+        }
+        const info=document.createElement('div');
+        info.textContent='Scout attendance for regular Captain Set members across ALL units (temporary swings only counted on your selected tour): '+workedTours+
+            ' worked tours (PPE required), '+offTours+
+            ' fully off/deployed tours (no PPE required), '+unknownTours+
+            ' incomplete/unknown tours. One assigned day is enough to require the tour check.';
+        container.appendChild(info);
+        const refresh=makeButton('Refresh Scout Attendance',
+            {background:'#dcecf2',color:'#214b64'});
+        refresh.style.cssText+='margin-top:7px;padding:5px 8px;';
+        refresh.onclick=()=>captainShowCommandAttendance({
+            ...report,attendanceCheckedAt:'',attendanceRecords:null
+        },container,reportOverlay);
+        container.appendChild(refresh);
+        const details=document.createElement('details');
+        details.style.cssText='margin-top:6px;';
+        const summary=document.createElement('summary');
+        summary.textContent='Show person-by-tour evidence ('+
+            allTourStates.length+' comparisons)';
+        summary.style.cssText='cursor:pointer;font-weight:800;';
+        details.appendChild(summary);
+        for(const state of allTourStates){
+            const line=document.createElement('div');
+            line.style.cssText='padding:5px 2px;border-bottom:1px solid #d5e2e8;font-size:10px;';
+            line.textContent=state.owner.name+' | '+
+                state.tour.startDate+' + '+state.tour.endDate+' | '+
+                state.status+' | '+state.days.map(r=>
+                    r?.date.slice(5)+' '+(r?.status||'unknown')).join(' / ');
+            details.appendChild(line);
+        }
+        container.appendChild(details);
+        for(const candidate of result.candidates||[]){
+            const line=document.createElement('div');
+            line.style.cssText='display:flex;gap:8px;align-items:center;justify-content:space-between;padding:5px 2px;';
+            const description=document.createElement('span');
+            description.textContent=candidate.owner.name+' '+candidate.tour.startDate+
+                ' + '+candidate.tour.endDate+': '+candidate.reason;
+            const button=makeButton('Review',{background:'#fff0d0',color:'#604b17'});
+            button.onclick=()=>showCaptainHistoricalOffEditor(report,reportOverlay,
+                candidate.owner.prefix,candidate.tour.startDate);
+            line.append(description,button);container.appendChild(line);
+        }
     }
 
     function showCaptainDailyReport(report = getCaptainDailyReport()) {
@@ -4627,11 +6218,34 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             setStatus('No Daily Captain Check report is stored yet.');
             return;
         }
-        if (Number(report.schemaVersion || 0) < 5) {
-            setStatus('The stored Daily Captain Check report uses the older layout/rules. Run it again for the grouped two-month Captain + tour grid.', false);
+        if (Number(report.schemaVersion || 0) < 7) {
+            setStatus('This stored Daily Captain report includes the retired Monthly Captain requirement. Run the Tour-only read-only audit again.', false);
             return;
         }
-        const auditWindow = report.auditWindow || captainAuditWindow(report.generatedAt?.slice(0, 10));
+        // If the captain corrected an existing member's temporary assignment
+        // dates in Settings, rebuild the saved report from its SAME native
+        // Item Log snapshot. Do not rescan, re-submit, or alter the audit time.
+        const savedSet=(getConfig().captainSets||[])
+            .find(set=>set.id===report.setId);
+        const savedWindows=savedSet?.assignmentWindows||{};
+        if(report.tourRoster?.basePrefixes?.length && savedSet &&
+                JSON.stringify(report.tourRoster.assignmentWindows||{})!==
+                    JSON.stringify(savedWindows)){
+            const roster={...report.tourRoster,assignmentWindows:savedWindows};
+            report={...report,tourRoster:roster,
+                sourceSnapshot:{...(report.sourceSnapshot||{}),tourRoster:roster}};
+            report=captainRebuildStoredDailyReport(report);
+            saveJSON(CAPTAIN_DAILY_REPORT_KEY,report);
+        }
+        if(!report.swingHistoryLimited && (report.tourRoster?.swingPrefixes||[]).length){
+            // Upgrade previously generated 3.2.73 reports immediately,
+            // preserving original native inspection proof and scan time.
+            // Do not require another 20-minute equipment read.
+            report=captainRebuildStoredDailyReport(report);
+            saveJSON(CAPTAIN_DAILY_REPORT_KEY,report);
+        }
+        const auditWindow = report.auditWindow || captainAuditWindow(
+            report.generatedAt?.slice(0, 10),report.shift||report.tourRoster?.shift);
         const { overlay, box } = makeOverlayBox('1360px');
         const title = document.createElement('div');
         title.style.cssText = 'font-size:22px;font-weight:700;color:#153e5c;margin-bottom:4px;';
@@ -4639,26 +6253,71 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const sub = document.createElement('div');
         sub.style.cssText = 'font-size:12px;color:#607483;margin-bottom:13px;line-height:1.5;';
         const monthText = (auditWindow.months || []).map(displayMonthKey).join(' + ');
-        sub.innerHTML = escapeHtml(report.setName || 'Captain Set') + ' · read-only Item Log audit · ' + escapeHtml(new Date(report.generatedAt).toLocaleString()) + '<br>' +
-            '<b>Months:</b> ' + escapeHtml(monthText) + ' · <b>Red ✕</b> = required and missing · <b style="color:#24713b">green ✓</b> = completed · future tours have no mark.<br>' +
-            'Tour checks become due at 07:00 on the first shift day. One completion on either shift day satisfies the whole tour.';
+        sub.innerHTML = escapeHtml(report.setName || 'Captain Set') +
+            ' · '+escapeHtml(captainShiftLabel(report.shift||auditWindow.shift))+'-shift' +
+            ' · read-only Item Log audit · ' + escapeHtml(new Date(report.generatedAt).toLocaleString()) + '<br>' +
+            '<b>Months:</b> ' + escapeHtml(monthText) + ' · <b>Red ✕</b> = required and missing · <b style="color:#24713b">green ✓</b> = actual completed inspection (including swings) · <b>OFF*</b> = captain-entered entire-tour absence · <b>OFF</b> = verified off/deployed both days · <b>?</b> = regular-crew attendance unknown · blank = unassigned swing tour or future.<br>' +
+            'Your regular crew needs a tour check if assigned to any unit on either shift day. A temporary swing is counted here ONLY on the selected date(s) they work with you; their other tours stay blank unless a completed native check exists. OFF/deployed rules apply to regular crew.';
         box.append(title, sub);
+        if(Number.isFinite(report.elapsedMs)&&report.elapsedMs>=0){
+            const durationNote=document.createElement('div');
+            durationNote.style.cssText='font:700 11px/1.4 Arial;color:#2b6279;background:#edf6fa;border-radius:5px;padding:6px 9px;margin:0 0 8px;';
+            durationNote.textContent='Audit took '+captainDailyFormatDuration(report.elapsedMs)+
+                ' · '+(report.timingSampleCount||0)+' locally timed completed item read(s) used for upcoming ETA predictions.';
+            box.appendChild(durationNote);
+        }
+        if(report.tourRoster?.startDate){
+            const rosterInfo=document.createElement('div');
+            rosterInfo.style.cssText='font-size:11px;color:#274d62;background:#f1f7f9;border:1px solid #c7dce5;border-radius:7px;padding:8px 10px;margin-bottom:10px;';
+            const t=report.tourRoster;
+            const names=(report.owners||[]);
+            const assigned=date=>(t.onByDate?.[date]||[]).map(prefix=>
+                names.find(o=>o.prefix===prefix)?.name||prefix).join(', ')||'Nobody assigned';
+            rosterInfo.textContent='THIS TOUR ONLY '+t.startDate+' + '+t.endDate+
+                ' | Day 1: '+assigned(t.startDate)+' | Day 2: '+assigned(t.endDate)+
+                ' | Saved Captain Set unchanged.';
+            box.appendChild(rosterInfo);
+        }
 
         const months = Array.isArray(auditWindow.months) ? auditWindow.months.slice(0, 2) : [];
         const allItems = (report.owners || []).flatMap(owner => (owner.items || []).map(item => ({ owner, item })));
-        const missingMonthly = allItems.reduce((sum, row) => sum + (row.item.monthlyChecks || []).filter(check => !check.ok).length, 0);
-        const missingTours = allItems.reduce((sum, row) => sum + (row.item.tourChecks || []).filter(check => check.due && !check.ok).length, 0);
-        const unreadable = allItems.filter(row => row.item.status !== 'ok').length;
-        const hasProblems = missingMonthly > 0 || missingTours > 0 || unreadable > 0;
+        const missingTours = allItems.reduce((sum, row) =>
+            sum + (row.item.tourChecks || []).filter(check => check.due && !check.ok).length, 0);
+        const unknownTourOwners=new Set((report.owners||[]).flatMap(owner=>
+            (owner.items||[]).flatMap(item=>(item.tourChecks||[])
+                .filter(check=>check.unknown===true)
+                .map(check=>owner.prefix+'|'+check.startDate))));
+        const unreadable = allItems.filter(row=>row.item.status!=='ok' &&
+            (row.item.tourChecks||[]).some(check=>check.due)).length;
+        const hasUnresolvedOwners=(report.owners||[]).some(owner=>
+            !!owner.discoveryError||(owner.unknownAssets||[]).length>0);
+        const hasProblems = missingTours > 0 || unreadable > 0 ||
+            unknownTourOwners.size>0 || hasUnresolvedOwners;
 
         const summaryBar = document.createElement('div');
         summaryBar.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px;padding:9px 10px;border-radius:8px;border:1px solid ' +
             (hasProblems ? '#e1a3a3' : '#a9cfad') + ';background:' + (hasProblems ? '#fff3f3' : '#eef8ef') + ';font-size:11px;color:#304b5a;';
-        summaryBar.innerHTML = '<b>' + (hasProblems ? 'NEEDS REVIEW' : 'ALL DUE CHECKS COMPLETE') + '</b>' +
-            '<span>Monthly missing: <b style="color:' + (missingMonthly ? '#b42318' : '#24713b') + '">' + missingMonthly + '</b></span>' +
+        summaryBar.innerHTML = '<b>' + (hasProblems ? 'NEEDS REVIEW' : 'ALL DUE TOUR CHECKS COMPLETE') + '</b>' +
             '<span>Tour missing: <b style="color:' + (missingTours ? '#b42318' : '#24713b') + '">' + missingTours + '</b></span>' +
-            '<span>Unreadable: <b style="color:' + (unreadable ? '#b42318' : '#24713b') + '">' + unreadable + '</b></span>';
+            '<span>Unreadable: <b style="color:' + (unreadable ? '#b42318' : '#24713b') + '">' + unreadable + '</b></span>'+
+            '<span>Unverified tour attendance: <b style="color:#80570c">' +
+                unknownTourOwners.size + '</b></span>';
         box.appendChild(summaryBar);
+        const attendanceCard=document.createElement('section');
+        attendanceCard.style.cssText='margin:7px 0;padding:8px 10px;border:1px solid #c7d8e1;border-radius:7px;background:#f3f8fa;color:#385d70;font:11px/1.4 Arial;';
+        attendanceCard.textContent='Rebel Command attendance: loading read-only Scout evidence…';
+        box.appendChild(attendanceCard);
+        void captainShowCommandAttendance(report,attendanceCard,overlay);
+        if(report.recheckSummary){
+            const note=document.createElement('div');
+            note.style.cssText='font:700 11px/1.45 Arial;padding:7px 10px;margin-bottom:8px;border-radius:6px;background:#e9f4fb;color:#174761;';
+            const r=report.recheckSummary;
+            note.textContent='RECHECK: '+r.itemsQueried+' previously missing item(s) reread · '+
+                r.newlyCleared+' newly cleared · '+r.itemsStillMissing+
+                ' still missing'+(r.readErrors?' · '+r.readErrors+' read error(s)':'')+
+                '. Verified items were not reopened.';
+            box.appendChild(note);
+        }
 
         const ownerIssues = [];
         (report.owners || []).forEach(owner => {
@@ -4675,8 +6334,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const shortDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value || '') ? value.slice(5) : '';
         const monthTours = month => (auditWindow.tours || []).filter(tour => tour.month === month);
         const monthTourColumns = Math.max(1, ...months.map(month => monthTours(month).length));
-        const monthGridTemplate = () => '64px repeat(' + monthTourColumns + ', 34px)';
-        const makeMonthCell = (item, month, rowBackground, topBorder) => {
+        const monthGridTemplate = () => 'repeat(' + monthTourColumns + ', 34px)';
+        const makeMonthCell = (owner,item, month, rowBackground, topBorder) => {
             const td = document.createElement('td');
             const scheduledTours = monthTours(month);
             const itemTourMap = new Map(
@@ -4684,37 +6343,65 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     .filter(check => check.month === month)
                     .map(check => [check.startDate, check])
             );
-            const monthly = (item.monthlyChecks || []).find(check => check.month === month);
-            const capOk = item.status === 'ok' && !!(monthly && monthly.ok);
             td.style.cssText = 'padding:5px 7px;' + topBorder + 'vertical-align:middle;background:' + rowBackground +
-                ';min-width:' + (78 + monthTourColumns * 38) + 'px;';
-
+                ';min-width:' + (14 + monthTourColumns * 38) + 'px;';
             const grid = document.createElement('div');
             grid.style.cssText = 'display:grid;grid-template-columns:' + monthGridTemplate() + ';gap:4px;align-items:center;';
-
-            const cap = document.createElement('div');
-            cap.style.cssText = 'height:27px;display:flex;align-items:center;justify-content:center;border-radius:5px;border:1px solid ' +
-                (capOk ? '#78b684' : '#dc7f7f') + ';background:' + (capOk ? '#e5f5e8' : '#ffe3e3') +
-                ';color:' + (capOk ? '#176b32' : '#b42318') + ';font-size:11px;font-weight:800;white-space:nowrap;';
-            cap.textContent = capOk ? shortDate(monthly.date) : '✕';
-            cap.title = capOk
-                ? 'Captain monthly completed ' + monthly.date
-                : 'Captain monthly missing for ' + month;
-            grid.appendChild(cap);
-
             scheduledTours.forEach(headerTour => {
                 const tour = itemTourMap.get(headerTour.startDate) || headerTour;
-                const due = headerTour.due === true;
-                const ok = due && item.status === 'ok' && tour.ok === true;
-                const missing = due && !ok;
+                const due = tour.due === true;
+                const off = tour.off === true;
+                const unknown=tour.unknown===true;
+                const notAssigned=tour.notAssigned===true;
+                // A real native inspection is a fact even for a swing or
+                // someone normally on another shift. Never hide this green
+                // check behind today's Captain Set membership.
+                const ok=item.status==='ok' && tour.ok===true && !!tour.date;
+                const missing=due&&!ok;
                 const mark = document.createElement('div');
                 mark.style.cssText = 'height:27px;display:flex;align-items:center;justify-content:center;border-radius:5px;border:1px solid ' +
-                    (ok ? '#78b684' : missing ? '#dc7f7f' : '#d8e1e6') + ';background:' +
-                    (ok ? '#e5f5e8' : missing ? '#ffe3e3' : '#fafcfd') + ';color:' +
-                    (ok ? '#176b32' : missing ? '#b42318' : '#9aa8b0') + ';font-size:17px;font-weight:900;line-height:1;';
-                mark.textContent = due ? (ok ? '✓' : '✕') : '';
-                mark.title = 'Tour ' + headerTour.startDate + ' + ' + headerTour.endDate + ': ' +
-                    (due ? (ok ? 'completed' + (tour.date ? ' ' + tour.date : '') : 'missing') : 'future');
+                    (ok ? '#78b684' : missing ? '#dc7f7f' : unknown?'#ecb55b':'#d8e1e6') + ';background:' +
+                    (ok ? '#e5f5e8' : missing ? '#ffe3e3' : unknown?'#fff1d4':off ? '#e8edf0':'#fafcfd') + ';color:' +
+                    (ok ? '#176b32' : missing ? '#b42318' : unknown?'#80570c':'#9aa8b0') +
+                    ';font-size:'+(off&&!ok?'9px':'17px')+';font-weight:900;line-height:1;';
+                mark.textContent=ok?'✓':off?
+                    (tour.offSource==='captain_manual'?'OFF*':'OFF'):
+                    due?'✕':unknown?'?':'';
+                const manualDifferentShift=notAssigned&&tour.offSource==='captain_manual';
+                const offDetail=tour.offSource==='captain_manual'?
+                    (manualDifferentShift?'Captain-entered DIFFERENT SHIFT / other captain':'Captain-entered entire-tour OFF')+
+                    ' ('+(tour.offReason||'not specified')+')'+
+                    (tour.offNote?' · '+tour.offNote:'')+
+                    (tour.offRecordedBy?' · recorded by '+tour.offRecordedBy:''):'';
+                const otherShiftDetail=notAssigned?
+                    (tour.assignmentSource==='swing_outside_selected_tour'?
+                     'Temporary swing: no duty inferred outside the tour selected for this Captain check.':
+                     'Not assigned to this Captain Set on this tour; no requirement inferred.'):
+                    '';
+                mark.title='Tour '+headerTour.startDate+' + '+headerTour.endDate+': '+
+                    (offDetail||(unknown?
+                        'Scout could not verify a unit assignment or both full days OFF/deployed; review required.':
+                        otherShiftDetail)||(off?'Off/deployed this entire tour; PPE not due':due?
+                    (ok?'completed '+(tour.date||''): 'worked any unit, PPE required and missing'):
+                    'future/not yet due'));
+                if(tour.attendanceConflict)mark.title+=' · ATTENDANCE CONFLICT: a prior manual OFF entry disagrees with verified unit work. PPE remains due; verify the staffing record.';
+                if(ok)mark.title+=' · Verified native inspection completed '+tour.date+'.';
+                if(captainHistoricalTourEnded(headerTour) &&
+                   (missing||tour.offSource==='captain_manual')){
+                    mark.setAttribute('role','button');
+                    mark.setAttribute('tabindex','0');
+                    mark.setAttribute('aria-label','Edit past attendance for '+
+                        item.assetId+' on '+headerTour.startDate);
+                    mark.style.cursor='pointer';
+                    mark.style.outlineOffset='2px';
+                    mark.onclick=()=>showCaptainHistoricalOffEditor(report,overlay,
+                        owner.prefix,headerTour.startDate);
+                    mark.onkeydown=event=>{
+                        if(event.key==='Enter'||event.key===' '){
+                            event.preventDefault();mark.click();
+                        }
+                    };
+                }
                 grid.appendChild(mark);
             });
 
@@ -4731,7 +6418,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const tableWrap = document.createElement('div');
         tableWrap.style.cssText = 'max-height:68vh;overflow:auto;border:1px solid #c9d7df;border-radius:10px;background:#fff;';
         const table = document.createElement('table');
-        table.style.cssText = 'width:100%;min-width:' + (365 + months.length * (78 + monthTourColumns * 38)) + 'px;border-collapse:separate;border-spacing:0;font-size:11px;color:#223f50;';
+        table.style.cssText = 'width:100%;min-width:' + (365 + months.length * (14 + monthTourColumns * 38)) + 'px;border-collapse:separate;border-spacing:0;font-size:11px;color:#223f50;';
         const thead = document.createElement('thead');
         const headRow = document.createElement('tr');
         const makeHead = (text, extra) => {
@@ -4745,16 +6432,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             makeHead('ITEM', 'left:155px;min-width:210px;z-index:6;')
         );
         months.forEach((month, monthIndex) => {
-            const th = makeHead('', 'min-width:' + (78 + monthTourColumns * 38) + 'px;' + (monthIndex ? 'border-left:2px solid #355f7c;' : ''));
+            const th = makeHead('', 'min-width:' + (14 + monthTourColumns * 38) + 'px;' + (monthIndex ? 'border-left:2px solid #355f7c;' : ''));
             const monthTitle = document.createElement('div');
             monthTitle.style.cssText = 'font-size:11px;font-weight:800;margin-bottom:5px;';
             monthTitle.textContent = displayMonthKey(month);
             const guide = document.createElement('div');
             guide.style.cssText = 'display:grid;grid-template-columns:' + monthGridTemplate() + ';gap:4px;align-items:center;';
-            const capHead = document.createElement('div');
-            capHead.style.cssText = 'text-align:center;font-size:9px;font-weight:800;color:#dce9f2;';
-            capHead.textContent = 'CAP';
-            guide.appendChild(capHead);
             const tours = monthTours(month);
             tours.forEach(tour => {
                 const label = document.createElement('div');
@@ -4777,9 +6460,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         (report.owners || []).forEach((owner, ownerIndex) => {
             const ownerItems = owner.items || [];
             ownerItems.forEach((item, itemIndex) => {
-                const itemHasMissing = item.status !== 'ok' ||
-                    (item.monthlyChecks || []).some(check => !check.ok) ||
-                    (item.tourChecks || []).some(check => check.due && !check.ok);
+                const itemHasMissing = (item.tourChecks || []).some(check => check.due &&
+                    (item.status!=='ok' || !check.ok));
                 const baseBackground = ownerIndex % 2 ? '#f8fbfc' : '#ffffff';
                 const rowBackground = itemHasMissing ? '#fff1f1' : baseBackground;
                 const topBorder = itemIndex === 0 ? 'border-top:3px solid #6f8ea1;' : 'border-top:1px solid #dce5ea;';
@@ -4788,19 +6470,29 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const person = document.createElement('td');
                 person.style.cssText = 'position:sticky;left:0;z-index:2;min-width:155px;padding:6px 8px;' + topBorder +
                     'background:' + rowBackground + ';font-weight:800;color:#18384f;white-space:nowrap;';
+                const isTemporarySwing=captainIsTemporarySwing(owner,report.tourRoster);
+                const assignment=report.tourRoster?.assignmentWindows?.[owner.prefix];
+                const swingDates=isTemporarySwing?
+                    [report.tourRoster.startDate,report.tourRoster.endDate]
+                        .filter(date=>(report.tourRoster.onByDate?.[date]||[])
+                            .includes(owner.prefix))
+                        .map(date=>date.slice(5)):[];
                 person.innerHTML = '<span>' + escapeHtml(owner.name || owner.prefix || 'Unknown') + '</span>' +
-                    (owner.prefix ? ' <span style="font-size:9px;font-weight:500;color:#7a8d99">(' + escapeHtml(owner.prefix) + ')</span>' : '');
+                    (owner.prefix ? ' <span style="font-size:9px;font-weight:500;color:#7a8d99">(' + escapeHtml(owner.prefix) + ')</span>' : '')+
+                    (isTemporarySwing?' <span style="font-size:9px;font-weight:800;color:#136483;background:#e9f4fa;border-radius:4px;padding:2px 4px;">SWING '+escapeHtml(swingDates.join(' + '))+' ONLY</span>':'')+
+                    (assignment?.startDate?' <span style="font-size:9px;font-weight:800;color:#136483;background:#e9f4fa;border-radius:4px;padding:2px 4px;">TEMP '+escapeHtml(assignment.startDate)+' to '+escapeHtml(assignment.endDate||'ongoing')+'</span>':'');
 
                 const itemCell = document.createElement('td');
                 itemCell.style.cssText = 'position:sticky;left:155px;z-index:2;min-width:210px;padding:6px 8px;' + topBorder +
                     'background:' + rowBackground + ';box-shadow:' + (itemHasMissing ? 'inset 4px 0 0 #c83b3b,1px 0 0 #dce5ea' : '1px 0 0 #dce5ea') + ';white-space:nowrap;';
                 itemCell.innerHTML = '<b>' + escapeHtml(item.type || 'PPE') + '</b>' +
                     '<span style="font-size:9px;color:#6b7f8b;margin-left:6px">Asset ' + escapeHtml(item.assetId || 'unknown') + '</span>' +
-                    (item.status !== 'ok' ? '<span style="font-size:9px;color:#b42318;font-weight:800;margin-left:7px">HISTORY?</span>' : '');
+                    (item.status !== 'ok' && (item.tourChecks||[]).some(check=>check.due)?
+                        '<span style="font-size:9px;color:#b42318;font-weight:800;margin-left:7px">HISTORY?</span>' : '');
 
                 tr.append(person, itemCell);
                 months.forEach((month, monthIndex) => {
-                    const cell = makeMonthCell(item, month, rowBackground, topBorder);
+                    const cell = makeMonthCell(owner,item, month, rowBackground, topBorder);
                     if (monthIndex) cell.style.borderLeft = '2px solid #e1e8ec';
                     tr.appendChild(cell);
                 });
@@ -4814,102 +6506,40 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const footer = document.createElement('div');
         footer.style.cssText = 'font-size:10px;color:#6a7f8f;margin-top:8px;line-height:1.45;';
         footer.textContent = 'Audit through ' + displayHistoryDateKey(auditWindow.asOfDate) +
-            '. Previous month is fully due. Current-month future tours stay blank until their first 07:00 shift starts.';
+            '. Green means an actual native inspection including those by swing firefighters. Other-shift or unassigned tours stay blank if no completion is verified, not OFF or missed. OFF* is a manual entire-tour absence. Attendance corrections are not Vector inspection records or verified CrewSense absences. Use Edit Past Attendance to correct a historical assignment.';
         box.appendChild(footer);
 
         const closeV4 = makeButton('Close');
         closeV4.onclick = () => overlay.remove();
+        const pastOff=makeButton('Edit Past Attendance',{background:'#e1ebef',color:'#254963'});
+        pastOff.title='Record OFF or different-shift attendance for a completed tour. Captain-entered exception only; never an official Vector inspection.';
+        pastOff.onclick=()=>showCaptainHistoricalOffEditor(report,overlay);
+        const targets=captainDailyMissingTargets(report);
+        const recheckV4=makeButton('Recheck Missing ('+targets.length+')',
+            {background:'#147047',color:'#fff'});
+        recheckV4.disabled=!targets.length;
+        recheckV4.title='Read ONLY equipment with a due missing tour check or unreadable required history. Previously verified equipment is not revisited.';
+        recheckV4.onclick=async()=>{
+            overlay.remove();
+            await startCaptainDailyMissingRecheck(report);
+        };
         const rerunV4 = makeButton('Run Again', { background: '#176b8e', color: '#fff' });
         rerunV4.onclick = () => { overlay.remove(); launchCaptainDailyCheckFromAnywhere(); };
-        box.append(rerunV4, closeV4);
+        box.append(pastOff,recheckV4,rerunV4, closeV4);
         return;
-
-        (report.owners || []).forEach(owner => {
-            const card = document.createElement('div');
-            const verified = !!owner.compliant;
-            card.style.cssText = `padding:11px;margin:8px 0;border-radius:9px;border:1px solid ${verified ? '#9fc79f' : '#d7b56d'};background:${verified ? '#eef8ee' : '#fff8e8'};`;
-            const headline = document.createElement('div');
-            headline.style.cssText = 'font-size:14px;font-weight:700;color:#18384f;';
-            headline.textContent = owner.name;
-            const status = document.createElement('div');
-            status.style.cssText = 'font-size:12px;line-height:1.55;margin-top:4px;';
-            status.innerHTML = verified
-                ? `<b>COMPLIANT:</b> all ${owner.gearCount} current mapped PPE items satisfy both monthly checks and every tour check due in the two-month window.`
-                : `<b>NEEDS REVIEW:</b> Monthly ${owner.monthlyPassedCount}/${owner.monthlyRequirementCount} · Tour PPE ${owner.tourPassedCount}/${owner.tourRequirementCount}.`;
-            card.append(headline, status);
-
-            if (owner.discoveryError) {
-                const issue = document.createElement('div');
-                issue.style.cssText = 'font-size:11px;color:#8a5a00;margin-top:5px;';
-                issue.textContent = `Discovery issue: ${owner.discoveryError}`;
-                card.appendChild(issue);
-            }
-            if ((owner.unknownAssets || []).length) {
-                const issue = document.createElement('div');
-                issue.style.cssText = 'font-size:11px;color:#8a5a00;margin-top:5px;';
-                issue.textContent = `Unmapped gear: ${owner.unknownAssets.join(', ')}`;
-                card.appendChild(issue);
-            }
-
-            const details = document.createElement('details');
-            details.style.cssText = 'margin-top:7px;';
-            details.open = !verified;
-            const summary = document.createElement('summary');
-            summary.style.cssText = 'cursor:pointer;font-size:11px;color:#436276;';
-            summary.textContent = `${owner.gearCount} current mapped PPE item${owner.gearCount === 1 ? '' : 's'} — two-month history`;
-            const rows = document.createElement('div');
-            rows.style.cssText = 'margin-top:6px;font-size:11px;line-height:1.55;';
-            (owner.items || []).forEach(item => {
-                const row = document.createElement('div');
-                row.style.cssText = `padding:7px 0;border-top:1px solid ${item.compliant ? '#d6e9d6' : '#ead7ad'};`;
-                if (item.status !== 'ok') {
-                    row.textContent = `${item.type || 'PPE'} · ${item.assetId} · UNREADABLE: ${item.error || 'history not available'}`;
-                } else {
-                    const monthlyText = (item.monthlyChecks || []).map(x =>
-                        `${displayMonthKey(x.month)}: ${x.date ? `${displayHistoryDateKey(x.date)} ✓` : 'MISSING'}`
-                    ).join(' · ');
-                    const missingTours = (item.tourChecks || []).filter(x => !x.ok);
-                    const tourPassed = (item.tourChecks || []).filter(x => x.ok).length;
-                    const tourTotal = (item.tourChecks || []).length;
-                    const missingTourText = missingTours.length
-                        ? `<br><span style="color:#8a5a00">Missing tours: ${escapeHtml(missingTours.map(x => `${x.startDate.slice(5)}–${x.endDate.slice(5)}`).join(', '))}</span>`
-                        : '';
-                    row.innerHTML = `<b>${escapeHtml(item.type || 'PPE')}</b> · ${escapeHtml(item.assetId)}<br>` +
-                        `Captain's Monthly: ${escapeHtml(monthlyText)}<br>` +
-                        `Tour PPE: ${tourPassed}/${tourTotal} tours ✓${missingTourText}`;
-                }
-                rows.appendChild(row);
-            });
-            details.append(summary, rows);
-            card.appendChild(details);
-            box.appendChild(card);
-        });
-
-        const tourDetails = document.createElement('details');
-        tourDetails.style.cssText = 'margin-top:10px;padding:8px;border:1px solid #d5e0e7;border-radius:8px;background:#f8fbfc;';
-        const tourSummary = document.createElement('summary');
-        tourSummary.style.cssText = 'cursor:pointer;font-size:11px;font-weight:700;color:#436276;';
-        tourSummary.textContent = `Tours included (${(auditWindow.tours || []).length})`;
-        const tourList = document.createElement('div');
-        tourList.style.cssText = 'font-size:11px;line-height:1.6;margin-top:6px;color:#506a7b;';
-        tourList.textContent = (auditWindow.tours || []).map(x => `${displayHistoryDateKey(x.startDate)} + ${displayHistoryDateKey(x.endDate)}${(x.eligibleDates || []).length < 2 ? ' (through audit date)' : ''}`).join(' · ');
-        tourDetails.append(tourSummary, tourList);
-        box.appendChild(tourDetails);
-
-        const close = makeButton('Close');
-        close.onclick = () => overlay.remove();
-        const rerun = makeButton('Run Again', { background: '#176b8e', color: '#fff' });
-        rerun.onclick = () => { overlay.remove(); launchCaptainDailyCheckFromAnywhere(); };
-        box.append(rerun, close);
     }
 
     function showCaptainDailySetPicker() {
         const config = getConfig();
         const usableSets = (config.captainSets || [])
-            .map(set => ({ ...set, people: resolveCaptainSetPeople(set, config) }))
-            .filter(set => set.people.length);
+            .map(set => ({
+                ...set,
+                people: resolveCaptainSetPeople(set, config),
+                memberCount: (set.memberPrefixes || []).length
+            }))
+            .filter(set => set.people.length && set.people.length === set.memberCount);
         if (!usableSets.length) {
-            setStatus('No Captain Sets are ready. Open Settings → Captain Sets and choose your crew from the department roster.', false);
+            setStatus('No Captain Sets are ready. Open Settings → Captain Sets and add crew members by exact Vector Responsible Party name and save the set.', false);
             showSettings('captain');
             return;
         }
@@ -4920,7 +6550,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         title.textContent = 'Daily Captain Check';
         const sub = document.createElement('div');
         sub.style.cssText = 'font-size:12px;color:#607483;margin-bottom:14px;line-height:1.5;';
-        sub.textContent = "Read only. One line per person/item: previous month on the left, current month on the right. Captain Monthly shows the completion date or a red X; each two-shift tour shows a green check, red X once due, or stays blank until the tour starts.";
+        sub.textContent = 'Read only. Every PPE item shows its per-tour inspection status: green check when completed on either shift day, red X when due and missing, blank for future tours. Monthly Captain checks are retired.';
         box.append(title, sub);
 
         const selectLabel = document.createElement('label');
@@ -4931,11 +6561,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         usableSets.forEach(set => {
             const option = document.createElement('option');
             option.value = set.id;
-            option.textContent = `${set.name} (${set.people.length})`;
+            option.textContent = `${set.name} · ${captainShiftLabel(set.shift)} shift (${set.people.length})`;
             select.appendChild(option);
         });
         const last = persistentGetRaw(CAPTAIN_LAST_SET_KEY) || '';
         if (usableSets.some(set => set.id === last)) select.value = last;
+        const selectedCaptainShift=()=>captainShiftLabel(
+            (usableSets.find(set=>set.id===select.value)||usableSets[0]).shift);
         box.append(selectLabel, select);
 
         const dateLabel = document.createElement('label');
@@ -4950,12 +6582,194 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         auditHint.style.cssText = 'font-size:10px;color:#6a7f8f;margin-bottom:13px;line-height:1.4;';
         const updateHint = () => {
             const auditDate = validDateKey(auditInput.value) || localTodayKey();
-            const w = captainAuditWindow(auditDate);
-            auditHint.textContent = `Window: ${displayMonthKey(w.months[0])} + ${displayMonthKey(w.months[1])}, through ${displayHistoryDateKey(w.asOfDate)} · ${w.tours.filter(t => t.due).length} tours due / ${w.tours.length} shown.`;
+            const w = captainAuditWindow(auditDate,selectedCaptainShift());
+            auditHint.textContent = `${w.shift}-shift 48/96 · Window: ${displayMonthKey(w.months[0])} + ${displayMonthKey(w.months[1])}, through ${displayHistoryDateKey(w.asOfDate)} · ${w.tours.filter(t => t.due).length} tours due / ${w.tours.length} shown.`;
         };
         auditInput.onchange = updateHint;
         updateHint();
         box.append(dateLabel, auditInput, auditHint);
+
+        // Tour staffing is an ephemeral override. Existing saved Captain Set
+        // membership and historic tour coverage are never edited. Each shift
+        // has its own ON/OFF switches; add any swing from the master roster.
+        const rosterPanel=document.createElement('section');
+        rosterPanel.style.cssText='border:1px solid #cbdbe6;border-radius:9px;padding:10px;margin:10px 0;background:#f7fbfd;color:#1d3e55;';
+        const rosterHeader=document.createElement('div');
+        rosterHeader.style.cssText='font:750 13px Arial;margin-bottom:4px;';
+        rosterHeader.textContent='WHO IS HERE THIS TOUR';
+        const rosterInfo=document.createElement('p');
+        rosterInfo.style.cssText='font:11px/1.45 Arial;margin:3px 0 9px;color:#597383;';
+        rosterInfo.textContent='Your saved Captain Set is selected automatically. Uncheck an off-duty person for either shift. Add swings below. Changes apply only to this audit.';
+        const rosterList=document.createElement('div');
+        rosterList.style.cssText='display:grid;gap:4px;margin:8px 0;';
+        const swingControls=document.createElement('div');
+        swingControls.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;align-items:center;';
+        const swingSelect=document.createElement('select');
+        swingSelect.setAttribute('aria-label','Select a swing firefighter');
+        swingSelect.style.cssText='flex:1;min-width:190px;padding:8px;border:1px solid #b8c8d6;border-radius:6px;background:#fff;color:#173b50;';
+        const swingDate=document.createElement('select');
+        swingDate.setAttribute('aria-label','Swing assignment day');
+        swingDate.style.cssText='padding:8px;border:1px solid #b8c8d6;border-radius:6px;background:#fff;color:#173b50;';
+        const addSwing=makeButton('+ Add Swing',{background:'#176b8e',color:'#fff'});
+        const crewCount=document.createElement('small');
+        crewCount.style.cssText='display:block;margin-top:7px;color:#547183;font:10px/1.4 Arial;';
+        swingControls.append(swingSelect,swingDate,addSwing);
+        const nextTimeHint=document.createElement('small');
+        nextTimeHint.style.cssText='display:block;margin:5px 0;color:#355c70;font:10px/1.4 Arial;';
+        rosterPanel.append(rosterHeader,rosterInfo,rosterList,swingControls,crewCount,nextTimeHint);
+        box.appendChild(rosterPanel);
+
+        let tourEntries=new Map(),tourKeys=['',''],lastRosterScope='';
+        const activeCaptainSet=()=>usableSets.find(x=>x.id===select.value)||usableSets[0];
+        const currentTourKeys=()=>{
+            const date=validDateKey(auditInput.value)||localTodayKey();
+            const w=inferRegularTourWindow(new Date(date+'T12:00:00'),selectedCaptainShift());
+            return[w.startDate,w.endDate];
+        };
+        function renderCaptainTourRoster(){
+            const set=activeCaptainSet(),dates=currentTourKeys();
+            const scope=set.id+'|'+dates.join('|');
+            if(scope!==lastRosterScope){
+                lastRosterScope=scope;
+                tourEntries=new Map(set.people.map(person=>{
+                    const temp=set.assignmentWindows?.[person.prefix];
+                    // Saved windows use two-day C-shift TOUR START dates.
+                    const active=!temp?.startDate ||
+                        (dates[0]>=temp.startDate &&
+                        (!temp.endDate||dates[0]<=temp.endDate));
+                    return[person.prefix,{person,base:true,
+                        assignmentWindow:temp||null,
+                        day1:active,day2:active}];
+                }));
+            }
+            tourKeys=dates;
+            rosterList.innerHTML='';
+            const header=document.createElement('div');
+            header.style.cssText='display:grid;grid-template-columns:minmax(110px,1fr) 92px 92px 34px;gap:4px;align-items:center;font:800 10px Arial;color:#385c72;';
+            const who=document.createElement('span');who.textContent='CREW';
+            header.appendChild(who);
+            dates.forEach((date,index)=>{
+                const label=document.createElement('span');
+                label.textContent='Day '+(index+1)+' '+date.slice(5);
+                label.style.textAlign='center';
+                header.appendChild(label);
+            });
+            header.appendChild(document.createElement('span'));
+            rosterList.appendChild(header);
+            for(const entry of tourEntries.values()){
+                const row=document.createElement('div');
+                row.style.cssText='display:grid;grid-template-columns:minmax(110px,1fr) 92px 92px 34px;gap:4px;align-items:center;padding:5px 2px;border-top:1px solid #e0ebef;font:11px Arial;';
+                const name=document.createElement('span');
+                const span=entry.assignmentWindow;
+                name.textContent=entry.person.name+(entry.base?'':' · SWING')+
+                    (span?.startDate?' · TEMP '+span.startDate.slice(5)+
+                        (span.endDate?' to '+span.endDate.slice(5):'+'):'');
+                name.style.cssText='min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;';
+                row.appendChild(name);
+                for(let i=0;i<2;i++){
+                    const label=document.createElement('label');
+                    label.style.cssText='display:flex;align-items:center;justify-content:center;gap:4px;cursor:pointer;';
+                    const cb=document.createElement('input');
+                    cb.type='checkbox';cb.checked=i?entry.day2:entry.day1;
+                    const span=entry.assignmentWindow;
+                    const outside=entry.base&&span?.startDate&&
+                        (dates[0]<span.startDate||
+                        (span.endDate&&dates[0]>span.endDate));
+                    // An outside-window member is not an OFF person, and
+                    // cannot be checked 'Here' without editing their dates.
+                    cb.disabled=!!outside;
+                    cb.setAttribute('aria-label',(i?'Day 2':'Day 1')+' '+entry.person.name+' on duty');
+                    cb.onchange=()=>{
+                        if(i)entry.day2=cb.checked;
+                        else entry.day1=cb.checked;
+                        label.lastChild.textContent=cb.checked?'Here':'Off';
+                        refreshCount();
+                    };
+                    const state=document.createElement('span');
+                    state.textContent=outside?'Not assigned':(cb.checked?'Here':'Off');
+                    label.append(cb,state);row.appendChild(label);
+                }
+                const last=document.createElement('span');
+                if(!entry.base){
+                    const remove=makeButton('×');
+                    remove.title='Remove this swing for the selected tour';
+                    remove.setAttribute('aria-label','Remove swing '+entry.person.name);
+                    remove.style.cssText+='padding:2px 7px;font-size:14px;';
+                    remove.onclick=()=>{tourEntries.delete(entry.person.prefix);renderCaptainTourRoster();};
+                    last.appendChild(remove);
+                }
+                row.appendChild(last);rosterList.appendChild(row);
+            }
+            const captainSurname=name=>{
+                const value=clean(name);
+                const comma=value.indexOf(',');
+                return comma>0?value.slice(0,comma).toUpperCase():
+                    expectedSurnamePrefix(value);
+            };
+            const candidates=getCaptainPersonOptions()
+                .filter(person=>!tourEntries.has(person.prefix))
+                .sort((a,b)=>
+                    captainSurname(a.name).localeCompare(captainSurname(b.name)) ||
+                    clean(a.name).localeCompare(clean(b.name)));
+            swingSelect.innerHTML='';
+            const prompt=document.createElement('option');
+            prompt.value='';prompt.textContent='Select swing from master list';
+            swingSelect.appendChild(prompt);
+            candidates.forEach(person=>{
+                const option=document.createElement('option');
+                option.value=person.prefix;option.textContent=person.name;
+                swingSelect.appendChild(option);
+            });
+            swingDate.innerHTML='';
+            dates.forEach((date,i)=>{
+                const option=document.createElement('option');
+                option.value=String(i);option.textContent='Day '+(i+1)+' ('+date.slice(5)+')';
+                swingDate.appendChild(option);
+            });
+            const both=document.createElement('option');
+            both.value='both';both.textContent='Both days';swingDate.appendChild(both);
+            const today=localTodayKey();
+            swingDate.value=today===dates[1]?'1':'0';
+            function refreshCount(){
+                const records=[...tourEntries.values()];
+                crewCount.textContent='Assigned: Day 1 '+records.filter(x=>x.day1).length+
+                    ' · Day 2 '+records.filter(x=>x.day2).length+
+                    ' · '+records.filter(x=>!x.base).length+' temporary swing(s).';
+                const active=new Set(records.filter(x=>x.day1||x.day2).map(x=>x.person.prefix));
+                const prior=getCaptainDailyReport(),source=prior?.sourceSnapshot;
+                const items=source?.items||[];
+                const matched=items.filter(item=>active.has(item.ownerPrefix));
+                const known=new Set(matched.map(item=>item.ownerPrefix));
+                const history=captainDailyTimeHistory();
+                const prediction=captainDailyTimingPredict(matched,history);
+                const setup=captainDailyMedian(history.setupMs||[]);
+                const fullyMapped=active.size>0&&[...active].every(p=>known.has(p));
+                nextTimeHint.textContent=fullyMapped&&prediction.totalMs!=null?
+                    'Next check: ~'+captainDailyFormatDuration(
+                        prediction.totalMs+(setup||0))+' expected for '+matched.length+
+                    ' previously mapped PPE items'+(setup==null?
+                        ' (initial inventory lookup not estimated)':' including observed setup time')+
+                    '. Actual time will adjust as items are read.' :
+                    'Time estimate will appear after equipment discovery and actual item timings are available.';
+            }
+            refreshCount();
+        }
+        addSwing.onclick=()=>{
+            const prefix=swingSelect.value;
+            if(!prefix){setStatus('Select a swing person from the approved roster.',false);return;}
+            const person=getCaptainPersonOptions().find(p=>p.prefix===prefix);
+            if(!person || tourEntries.has(person.prefix)){
+                setStatus('That swing person is unavailable or already on this tour.',false);return;
+            }
+            const choice=swingDate.value;
+            tourEntries.set(person.prefix,{person,base:false,
+                day1:choice==='0'||choice==='both',day2:choice==='1'||choice==='both'});
+            renderCaptainTourRoster();
+            setStatus(person.name+' added as a swing for this tour only. Saved Captain Set unchanged.');
+        };
+        select.onchange=()=>{updateHint();renderCaptainTourRoster();};
+        auditInput.onchange=()=>{updateHint();renderCaptainTourRoster();};
+        renderCaptainTourRoster();
 
         const run = makeButton('Run Read-Only Check', { background: '#176b8e', color: '#fff' });
         run.onclick = async () => {
@@ -4965,12 +6779,36 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 setStatus('Daily Captain Check needs a valid audit-through date.', false);
                 return;
             }
+            const selected=[...tourEntries.values()];
+            const keys=currentTourKeys();
+            const onByDate={
+                [keys[0]]:selected.filter(entry=>entry.day1).map(entry=>entry.person.prefix),
+                [keys[1]]:selected.filter(entry=>entry.day2).map(entry=>entry.person.prefix)
+            };
+            if(!onByDate[keys[0]].length&&!onByDate[keys[1]].length){
+                setStatus('Both shifts are empty. Mark at least one firefighter Here before checking.',false);
+                return;
+            }
+            const selectedSet={
+                ...set,
+                people:selected.map(entry=>entry.person),
+                memberPrefixes:selected.map(entry=>entry.person.prefix),
+                shift:selectedCaptainShift(),
+                tourRoster:{
+                    shift:selectedCaptainShift(),
+                    startDate:keys[0],endDate:keys[1],
+                    basePrefixes:set.people.map(person=>person.prefix),
+                    swingPrefixes:selected.filter(entry=>!entry.base).map(entry=>entry.person.prefix),
+                    assignmentWindows:set.assignmentWindows||{},
+                    onByDate
+                }
+            };
             persistentSetRaw(CAPTAIN_LAST_SET_KEY, set.id);
             overlay.remove();
-            await startCaptainDailyCheck(set, auditAsOfDate);
+            await startCaptainDailyCheck(selectedSet, auditAsOfDate);
         };
         const prior = getCaptainDailyReport();
-        if (Number(prior?.schemaVersion || 0) >= 5) {
+        if (Number(prior?.schemaVersion || 0) >= 6) {
             const view = makeButton('View Last Report');
             view.onclick = () => { overlay.remove(); showCaptainDailyReport(prior); };
             box.append(run, view);
@@ -4982,9 +6820,154 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         box.appendChild(close);
     }
 
+    // Recheck only previously due, missing or unreadable PPE. The previous
+    // successful asset histories are copied into the new report and never
+    // re-navigated. This reads native Vector Item Logs; it never performs
+    // or submits an inspection on behalf of a firefighter.
+    async function startCaptainDailyMissingRecheck(report) {
+        if(Number(report?.schemaVersion||0)<7){
+            setStatus('Only Tour-only Daily Captain reports support missing-item rechecks.',false);
+            return false;
+        }
+        const targets=captainDailyMissingTargets(report);
+        if(!targets.length){
+            setStatus('No due missing PPE checks remain to recheck.');
+            return false;
+        }
+        if(getRun() || getCaptainDailyCheck() || captainDailyBusy){
+            setStatus('Another inspection or Daily Captain audit is active. Finish or resolve it before rechecking.',false);
+            return false;
+        }
+        captainDailyBusy=true;
+        try {
+            await ensurePpeEquipmentPage(message=>setStatus(message),false);
+            const source=report.sourceSnapshot||{};
+            const allOriginal=(report.owners||[]).flatMap(owner=>(owner.items||[])
+                .map(item=>({
+                    assetId:item.assetId,type:item.type,
+                    ownerName:owner.name,ownerPrefix:owner.prefix
+                })));
+            const ownerList=(source.owners?.length?source.owners:report.owners||[])
+                .map(owner=>{
+                    const configured=rosterPersonByPrefix(owner.prefix);
+                    return {...owner,...(configured||{}),
+                        // Preserve the report's original Vector identity.
+                        name:owner.name,prefix:owner.prefix};
+                });
+            const keys=new Set(targets.map(t=>t.ownerPrefix+'|'+t.assetId));
+            const stored=Array.isArray(source.items)?source.items:[];
+            const byKey=new Map(stored.filter(item=>item.url&&item.assetId)
+                .map(item=>[item.ownerPrefix+'|'+item.assetId,item]));
+            const lacking=targets.filter(target=>!byKey.has(target.ownerPrefix+'|'+target.assetId));
+            let inventory=null;
+            if(lacking.length){
+                const missingNames=new Set(lacking.map(target=>target.ownerPrefix));
+                const scopedOwners=ownerList.filter(owner=>missingNames.has(owner.prefix));
+                if(scopedOwners.length!==missingNames.size)
+                    throw new Error('Some previous PPE owners cannot be identified. Recheck cannot safely match their items.');
+                inventory=await scanPpeCrewOwners(scopedOwners,
+                    message=>setStatus('Recheck Missing: '+message));
+                for(const owner of scopedOwners){
+                    const found=await discoverOwnerGear(owner,'tour',inventory);
+                    for(const item of found.items||[]){
+                        const stamped={...item,ownerName:owner.name,ownerPrefix:owner.prefix};
+                        const key=stamped.ownerPrefix+'|'+stamped.assetId;
+                        if(keys.has(key)&&!byKey.has(key))byKey.set(key,stamped);
+                    }
+                }
+            }
+            const unresolved=targets.filter(target=>
+                !byKey.get(target.ownerPrefix+'|'+target.assetId)?.url);
+            if(unresolved.length)
+                throw new Error('Cannot safely locate '+unresolved.length+' missing PPE item(s), beginning with '+
+                    unresolved[0].ownerName+' '+unresolved[0].assetId+
+                    '. Original results remain unchanged. Update the roster/asset mapping first.');
+            const dueItems=targets.map(target=>
+                byKey.get(target.ownerPrefix+'|'+target.assetId));
+            const originalResults=Array.isArray(source.results)&&source.results.length?
+                source.results:captainDailySourceResults(report);
+            const reportAllItems=allOriginal.map(item=>
+                byKey.get(item.ownerPrefix+'|'+item.assetId)||
+                stored.find(storedItem=>storedItem.ownerPrefix===item.ownerPrefix&&
+                    storedItem.assetId===item.assetId)||item);
+            const check={
+                schemaVersion:3,
+                checkId:'captain-daily-recheck-'+Date.now()+'-'+
+                    Math.random().toString(36).slice(2,8),
+                status:'running',ownerTabId:TAB_ID,
+                startedAt:new Date().toISOString(),
+                returnUrl:location.href,
+                setId:report.setId,setName:report.setName,
+                auditAsOfDate:source.auditAsOfDate||report.auditWindow?.asOfDate,
+                owners:ownerList,discovery:source.discovery||[],
+                tourRoster:source.tourRoster||report.tourRoster||null,
+                attendanceRecords:source.attendanceRecords||report.attendanceRecords||null,
+                attendanceCheckedAt:report.attendanceCheckedAt||'',
+                items:dueItems,fullItems:reportAllItems,
+                index:0,itemStartedAtMs:Date.now(),results:originalResults,
+                recheckTargets:targets,
+                recheckCount:Number(report.recheckCount||0)+1,
+                recheckErrors:[],
+                navAttempts:{}
+            };
+            if(!validDateKey(check.auditAsOfDate))
+                throw new Error('The original audit date is missing. Start a fresh Daily Captain audit.');
+            saveCaptainDailyCheck(check);
+            rebelCommandEvent('scan_check_started',{
+                success:true,workflowMode:'captainDaily',action:'daily_captain_recheck',
+                description:'Read-only recheck of previously missing PPE.',
+                metadata:{itemCount:dueItems.length,stage:'missing_only'}
+            });
+            setStatus('Recheck Missing: reading 1/'+dueItems.length+' ('+
+                dueItems[0].assetId+'). All previously completed items are skipped.');
+            navigateCaptainDailyToItem(check,dueItems[0]);
+            return true;
+        }catch(error){
+            const message='Recheck Missing stopped: '+(error?.message||String(error));
+            saveDiagnostic(message);
+            void reportRebelErrorToCommand(message,'captainDaily','recheck');
+            setStatus(message,false);
+            return false;
+        }finally{
+            captainDailyBusy=false;
+        }
+    }
+
+    function mergeCaptainDailyRecheckResult(previous,current) {
+        if(!previous)return current;
+        if(current.status!=='ok')return previous.status==='ok'?
+            {...previous,lastRecheckError:current.error||'Native history unreadable'}:current;
+        if(previous.status!=='ok')return current;
+        const dates=[...new Set([...(previous.tour?.dates||[]),
+            ...(current.tour?.dates||[])])].filter(validDateKey).sort().reverse();
+        return {...current,tour:{...current.tour,dates,
+            latestDate:dates[0]||''}};
+    }
+
+    function consumeQueuedCaptainDailyAfterVerifiedRun(run, now = Date.now()) {
+        const deferred = loadJSON(CAPTAIN_DAILY_DEFERRED_KEY, null);
+        if (!deferred || deferred.runId !== run?.runId) return false;
+        persistentRemoveRaw(CAPTAIN_DAILY_DEFERRED_KEY);
+        const queuedAt = Date.parse(deferred.queuedAt || '');
+        return Number.isFinite(queuedAt) && now >= queuedAt &&
+            now - queuedAt < 30 * 60 * 1000;
+    }
+
     async function launchCaptainDailyCheckFromAnywhere() {
-        if (getRun()) {
-            setStatus('An inspection run is active. Finish or abort it before the read-only Captain history check.', false);
+        const activeRun = getRun();
+        if (activeRun) {
+            if (activeRun.phase === 'stopped') {
+                setStatus('The inspection run stopped and needs review. Verify any submitted inspection, then use Settings → General → Abort Active Run before starting the Daily Captain Check.', false);
+                return;
+            }
+            // A request immediately after the final submit must not navigate away
+            // while the official Item Log is still being verified. Defer the read-only
+            // check until the existing run records its verified completion.
+            saveJSON(CAPTAIN_DAILY_DEFERRED_KEY, {
+                runId: activeRun.runId,
+                queuedAt: new Date().toISOString()
+            });
+            setStatus('Daily Captain Check queued. Waiting for the current PPE run to finish and verify its final submission; no new inspection will be started.');
             return;
         }
         const active = getCaptainDailyCheck();
@@ -4999,7 +6982,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
         try {
             setStatus('Opening Equipment → PPE for the Daily Captain Check…');
-            await ensurePpeEquipmentPage(message => setStatus(message));
+            await ensurePpeEquipmentPage(message => setStatus(message), false);
             showCaptainDailySetPicker();
         } catch (error) {
             saveDiagnostic(error.message);
@@ -5014,24 +6997,38 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             setStatus('Daily Captain Check needs a valid audit-through date.', false);
             return;
         }
+        const scanBeganAtMs=Date.now();
         captainDailyBusy = true;
         try {
-            const window = captainAuditWindow(validAuditDate);
+            const shift=captainShiftLabel(set.shift);
+            const window = captainAuditWindow(validAuditDate,shift);
             const config = getConfig();
             const selfPrefix = clean(config.selfPrefix).toUpperCase();
+            if (!(set.people || []).length ||
+                (set.memberPrefixes || []).length !== set.people.length) {
+                throw new Error('Captain Set membership is incomplete or unresolved. Edit the Captain Set before auditing PPE.');
+            }
             const owners = (set.people || [])
-                .map((person, index) => ({ name: person.name, prefix: person.prefix, setOrder: index }))
+                .map((person, index) => ({
+                    name: person.name,
+                    prefix: person.prefix,
+                    gearSearchPrefix: person.gearSearchPrefix,
+                    legacyPrefix: person.legacyPrefix,
+                    setOrder: index
+                }))
                 .sort((a, b) => {
-                    const rank = owner => owner.prefix === selfPrefix ? 0 : /\bbaldree\b/i.test(owner.name || '') ? 1 : 2;
+                    const rank = owner => masterNameKey(owner.name) === masterNameKey(config.inspectorName)
+                        ? 0 : /\bbaldree\b/i.test(owner.name || '') ? 1 : 2;
                     return rank(a) - rank(b) || a.setOrder - b.setOrder;
                 })
                 .map(({ setOrder, ...owner }) => owner);
             const items = [];
             const discovery = [];
+            const freshInventory = await scanPpeCrewOwners(owners, message => setStatus(message));
             for (const owner of owners) {
-                setStatus(`Daily Captain Check — finding current PPE for ${owner.name}…`);
+                setStatus(`Daily Captain Check — preparing verified PPE for ${owner.name}…`);
                 try {
-                    const found = await discoverOwnerGear(owner.prefix, 'captain');
+                    const found = await discoverOwnerGear(owner, 'tour', freshInventory);
                     discovery.push({
                         name: owner.name,
                         prefix: owner.prefix,
@@ -5054,11 +7051,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 checkId: `captain-daily-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                 status: 'running',
                 ownerTabId: TAB_ID,
-                startedAt: new Date().toISOString(),
+                startedAt: new Date(scanBeganAtMs).toISOString(),
                 returnUrl: location.href,
                 setId: set.id,
                 setName: set.name,
+                shift,
                 auditAsOfDate: validAuditDate,
+                tourRoster:set.tourRoster||null,
                 auditStartDate: window.startDate,
                 auditMonths: window.months,
                 auditTours: window.tours,
@@ -5066,9 +7065,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 discovery,
                 items,
                 index: 0,
+                itemStartedAtMs:Date.now(),
                 results: [],
                 navAttempts: {}
             };
+            captainDailyRememberSetup(Date.now()-scanBeganAtMs);
             saveCaptainDailyCheck(check);
             rebelCommandEvent('scan_check_started', {
                 success: true,
@@ -5090,6 +7091,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 metadata: { stage: 'start' }
             });
             clearCaptainDailyCheck();
+            void reportRebelErrorToCommand(error?.message||error,'captainDaily','start');
             setStatus(`Daily Captain Check stopped: ${error.message}`, false);
         } finally {
             captainDailyBusy = false;
@@ -5114,9 +7116,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         if (check.status === 'returning') {
             const report = buildCaptainDailyReport(check);
+            report.elapsedMs=Date.now()-Date.parse(check.startedAt||new Date().toISOString());
+            report.timingSampleCount=captainDailyTimeHistory().samples;
             const dailyErrors = (check.results || []).filter(x => x?.status === 'error');
             saveJSON(CAPTAIN_DAILY_REPORT_KEY, report);
-            if (dailyErrors.length) {
+            if (dailyErrors.length || (check.recheckErrors||[]).length) {
                 rebelCommandEvent('scan_check_failed', {
                     success: false,
                     workflowMode: 'captainDaily',
@@ -5178,20 +7182,34 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     assetId: item.assetId,
                     type: item.type,
                     status: 'error',
-                    captain: { dates: [], latestDate: '' },
                     tour: { dates: [], latestDate: '' },
                     error: error.message
                 };
             }
             if (cancelSerialAtStart !== captainDailyCancelSerial || getCaptainDailyCheck()?.checkId !== check.checkId) return true;
 
-            check.results = [...(check.results || []).filter(x => x.assetId !== item.assetId), result];
+            const nativeReadSucceeded=result.status==='ok';
+            const previous=(check.results||[]).find(x=>
+                x.assetId===item.assetId&&x.ownerPrefix===item.ownerPrefix);
+            if(check.recheckTargets?.length){
+                if(result.status!=='ok')check.recheckErrors=[
+                    ...(check.recheckErrors||[]),{
+                        assetId:item.assetId,ownerName:item.ownerName,error:result.error||'Unreadable'
+                    }
+                ];
+                result=mergeCaptainDailyRecheckResult(previous,result);
+            }
+            check.results=[...(check.results||[]).filter(x=>
+                x.assetId!==item.assetId||x.ownerPrefix!==item.ownerPrefix),result];
+            if(nativeReadSucceeded&&Number(check.itemStartedAtMs)>0)
+                captainDailyRememberDuration(item,Date.now()-check.itemStartedAtMs);
             check.index += 1;
+            check.itemStartedAtMs=Date.now();
 
             if (check.index >= check.items.length) {
                 check.status = 'returning';
                 saveCaptainDailyCheck(check);
-                setStatus('Daily Captain Check — two-month Captain Monthly + per-tour PPE history read complete. Returning to PPE list…');
+                setStatus('Daily Captain Check: two-month per-tour PPE history read complete. Returning to PPE list.');
                 if (check.returnUrl && location.href !== check.returnUrl) location.href = check.returnUrl;
                 else setTimeout(resumeCaptainDailyCheck, 50);
             } else {
@@ -5210,21 +7228,31 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // INSPECTION CHOOSER
     // ============================================================
 
+    // Vector renders the chooser as a React modal whose title, Cancel action,
+    // and cards may be divs or button-like elements in different builds.
+    // Normalize smart quotes and ellipsis before matching; never search the
+    // whole page for a checklist action unless its containing modal is verified.
+    function chooserText(el) {
+        return uiText(el?.innerText || el?.textContent || '')
+            .replace(/\u2026/g, '...')
+            .replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
     function findChooserRoot() {
-        const titles = [...document.querySelectorAll('h1,h2,h3,h4,div,span')].filter(
-            el => visible(el) && clean(el.innerText) === 'Select Inspection...'
-        );
+        const titles = [...document.querySelectorAll('h1,h2,h3,h4,div,span,[role="heading"]')]
+            .filter(el => visible(el) && chooserText(el) === 'select inspection...');
 
         const roots = [];
         for (const title of titles) {
             let el = title;
-            for (let i = 0; el && i < 8; i++, el = el.parentElement) {
+            for (let i = 0; el && i < 10; i++, el = el.parentElement) {
                 if (!visible(el)) continue;
-                const text = clean(el.innerText);
-                if (exactButton('Cancel', el) && text.includes('CHECKLIST')) {
-                    roots.push(el);
-                    break;
-                }
+                const text = chooserText(el);
+                if (!text.includes('select inspection...') || !text.includes('checklist')) continue;
+                const controls = [...el.querySelectorAll('button,a,[role="button"],input[type="button"]')];
+                if (!controls.some(control => visible(control) && chooserText(control) === 'cancel')) continue;
+                roots.push(el);
+                break;
             }
         }
 
@@ -5242,33 +7270,36 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         if (!root) return null;
 
         const target = uiText(modeTitle).toLowerCase();
-        const matches = [...root.querySelectorAll('button,a,[role="button"],li,div')].filter(el => {
-            if (!visible(el)) return false;
-            const t = uiText(el.innerText).toLowerCase();
-            return (
-                t === target ||
-                t === `${target} checklist` ||
-                (t.startsWith(target) && t.includes('checklist') && t.length <= target.length + 24)
-            );
+        // Match the ENTIRE official title, not a prefix such as "Tour PPE".
+        // Vector may render cards as nested div/span/paragraphs, not buttons.
+        const matches = [...root.querySelectorAll(
+            'button,a,[role="button"],[role="option"],li,div,article,section,span,p,h3,h4'
+        )].filter(el => {
+            if (!visible(el) || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+            const t = chooserText(el);
+            return t === target || t === `${target} checklist` ||
+                (t.startsWith(target) && t.includes('checklist') && t.length <= target.length + 24);
         });
         if (!matches.length) return null;
 
         const clickable = matches.filter(el => {
-            const tag = el.tagName.toLowerCase();
+            const tag = (el.tagName || '').toLowerCase();
             const role = el.getAttribute('role');
             const cursor = getComputedStyle(el).cursor;
-            return tag === 'button' || tag === 'a' || role === 'button' || !!el.onclick || el.tabIndex >= 0 || cursor === 'pointer';
+            return tag === 'button' || tag === 'a' || role === 'button' ||
+                role === 'option' || !!el.onclick || el.tabIndex >= 0 || cursor === 'pointer';
         });
 
         const pool = clickable.length ? clickable : matches;
         pool.sort((a, b) => {
             const ar = a.getBoundingClientRect();
             const br = b.getBoundingClientRect();
-            const score = r => {
-                const cardish = (r.width >= 250 && r.height >= 35 && r.height <= 150) ? 0 : 1000000;
-                return cardish + Math.abs(r.height - 70) * 100 + Math.abs(r.width - 450);
+            const score = (rect, text) => {
+                const cardish = (rect.width >= 220 && rect.height >= 30 && rect.height <= 160) ? 0 : 1000000;
+                const hasChecklist = text.endsWith(' checklist') ? 0 : 800;
+                return cardish + hasChecklist + Math.abs(rect.height - 70) * 100 + Math.abs(rect.width - 450);
             };
-            return score(ar) - score(br);
+            return score(ar,chooserText(a)) - score(br,chooserText(b));
         });
 
         return pool[0];
@@ -5309,7 +7340,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     async function fillLiveForm(run, item) {
-        const mode = getMode(run.modeKey);
+        const mode = getItemInspectionMode(run, item);
         const current = currentInspection();
         if (!current || current.template !== item.template) {
             throw new Error(`${item.assetId}: expected template ${item.template}, Vector opened ${current?.template || 'unknown'}.`);
@@ -5317,6 +7348,35 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         const pass = exactButtons('Passed');
         const fail = exactButtons('Failed');
+        if (item.inspectionModeKey === 'scbaTour') {
+            if (!Array.isArray(item.scbaAnswers) ||
+                item.scbaAnswers.length !== SCBA_TOUR_QUESTIONS.length ||
+                item.scbaAnswers.some(answer => answer !== 'pass')) {
+                throw new Error(item.assetId + ': SCBA requires seven physically verified PASS answers for automatic submission. Failed/incomplete masks require manual Vector inspection.');
+            }
+            if (pass.length !== 7 || fail.length !== 7) {
+                throw new Error(item.assetId + ': SCBA expected exactly seven Pass/Fail controls; saw ' +
+                    pass.length + '/' + fail.length + '. Form may have changed.');
+            }
+            const visibleText = uiText(document.body?.innerText || '');
+            let previousPosition = -1;
+            for (const question of SCBA_TOUR_QUESTIONS) {
+                const index = visibleText.toLowerCase().indexOf(uiText(question).toLowerCase(), previousPosition + 1);
+                if (index < 0 || index <= previousPosition) {
+                    throw new Error(item.assetId + ': SCBA checklist question/order does not match the verified seven-question template.');
+                }
+                previousPosition = index;
+            }
+            if ([...document.querySelectorAll('textarea')].some(visible) ||
+                enabledButton('Done')) {
+                throw new Error(item.assetId + ': SCBA unexpectedly requires a comment/Done step; inspect manually.');
+            }
+            for (let i = 0; i < 7; i++) {
+                pass[i].click();
+                await sleep(280);
+            }
+            return;
+        }
         if (pass.length !== 2 || fail.length !== 2) {
             throw new Error(`${item.assetId}: expected exactly 2 Passed and 2 Failed buttons. Found ${pass.length} Passed and ${fail.length} Failed.`);
         }
@@ -5554,7 +7614,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     function completionEvidence(run, item) {
-        const mode = getMode(run.modeKey);
+        const mode = getItemInspectionMode(run, item);
 
         // Retained for compatibility with any Vector variant that exposes a
         // completed inspection-instance view.
@@ -5696,14 +7756,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 postSubmitHistoryEntries: run.postSubmitHistoryEntries || [],
                 postSubmitHistoryKeys: run.postSubmitHistoryKeys || [],
                 postSubmitUsesStableIds: !!run.postSubmitUsesStableIds,
-                finalHistoryEntries: modeHistoryEntryTexts(item, getMode(run.modeKey).title),
+                finalHistoryEntries: modeHistoryEntryTexts(item, getItemInspectionMode(run, item).title),
                 itemLogTableFound: !!findItemLogHistoryTable(),
                 itemLogHeaders: findItemLogHistoryTable()
                     ? historyContainerHeaderText(findItemLogHistoryTable())
                     : '',
                 itemLogParserPath: run.itemLogParserPath || '',
-                textHistoryFallbackCount: textHistoryEntryElements(getMode(run.modeKey).title).length,
-                textHistoryFallbackEntries: textHistoryEntryElements(getMode(run.modeKey).title)
+                textHistoryFallbackCount: textHistoryEntryElements(getItemInspectionMode(run, item).title).length,
+                textHistoryFallbackEntries: textHistoryEntryElements(getItemInspectionMode(run, item).title)
                     .map(entry => uiText(entry.text))
                     .slice(0, 20),
                 preSubmitAssetFingerprint: run.preSubmitAssetFingerprint || null,
@@ -5761,7 +7821,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             });
             const stopped = loadJSON(STOPPED_RUN_KEY, null);
             if (stopped?.modeKey === run.modeKey) persistentRemoveRaw(STOPPED_RUN_KEY);
+            // Consume only after the whole run is archived as verified.
+            const queuedCaptain = consumeQueuedCaptainDailyAfterVerifiedRun(run);
             clearRun();
+
+            if (queuedCaptain) {
+                setStatus(`RUN COMPLETE — ${total}/${total} ${mode.short} inspection(s) verified. Opening the queued read-only Daily Captain Check.`);
+                setTimeout(() => launchCaptainDailyCheckFromAnywhere().catch(error => {
+                    setStatus(`Daily Captain Check could not open: ${error.message}`, false);
+                }), 600);
+                return;
+            }
 
             const archiveNote = archiveWarnings.length
                 ? ` Local archive warning: ${archiveWarnings.join(' ')} Download this run summary now.`
@@ -5782,7 +7852,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     async function waitForFinalCompletion(run, timeout = 60000) {
         const item = run.items[run.index];
-        const mode = getMode(run.modeKey);
+        const mode = getItemInspectionMode(run, item);
         const start = Date.now();
         let historyRevealAttempted = false;
 
@@ -5819,7 +7889,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     async function waitFailedOutcome(run) {
         const item = run.items[run.index];
-        const mode = getMode(run.modeKey);
+        const mode = getItemInspectionMode(run, item);
         const start = Date.now();
         let historyRevealAttempted = false;
 
@@ -5868,7 +7938,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     async function processLiveInspection(run) {
         const item = run.items[run.index];
-        const mode = getMode(run.modeKey);
+        const mode = getItemInspectionMode(run, item);
 
         if (!isLiveInspectionPage(mode.title)) {
             stopRun(`${item.assetId}: a fresh live ${mode.short} inspection was not detected.`);
@@ -5886,7 +7956,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         saveRun(run);
 
         try {
-            setStatus(`${run.index + 1}/${run.items.length} — recording ${item.q1.toUpperCase()}/${item.q2.toUpperCase()} for ${item.assetId}...`);
+            setStatus(`${run.index + 1}/${run.items.length} — recording ${item.inspectionModeKey === 'scbaTour' ? '7 verified SCBA answers' : item.q1.toUpperCase() + '/' + item.q2.toUpperCase()} for ${item.assetId}...`);
             await fillLiveForm(run, item);
 
             setStatus(`${run.index + 1}/${run.items.length} — applying ${getConfig().inspectorName}'s next signature variant...`);
@@ -5896,7 +7966,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
             await sleep(1000);
             const mainSubmit = await waitFor(() => enabledButton('Submit Inspection'), 15000);
-            const anyFailure = item.q1 === 'fail' || item.q2 === 'fail';
+            const anyFailure = item.inspectionModeKey === 'scbaTour'
+                ? (item.scbaAnswers || []).some(value => value === 'fail')
+                : item.q1 === 'fail' || item.q2 === 'fail';
 
             if (anyFailure) {
                 run.phase = 'failed-main-submitted';
@@ -5935,20 +8007,30 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     async function openInspectionForCurrentAsset(run) {
         const item = run.items[run.index];
-        const mode = getMode(run.modeKey);
+        const mode = getItemInspectionMode(run, item);
 
         if (!isAssetPageFor(item)) {
             location.href = item.url;
             return;
         }
 
-        const identityVerified = await verifyExpectedAssetPage(item);
-        if (!identityVerified) {
+        // Use the same continuous identity retry as read-only Captain,
+        // not a one-shot name recovery followed by waiting for a stale label.
+        const proof = await verifyPpeDetailIdentity(item);
+        if (!proof) {
             stopRun(
                 `${item.assetId}: Vector reached pool ${item.pool} / item ${item.itemId}, ` +
-                'but the expected asset ID was not found in the asset identity/header region. No inspection was started.'
+                'but neither the exact PPE Name nor its labeled serial number matched the verified item. No inspection was started. Open DIAGNOSTICS and share the report.'
             );
             return;
+        }
+        const { restoredName, verifiedItem } = proof;
+        if (restoredName) {
+            // Change the selected item's label only AFTER full identity proof.
+            // Its verified Responsible Party and pool/item URL are untouched.
+            item.assetId = restoredName;
+            saveRun(run);
+            setStatus('Verified exact PPE Name from heading and serial: ' + restoredName);
         }
 
         const itemKey = `${item.pool}:${item.itemId}`;
@@ -6064,6 +8146,37 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             setStatus(`${run.index + 1}/${run.items.length} — opening ${mode.short} chooser for ${item.assetId}...`);
         }
 
+        // The SCBA Face Mask pool opens its single Tour Checklist directly
+        // from Start Inspection, without the multi-template chooser. Persist
+        // the click first, and NEVER click it again during interrupted resumes.
+        if (item.inspectionModeKey === 'scbaTour') {
+            if (run.phase !== 'asset') {
+                stopRun(item.assetId + ': SCBA draft had already been opened. Verify it manually; no second Start Inspection click.');
+                return;
+            }
+            const startButton = await waitFor(() => enabledButton('Start Inspection'), 10000);
+            await bringIntoView(startButton, 300);
+            run.phase = 'await-live';
+            run.chooserOpenedAt = Date.now();
+            saveRun(run);
+            startButton.click();
+            const started = Date.now();
+            while (Date.now() - started < 18000) {
+                if (isLiveInspectionPage(mode.title)) {
+                    const fresh = getRun();
+                    if (fresh?.phase === 'await-live') await processLiveInspection(fresh);
+                    return;
+                }
+                if (findChooserRoot()) {
+                    stopRun(item.assetId + ': SCBA unexpectedly opened a chooser instead of the verified direct Tour Checklist. No second click.');
+                    return;
+                }
+                await sleep(180);
+            }
+            stopRun(item.assetId + ': SCBA Start Inspection did not open the expected Tour Checklist. No retry was made.');
+            return;
+        }
+
         let chooser = findChooserRoot();
         if (run.phase === 'chooser') {
             const chooserAge = Number.isFinite(run.chooserOpenedAt) ? Date.now() - run.chooserOpenedAt : Infinity;
@@ -6085,7 +8198,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             run.chooserOpenedAt = Date.now();
             saveRun(run); // persist before the click it authorizes
             startButton.click();
-            chooser = await waitFor(findChooserRoot, 10000);
+            try {
+                chooser = await waitFor(findChooserRoot, 15000);
+            } catch {
+                stopRun(`${item.assetId}: Start Inspection was clicked once, but the Select Inspection popup could not be recognized. No retry was made. Review the open Vector modal manually.`);
+                return;
+            }
 
             // Starting an inspection must not itself create something we count as
             // COMPLETE. This catches draft rows labelled "Incomplete" or any future
@@ -6107,7 +8225,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
         }
 
-        const card = await waitFor(() => findInspectionCardInChooser(mode.title), 10000);
+        let card;
+        try {
+            card = await waitFor(() => findInspectionCardInChooser(mode.title), 15000);
+        } catch {
+            stopRun(`${item.assetId}: the Select Inspection popup was open, but the exact "${mode.title}" card could not be identified. No option was clicked. Review it manually.`);
+            return;
+        }
         if (!chooser.contains(card)) {
             stopRun(`${item.assetId}: ${mode.short} selector was not inside the Select Inspection popup.`);
             return;
@@ -6152,7 +8276,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         busy = true;
         try {
             const item = run.items[run.index];
-            const mode = getMode(run.modeKey);
+            const mode = getItemInspectionMode(run, item);
             setStatus(`${run.index + 1}/${run.items.length} — ${item.assetId} — ${run.phase}`);
 
             if (run.phase === 'submitted') {
@@ -6281,17 +8405,52 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         box.appendChild(wrap);
     }
 
+    function stoppedRunAlreadyVerifiedInArchive(stoppedRun, archives = null) {
+        if (!stoppedRun?.runId || !stoppedRun?.startedAt ||
+            !Array.isArray(stoppedRun.items) || !stoppedRun.items.length) return false;
+        const saved = archives || [loadJSON(LAST_SUMMARY_KEY, null), ...getRunHistory()];
+        const expected = stoppedRun.items.map(item => clean(item.assetId).toUpperCase());
+        if (expected.some(id => !id) || new Set(expected).size !== expected.length) return false;
+        return saved.some(summary => {
+            if (!summary || summary.runId !== stoppedRun.runId ||
+                summary.startedAt !== stoppedRun.startedAt ||
+                summary.modeKey !== stoppedRun.modeKey ||
+                Number(summary.total) !== expected.length ||
+                !Number.isFinite(Date.parse(summary.completedAt || '')) ||
+                Date.parse(summary.completedAt) < Date.parse(stoppedRun.startedAt)) return false;
+            const completed = Object.values(summary.groups || {}).flatMap(group =>
+                Array.isArray(group?.items) ? group.items : []);
+            if (completed.length !== expected.length) return false;
+            const confirmed = new Map(completed.map(item =>
+                [clean(item.assetId).toUpperCase(), clean(item.evidence)]));
+            return confirmed.size === expected.length &&
+                expected.every(id => confirmed.has(id) && !!confirmed.get(id));
+        });
+    }
+
     async function buildPreview(modeKey, ownerInput) {
         const mode = getMode(modeKey);
         const config = getConfig();
         const owners = (Array.isArray(ownerInput) ? ownerInput : [ownerInput])
-            .map(normalizePerson)
+            .map(raw => {
+                const basic = normalizePerson(raw);
+                if (!basic) return null;
+                return {
+                    ...basic,
+                    gearSearchPrefix: clean(raw?.gearSearchPrefix).toUpperCase(),
+                    legacyPrefix: clean(raw?.legacyPrefix).toUpperCase(),
+                    role: clean(raw?.role)
+                };
+            })
             .filter(Boolean);
 
         if (!owners.length) throw new Error('Select at least one gear owner.');
+        if ((modeKey === 'tour' || modeKey === 'afterFire') && owners.length !== 1) {
+            throw new Error('Personal PPE mode requires exactly one owner.');
+        }
         if (!mode) throw new Error(`Unknown inspection mode: ${modeKey}`);
         if (!config.initialized) {
-            throw new Error('First-time setup required. Open Settings, confirm the inspector name / gear prefix, and save before running inspections.');
+            throw new Error('First-time setup required. Open Settings → Profile, confirm the inspector name, and save before running inspections.');
         }
         if (!getSignatureLibrary().length) {
             throw new Error('No saved signature variants. Open Settings → Signatures first.');
@@ -6299,11 +8458,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         const groups = [];
         let fatalIssue = false;
+        const personalMode = modeKey === 'tour' || modeKey === 'afterFire';
+        setStatus(personalMode
+            ? 'Searching only your PPE and verifying Responsible Party…'
+            : 'Verifying live Responsible Party ownership for the selected crew…');
+        const freshInventory = personalMode
+            ? await scanPpeByResponsibleParty(owners[0].name, message => setStatus(message))
+            : await scanPpeCrewOwners(owners, message => setStatus(message));
 
         for (const owner of owners) {
             setStatus(`Searching ${owner.name}'s assigned PPE...`);
             try {
-                const result = await discoverOwnerGear(owner.prefix, modeKey);
+                const result = await discoverOwnerGear(owner, modeKey, freshInventory);
                 const gear = result.items.map(item => ({
                     ...item,
                     ownerName: owner.name,
@@ -6316,14 +8482,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     ownerPrefix: owner.prefix,
                     ownerRole: owner.role || ''
                 }));
-                const currentAll = [...gear, ...unknown];
-                const diff = compareGearSnapshot(owner.prefix, currentAll);
+                const supplemental = (result.supplemental || []).map(item => ({
+                    ...item, ownerName: owner.name
+                }));
+                const diff = compareGearSnapshot(owner.prefix, [...gear, ...unknown]);
 
-                if (unknown.length) fatalIssue = true;
+                if (unknown.length || !gear.length) fatalIssue = true;
                 groups.push({
                     owner,
                     gear,
                     unknown,
+                    supplemental,
                     diff,
                     searchMeta: result.searchMeta,
                     error: null
@@ -6334,6 +8503,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     owner,
                     gear: [],
                     unknown: [],
+                    supplemental: [],
                     diff: compareGearSnapshot(owner.prefix, []),
                     searchMeta: null,
                     error: error.message
@@ -6360,21 +8530,50 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const rows = [];
         const expectedCount = getExpectedGearCount(config);
         const stoppedRun = loadJSON(STOPPED_RUN_KEY, null);
-        const stoppedRecent = stoppedRun && stoppedRun.modeKey === modeKey &&
-            Date.now() - Date.parse(stoppedRun.stoppedAt || stoppedRun.startedAt || 0) <= 6 * 60 * 60 * 1000;
+        // An older open Vector tab can resurrect and later stop a run which the
+        // SAME run ID had already archived as completely verified. An exact
+        // evidence-bearing archived match is a ghost, not an unfinished check.
+        const archivedStop = stoppedRunAlreadyVerifiedInArchive(stoppedRun);
+        if (archivedStop) persistentRemoveRaw(STOPPED_RUN_KEY);
+        const stoppedAt = Date.parse(stoppedRun?.stoppedAt || stoppedRun?.startedAt || '');
+        const stoppedRecent = !archivedStop && stoppedRun?.modeKey === modeKey &&
+            Number.isFinite(stoppedAt) && Date.now() >= stoppedAt &&
+            Date.now() - stoppedAt <= 6 * 60 * 60 * 1000;
         const protectedAssetIds = new Set();
         if (stoppedRecent) {
-            for (const c of stoppedRun.completed || []) protectedAssetIds.add(clean(c.assetId).toUpperCase());
-            if (Number.isFinite(stoppedRun.submittedAt) && stoppedRun.items?.[stoppedRun.index]?.assetId) {
-                protectedAssetIds.add(clean(stoppedRun.items[stoppedRun.index].assetId).toUpperCase());
-            }
+            const previouslyCompleted = new Set(
+                (stoppedRun.completed || []).map(c => clean(c.assetId).toUpperCase()).filter(Boolean)
+            );
+            for (const id of previouslyCompleted) protectedAssetIds.add(id);
+            const inFlight = Number.isFinite(stoppedRun.submittedAt)
+                ? clean(stoppedRun.items?.[stoppedRun.index]?.assetId).toUpperCase() : '';
+            if (inFlight) protectedAssetIds.add(inFlight);
             if (protectedAssetIds.size) {
                 const recovery = document.createElement('div');
                 recovery.style.cssText = 'background:#fff4e5;border:2px solid #d49b42;padding:10px;margin:8px 0;border-radius:5px;line-height:1.45;';
                 recovery.innerHTML =
-                    `<b>RECENT STOPPED RUN RECOVERY:</b> ${protectedAssetIds.size} asset(s) from the stopped ${escapeHtml(mode.short)} run ` +
-                    'will be pre-unchecked to reduce duplicate records. Review before re-enabling any of them.<br>' +
+                    `<b>PREVIOUS RUN NEEDS REVIEW:</b> ${previouslyCompleted.size} item(s) already recorded complete` +
+                    (inFlight && !previouslyCompleted.has(inFlight)
+                        ? `; 1 last submitted item (${escapeHtml(inFlight)}) has UNVERIFIED completion` : '') +
+                    '. These items were left unchecked to avoid accidental duplicate inspections. ' +
+                    'Check the official Vector Item Log before retrying an uncertain submission.<br>' +
                     [...protectedAssetIds].map(escapeHtml).join(', ');
+                const chooseNew = makeButton('NEW physical inspection — select all gear', {
+                    background: '#e8f3f7', color: '#153e5c'
+                });
+                chooseNew.onclick = () => {
+                    if (!confirm(
+                        'Start an entirely NEW physical inspection of all listed equipment? ' +
+                        'Some items may already have been submitted during the prior run. ' +
+                        'Selecting them again can create duplicate official records. ' +
+                        'Do not use this to retry an uncertain submission.'
+                    )) return;
+                    for (const row of rows) row.include.checked = true;
+                    chooseNew.textContent = 'All gear selected for a new inspection';
+                    setStatus('All gear selected for a NEW physical inspection. Review the answers and certify before starting.');
+                };
+                recovery.appendChild(document.createElement('br'));
+                recovery.appendChild(chooseNew);
                 box.appendChild(recovery);
             }
         }
@@ -6386,7 +8585,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
             const ownerHeader = document.createElement('div');
             ownerHeader.style.cssText = 'margin:14px 0 6px;padding:8px 10px;background:#eaf0f7;border-left:4px solid #173f70;font-weight:700;';
-            ownerHeader.textContent = `${owner.name} — ${owner.role || 'Personnel'} — ${owner.prefix} — ${totalFound} item(s) found`;
+            ownerHeader.textContent = `${owner.name} — ${owner.role || 'Personnel'} — ${totalFound} item(s) for this inspection mode` +
+                (group.supplemental?.length
+                    ? ` · ${group.supplemental.length} other assigned item(s)` : '');
             box.appendChild(ownerHeader);
 
             if (group.error) {
@@ -6419,6 +8620,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
             renderGearChangeNotice(box, owner, group.diff, totalFound);
 
+            if (group.supplemental?.length) {
+                const info = document.createElement('div');
+                info.style.cssText = 'background:#e9f4ff;border:1px solid #9bbfd8;padding:9px;margin:6px 0;border-radius:5px;font-size:12px;';
+                info.innerHTML =
+                    '<b>OTHER ASSIGNED EQUIPMENT — NOT PART OF THIS INSPECTION:</b><br>' +
+                    group.supplemental.map(x =>
+                        `${escapeHtml(x.assetId)} — ${escapeHtml(x.type)}`
+                    ).join('<br>') +
+                    '<br>These belong to this Responsible Party but require their own applicable check; no inspection is submitted for them here.';
+                box.appendChild(info);
+            }
             if (group.unknown.length) {
                 const unknown = document.createElement('div');
                 unknown.style.cssText = 'background:#ffe5e5;border:2px solid #b93636;padding:9px;margin:6px 0;border-radius:5px;';
@@ -6432,6 +8644,45 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
 
             discovered.forEach(item => {
+                if (item.inspectionModeKey === 'scbaTour') {
+                    const row = document.createElement('div');
+                    row.style.cssText = 'border:2px solid #3c7b9a;border-radius:7px;padding:12px;margin:9px 0;background:#f0f8ff;';
+                    const head = document.createElement('label');
+                    head.style.cssText = 'display:flex;align-items:center;gap:9px;font-weight:700;margin-bottom:8px;';
+                    const include = document.createElement('input');
+                    include.type = 'checkbox';
+                    include.checked = !protectedAssetIds.has(clean(item.assetId).toUpperCase());
+                    const title = document.createElement('span');
+                    title.textContent = 'SCBA Face Mask Tour Checklist — ' + item.assetId +
+                        ' (' + item.ownerName + ')';
+                    head.append(include, title);
+                    row.appendChild(head);
+                    const instruction = document.createElement('div');
+                    instruction.style.cssText = 'font-size:11px;color:#35596b;margin:6px 0 10px;';
+                    instruction.textContent = 'PASS is the initial selection, just as with other PPE. Physically inspect all seven SCBA components and change any problem to FAIL before confirming. Failed masks must be handled using Vector’s original SCBA inspection.';
+                    row.appendChild(instruction);
+                    const scbaSelects = SCBA_TOUR_QUESTIONS.map((question, index) => {
+                        const label = document.createElement('label');
+                        label.style.cssText = 'display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid #cee2ef;font-size:11px;';
+                        const name = document.createElement('span');
+                        name.style.cssText = 'flex:1;';
+                        name.textContent = (index + 1) + '. ' + question;
+                        const select = document.createElement('select');
+                        select.style.cssText = 'min-width:100px;padding:6px;';
+                        select.innerHTML = '<option value="pass">PASS</option><option value="fail">FAIL</option>';
+                        select.value = 'pass'; // Default selection only; inspector must still inspect and certify.
+                        select.addEventListener('change', () => {
+                            row.style.borderColor = scbaSelects.some(x => x.value === 'fail')
+                                ? '#b32c2c' : '#3c7b9a';
+                        });
+                        label.append(name,select);
+                        row.appendChild(label);
+                        return select;
+                    });
+                    box.appendChild(row);
+                    rows.push({ item, include, scbaSelects });
+                    return;
+                }
                 const defaults = defaultResultForAsset(item);
                 const row = document.createElement('div');
                 row.style.cssText = 'border:1px solid #ddd;border-radius:6px;padding:9px;margin:5px 0;';
@@ -6526,6 +8777,20 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const selected = [];
                 for (const row of rows) {
                     if (!row.include.checked) continue;
+                    if (row.item.inspectionModeKey === 'scbaTour') {
+                        const scbaAnswers = row.scbaSelects.map(select => select.value);
+                        if (scbaAnswers.length !== 7 || scbaAnswers.some(value => !value)) {
+                            alert(row.item.assetId + ': answer all seven SCBA checklist questions before starting.');
+                            return;
+                        }
+                        if (scbaAnswers.some(value => value === 'fail')) {
+                            alert(row.item.assetId +
+                                ': SCBA has one or more FAILED checks. Finish this SCBA inspection manually in Vector so its failure details are recorded correctly. Uncheck this SCBA item to proceed with other gear.');
+                            return;
+                        }
+                        selected.push({ ...row.item, scbaAnswers, failureNote: '' });
+                        continue;
+                    }
                     const q1 = row.q1.value;
                     const q2 = row.q2.value;
                     const failureNote = clean(row.note.value);
@@ -6672,7 +8937,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const cancelledDaily = await cancelCaptainDailyCheckForRealInspection();
             if (cancelledDaily) setStatus('Daily Captain Check cancelled. Starting the real PPE inspection…');
             else setStatus('Opening Equipment → PPE…');
-            await ensurePpeEquipmentPage(message => setStatus(message));
+            await ensurePpeEquipmentPage(message => setStatus(message), false);
             await startMyMode(modeKey);
         } catch (error) {
             saveDiagnostic(error.message);
@@ -6690,7 +8955,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const cancelledDaily = await cancelCaptainDailyCheckForRealInspection();
             if (cancelledDaily) setStatus('Daily Captain Check cancelled. Starting the real Captain PPE inspection…');
             else setStatus('Opening Equipment → PPE…');
-            await ensurePpeEquipmentPage(message => setStatus(message));
+            await ensurePpeEquipmentPage(message => setStatus(message), false);
             showCaptainOwnerPicker();
         } catch (error) {
             saveDiagnostic(error.message);
@@ -6705,11 +8970,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
 
         const config = getConfig();
-        const self = config.peopleDirectory.find(
-            x => x.prefix.toUpperCase() === config.selfPrefix.toUpperCase()
-        ) || {
+        // Always search as the current signed-in inspector, never a legacy
+        // directory record which could contain somebody else's name.
+        const self = {
             name: config.inspectorName,
-            prefix: config.selfPrefix
+            // Stable internal owner key; legacy stored prefix retained only if
+            // already present so existing local rules/snapshots keep working.
+            prefix: config.selfPrefix || ownerRosterKey(config.inspectorName)
         };
 
         try {
@@ -6738,12 +9005,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const usableSets = (config.captainSets || [])
             .map(set => ({
                 ...set,
-                people: resolveCaptainSetPeople(set, config)
+                people: resolveCaptainSetPeople(set, config),
+                memberCount: (set.memberPrefixes || []).length
             }))
-            .filter(set => set.people.length);
+            .filter(set => set.people.length && set.people.length === set.memberCount);
 
         if (!usableSets.length) {
-            setStatus('No Captain Sets are ready. Open Settings → Captain Sets and choose your crew from the department roster.', false);
+            setStatus('No Captain Sets are ready. Open Settings → Captain Sets and add crew members by exact Vector Responsible Party name and save the set.', false);
             showSettings('captain');
             return;
         }
@@ -6829,11 +9097,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         go.onclick = async () => {
             const set = currentSet();
             const selected = [...peopleHost.querySelectorAll('input[type="checkbox"][data-prefix]:checked')]
-                .map(cb => rosterPersonByPrefix(cb.dataset.prefix))
+                .map(cb => set.people.find(person => person.prefix === cb.dataset.prefix) || null)
                 .filter(Boolean)
                 .map(person => ({
                     name: person.name,
-                    prefix: person.prefix
+                    prefix: person.prefix,
+                    gearSearchPrefix: person.gearSearchPrefix,
+                    legacyPrefix: person.legacyPrefix
                 }));
             if (!selected.length) {
                 alert('Select at least one person whose PPE you inspected.');
@@ -6986,6 +9256,598 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return repeated[0]?.text || '';
     }
 
+    // PPE preflight confirmed the authoritative "Responsible Party" header.
+    // Do not use Location, duplicate name cells, or asset prefix for ownership.
+    function responsiblePartyPpeRow(anchor) {
+        const row = ppeRowForAnchor(anchor);
+        const table = row?.closest('table');
+        const heads = table ? [...table.querySelectorAll('thead th')].map(h =>
+            clean(h.innerText || h.textContent || '').toLowerCase()) : [];
+        const cells = row ? [...row.querySelectorAll(':scope > td, :scope > [role="cell"]')] : [];
+        const nameIndex = heads.indexOf('name'), partyIndex = heads.indexOf('responsible party');
+        const statusIndex = heads.indexOf('item status');
+        const poolIndex = heads.indexOf('pool');
+        // Populate only fields that Vector actually exposes in this verified row.
+        const headerValue = patterns => {
+            const index = heads.findIndex(header => patterns.some(rx => rx.test(header)));
+            return index >= 0 ? val(index) : '';
+        };
+        if (!row || nameIndex < 0 || partyIndex < 0 || !cells[nameIndex] || !cells[partyIndex]) {
+            throw new Error('PPE Name and Responsible Party columns were not found or aligned. Scan stopped.');
+        }
+        const val = index => index >= 0 && cells[index]
+            ? clean(cells[index].innerText || cells[index].textContent || '') : '';
+        const href = anchor.getAttribute('href') || '';
+        const ids = href.match(/\/app\/equipment\/PPE\/pool\/(\d+)\/(\d+)\/item/i);
+        if (!ids) throw new Error('PPE equipment row has no verifiable item URL.');
+        // PPE Name is an arbitrary equipment label, NOT a machine-generated
+        // surname prefix. Real examples include B.SMITH-10237612-FL and
+        // numeric serials. Validate presence and printability, not punctuation.
+        // Identity still comes from the exact pool/item URL, and ownership
+        // still comes EXCLUSIVELY from Responsible Party.
+        const assetId = val(nameIndex).toUpperCase();
+        if (!assetId || assetId.length > 160 || !/[\p{L}\p{N}]/u.test(assetId) ||
+            /[\u0000-\u001F\u007F]/.test(assetId)) {
+            throw new Error(
+                'PPE Name missing or unusable for item ' + ids[1] + ':' + ids[2] +
+                '. The roster was not saved; no equipment ownership was guessed.'
+            );
+        }
+        const party = val(partyIndex);
+        return {
+            assetId, pool: ids[1], itemId: ids[2],
+            url: new URL(href, location.origin).href,
+            ownerName: party && party !== '-' && !isOrganizationOrBadRosterName(party) ? party : '',
+            status: val(statusIndex),
+            serial: headerValue([/^serial(?: number| no| #)?$/i]),
+            size: headerValue([/^size$/i]),
+            manufacture: headerValue([/^date of manuf(?:acture|acturing)?\.?$/i,
+                /^manufactur(?:e|ing) date$/i, /^mfg\.? date$/i]),
+            type: getPoolType(ids[1]) === 'UNKNOWN'
+                ? (val(poolIndex) || 'UNKNOWN') : getPoolType(ids[1])
+        };
+    }
+
+    // Bounded PPE owner discovery, shared by personal and Captain checks.
+    // Search the specified PPE asset prefix via Vector's own search field and
+    // verify every returned row against Responsible Party. Never infer owner
+    // from Location, an asset ID, or a PERSON-* master-roster key.
+    // React-select is a multiselect. Merely finding Baldree among its chips
+    // must NEVER be accepted if Brandon Barth or anyone else is also selected.
+    // Read chip labels without inferring identity from the typed search text.
+    function responsiblePartySelectionLabels(input) {
+        const box = input?.parentElement?.parentElement;
+        if (!box) return [];
+        return [...box.querySelectorAll(
+            '[class*="multiValue"],[class*="singleValue"],[class*="MultiValue"]'
+        )].filter(el => visible(el) && !el.parentElement?.closest('[class*="multiValue"],[class*="singleValue"],[class*="MultiValue"]')).map(el =>
+            masterNameKey(clean(el.innerText || el.textContent || '')
+                .replace(/[×✕]/g, ''))
+        ).filter(Boolean);
+    }
+
+    function exactlyOneResponsiblePartySelected(input, expectedNameKey) {
+        const box = input?.parentElement?.parentElement;
+        if (!box || !expectedNameKey) return false;
+        const labels = responsiblePartySelectionLabels(input);
+        if (labels.length) {
+            // Any additional chip is unsafe, even if the expected owner is
+            // also present. Never Apply Filters in this state.
+            return labels.length === 1 && labels[0] === expectedNameKey;
+        }
+        // Legacy Vector variant with no recognizable CSS chip class.
+        // This fallback must match the ENTIRE rendered value, not a substring.
+        const rendered = clean(box.textContent || '').replace(/[×✕]/g, '');
+        return masterNameKey(rendered) === expectedNameKey;
+    }
+
+    // Direct Vector PPE filter by Responsible Party, verified live on 2026-10-22.
+    // This can return serial-number SCBA masks as well as surname-marked bunker
+    // PPE without guessing gear ID prefixes, and without a department-wide crawl.
+    // It uses the existing Vector filter controls (read-only UI navigation).
+    async function scanPpeByResponsibleParty(personName, progress = null) {
+        const name = clean(personName);
+        const ownerKey = masterNameKey(name);
+        if (!ownerKey || isOrganizationOrBadRosterName(name)) {
+            throw new Error('A valid Responsible Party person name is required.');
+        }
+        await ensurePpeEquipmentPage(progress, false);
+        const search = getSearchInput();
+        if (!search) throw new Error('PPE search field missing.');
+        if (clean(search.value)) {
+            // Clear the separate equipment-name search; otherwise it would hide
+            // valid gear even after Responsible Party filtering succeeds.
+            nativeSetInput(search, '');
+            await sleep(350);
+        }
+        const findButton = label => [...document.querySelectorAll('button,[role="button"]')]
+            .find(btn => visible(btn) &&
+                (uiEquals(btn.getAttribute('aria-label') || '', label) ||
+                    uiEquals(btn.innerText || btn.textContent || '', label)));
+        let input = [...document.querySelectorAll('input[role="combobox"]')]
+            .find(el => visible(el) && /filter-equip-.*-responsibleParty/i.test(el.id));
+        if (!input) {
+            const open = findButton('Open filter options') || findButton('Filters');
+            if (!open) throw new Error('Vector PPE Filters button was not found.');
+            open.click();
+            const openedAt = Date.now();
+            while (Date.now() - openedAt < 5500) {
+                await sleep(120);
+                input = [...document.querySelectorAll('input[role="combobox"]')]
+                    .find(el => visible(el) && /filter-equip-.*-responsibleParty/i.test(el.id));
+                if (input) break;
+            }
+        }
+        if (!input) throw new Error('Vector PPE Responsible Party filter was not available.');
+        // Clear other user-selected draft filters so an earlier Pool/Location
+        // filter cannot silently exclude this person's assigned equipment.
+        const clear = findButton('Clear Filters');
+        if (!clear) throw new Error('Vector did not expose Clear Filters; cannot guarantee full coverage.');
+        clear.click();
+        await sleep(180);
+        input = [...document.querySelectorAll('input[role="combobox"]')]
+            .find(el => visible(el) && /filter-equip-.*-responsibleParty/i.test(el.id));
+        if (!input) {
+            const open = findButton('Open filter options') || findButton('Filters');
+            open?.click();
+            await sleep(250);
+            input = [...document.querySelectorAll('input[role="combobox"]')]
+                .find(el => visible(el) && /filter-equip-.*-responsibleParty/i.test(el.id));
+        }
+        if (!input) throw new Error('Responsible Party picker closed unexpectedly after clearing filters.');
+        // Vector's React-select may reject a complete full-name autocomplete
+        // string. Searching a name fragment produces options; the resulting
+        // choice MUST match the complete requested person name exactly.
+        const tokens = name.split(/[\s-]+/).filter(t => t.length >= 2);
+        // "Ba" is shared by Baldree and Barth. Do not lead with two-letter
+        // probes or allow a stale chip for another firefighter to survive.
+        // Search the full unique name first, then surname or given name.
+        const probes = [...new Set([name, tokens.at(-1), tokens[0]]
+            .filter(Boolean))];
+        // React-select's multiselect value must actually contain a selected
+        // chip. Finding an option is NOT proof it was selected (v3.2.29 live
+        // video showed Apply Filters running with an empty Responsible Party).
+        const partyIsSelected = () => exactlyOneResponsiblePartySelected(input, ownerKey);
+        // Clear Filters may race the React-select chip state. Never select
+        // a second person on top of a retained/foreign Responsible Party.
+        const clearedAt = Date.now();
+        while (Date.now() - clearedAt < 1600 &&
+            responsiblePartySelectionLabels(input).length) await sleep(120);
+        if (responsiblePartySelectionLabels(input).length) {
+            throw new Error('Responsible Party filter still contains a selected person after Clear Filters. Stopped before inspection.');
+        }
+        let chosen = false;
+        for (const term of probes) {
+            input.focus();
+            input.click();
+            nativeSetInput(input, term);
+            const started = Date.now();
+            while (Date.now() - started < 4000) {
+                await sleep(130);
+                const menuId = input.getAttribute('aria-controls');
+                const menu = menuId ? document.getElementById(menuId) : null;
+                const options = [...(menu || document).querySelectorAll('[role="option"],[id*="-option-"]')]
+                    .filter(el => visible(el));
+                const target = options.find(el =>
+                    masterNameKey(el.innerText || el.textContent || '') === ownerKey);
+                if (!target) continue;
+                // One mousedown is the React-select selection gesture. A second
+                // click can toggle it back off in the multi-select widget.
+                target.dispatchEvent(new MouseEvent('mousedown', {bubbles:true,cancelable:true}));
+                await sleep(200);
+                if (!partyIsSelected()) {
+                    // Alternate selector behavior: some Vector releases select
+                    // on click instead of mousedown.
+                    target.click();
+                    await sleep(200);
+                }
+                chosen = partyIsSelected();
+                if (!chosen && responsiblePartySelectionLabels(input).length) {
+                    // A wrong or additional person was selected by the UI.
+                    // Clear immediately, do not Apply or silently try again.
+                    clear.click();
+                    throw new Error('Vector selected an unexpected or additional Responsible Party while searching for "' +
+                        name + '". Cleared filter. No inspection started.');
+                }
+                if (chosen) break;
+            }
+            if (chosen) break;
+        }
+        if (!chosen || !partyIsSelected()) throw new Error('Responsible Party "' + name +
+            '" was not confirmed as the ONE selected owner. No check was started.');
+        const apply = findButton('Apply Filters');
+        if (!apply) throw new Error('Vector did not show Apply Filters.');
+        // One final check immediately before the consequential filter action.
+        // A separate owner must never be included with the selected inspector.
+        if (!exactlyOneResponsiblePartySelected(input, ownerKey)) {
+            throw new Error('Responsible Party selection changed. Refusing to filter multiple people.');
+        }
+        apply.click();
+
+        const started = Date.now();
+        let firstReady = 0, stableAt = 0, prior = '', emptyAt = 0;
+        while (Date.now() - started < 25000) {
+            await sleep(200);
+            const snapshot = ppeLoadedRowsSnapshot();
+            const anchors = getVisiblePpeAnchors(getPpeResultsContainer() || document);
+            let correct = snapshot.ready && anchors.length > 0;
+            if (correct) {
+                try {
+                    correct = anchors.every(a =>
+                        masterNameKey(responsiblePartyPpeRow(a).ownerName) === ownerKey);
+                } catch { correct = false; }
+            }
+            const sig = correct ? snapshot.signature : '';
+            if (correct) {
+                const now = Date.now();
+                if (!firstReady) firstReady = now;
+                if (sig !== prior) { prior = sig; stableAt = now; }
+                if (now-firstReady >= 1400 && now-stableAt >= 900) break;
+            } else {
+                firstReady = 0; prior = ''; stableAt = 0;
+            }
+            if (hasExplicitNoResults() && Date.now() - started > 3000) {
+                if (!emptyAt) emptyAt = Date.now();
+                if (Date.now() - emptyAt > 1200) {
+                    throw new Error('No PPE assigned to Responsible Party "' + name +
+                        '" in Vector. The check was not started.');
+                }
+            }
+            if (progress && Date.now()-started > 1200 &&
+                Math.floor((Date.now()-started)/1000) % 4 === 0) {
+                progress('Waiting for Responsible Party "' + name + '" PPE rows…');
+            }
+        }
+        if (!firstReady || Date.now() - firstReady < 1400 ||
+            Date.now() - stableAt < 900) {
+            throw new Error('Responsible Party PPE filter did not settle for "'+name+'". Check stopped.');
+        }
+        const byItem = new Map(), seenPages = new Set();
+        let pageCount=0, rowCount=0;
+        for (let page=0;page<20;page++) {
+            const snapshot = ppeLoadedRowsSnapshot();
+            const sig = visibleAssetLinksSignature();
+            if (!snapshot.ready || !sig || seenPages.has(sig)) {
+                throw new Error('Responsible Party filtered PPE pagination incomplete or repeated.');
+            }
+            seenPages.add(sig);
+            pageCount++;
+            const anchors = getVisiblePpeAnchors(getPpeResultsContainer() || document);
+            rowCount += anchors.length;
+            if (rowCount > 200) {
+                throw new Error('Responsible Party filter returned more than 200 rows. Unverified filter; stopped.');
+            }
+            for (const anchor of anchors) {
+                const item = responsiblePartyPpeRow(anchor);
+                if (masterNameKey(item.ownerName) !== ownerKey) {
+                    throw new Error('PPE filter returned an asset belonging to a different Responsible Party: ' +
+                        item.assetId + '. Stopped without creating an inspection.');
+                }
+                const key = item.pool+':'+item.itemId;
+                const previous = byItem.get(key);
+                if (previous && (previous.assetId!==item.assetId ||
+                    masterNameKey(previous.ownerName)!==ownerKey)) {
+                    throw new Error('Conflicting PPE filtered row for ' + key);
+                }
+                byItem.set(key,item);
+            }
+            if (progress) progress('Responsible Party '+name+': verified '+
+                byItem.size+' assigned PPE items ('+pageCount+' page(s))…');
+            const next = getPaginationControl('next');
+            if (!paginationControlEnabled(next)) {
+                return {
+                    items:[...byItem.values()],pageCount,rowCount,
+                    source:'Vector PPE Responsible Party column',
+                    scope:'responsible-party-filter',
+                    capturedAt:new Date().toISOString()
+                };
+            }
+            if (page === 19) throw new Error('Responsible Party results exceed 20 pages; check stopped.');
+            next.click();
+            await waitForPpePageChange(sig);
+        }
+        throw new Error('Responsible Party PPE filtered scan did not reach the last page.');
+    }
+
+    async function scanPpeOwnerSearch(owner, progress = null) {
+        const ownerName = clean(owner?.name);
+        const ownerKey = masterNameKey(ownerName);
+        if (!ownerKey) throw new Error('Set your full inspector name in Settings → Profile first.');
+        // The search field can legitimately show zero results from a previous
+        // query. Require the PPE tab and controls, not a loaded full inventory,
+        // before overwriting that search with the owner's saved gear prefix.
+        await ensurePpeEquipmentPage(progress, false);
+        const search = getSearchInput();
+        if (!search) throw new Error('Vector PPE search input was not found.');
+        const originalTerm = search.value || '';
+        const ownerPrefix = clean(owner?.prefix).toUpperCase();
+        if (!ownerPrefix || ownerPrefix.length < 2 ||
+            !/^[A-Z0-9._-]+$/.test(ownerPrefix) ||
+            ownerPrefix.startsWith('PERSON-')) {
+            throw new Error('A real PPE asset prefix is required in Settings → Profile (for example BRION).');
+        }
+        const searchTerms = [ownerPrefix];
+        const byItem = new Map();
+        const searched = [];
+        let scannedPages = 0, scannedRows = 0;
+        try {
+            for (const term of searchTerms) {
+                if (progress) progress('Searching PPE asset IDs by prefix "' + term +
+                    '" for ' + ownerName + '…');
+                const before = visibleAssetLinksSignature();
+                const priorTerm = clean(search.value);
+                nativeSetInput(search, term);
+                // The form changes immediately, but Vector may fetch/render the
+                // new results considerably later. Wait for an actual transition
+                // or an explicit, settled no-results state.
+                let latest = '', stableSince = 0, readySince = 0;
+                let didSettle = false, empty = false;
+                const started = Date.now();
+                while (Date.now() - started < 24000) {
+                    await sleep(200);
+                    if (clean(search.value) !== clean(term)) continue;
+                    const snap = ppeLoadedRowsSnapshot();
+                    const emptyState = hasExplicitNoResults() && !snap.ready &&
+                        Date.now() - started >= 2200;
+                    const changed = before !== visibleAssetLinksSignature();
+                    const unchangedQuery = priorTerm === clean(term);
+                    if ((snap.ready && (changed || unchangedQuery)) || emptyState) {
+                        const candidate = emptyState ? 'EMPTY' : snap.signature;
+                        const now = Date.now();
+                        if (!readySince) readySince = now;
+                        if (candidate !== latest) {
+                            latest = candidate;
+                            stableSince = now;
+                        }
+                        if (now - readySince >= 1400 && now - stableSince >= 900) {
+                            didSettle = true;
+                            empty = emptyState;
+                            break;
+                        }
+                    } else {
+                        readySince = 0;
+                        stableSince = 0;
+                        latest = '';
+                    }
+                }
+                if (!didSettle) {
+                    throw new Error('Vector did not confirm a settled PPE search for "' +
+                        term + '". Scoped PPE search stopped before any inspection or audit.');
+                }
+                searched.push(term);
+                if (empty) continue;
+                const visitedPages = new Set();
+                for (let page = 0; page < 15; page++) {
+                    const snapshot = ppeLoadedRowsSnapshot();
+                    const signature = visibleAssetLinksSignature();
+                    if (!snapshot.ready || !signature || visitedPages.has(signature)) {
+                        throw new Error('PPE search pagination was incomplete or repeated for "' + term + '".');
+                    }
+                    visitedPages.add(signature);
+                    scannedPages++;
+                    const anchors = getVisiblePpeAnchors(getPpeResultsContainer() || document);
+                    scannedRows += anchors.length;
+                    if (scannedRows > 160) {
+                        throw new Error('PPE owner search returned too many results to trust as a personal filter. No inspection was started.');
+                    }
+                    for (const anchor of anchors) {
+                        const item = responsiblePartyPpeRow(anchor);
+                        if (item.ownerName && masterNameKey(item.ownerName) === ownerKey) {
+                            const key = item.pool + ':' + item.itemId;
+                            const previous = byItem.get(key);
+                            if (previous && (previous.assetId !== item.assetId ||
+                                masterNameKey(previous.ownerName) !== ownerKey)) {
+                                throw new Error('Conflicting PPE assignment for ' + key + '.');
+                            }
+                            byItem.set(key, item);
+                        }
+                    }
+                    if (progress) progress('Verified ' + byItem.size + ' PPE item(s) assigned to ' +
+                        ownerName + ' using Responsible Party…');
+                    const next = getPaginationControl('next');
+                    if (!paginationControlEnabled(next)) break;
+                    if (page === 14) {
+                        throw new Error('PPE owner search exceeded 15 pages. Refusing a department-wide scan.');
+                    }
+                    next.click();
+                    await waitForPpePageChange(signature);
+                    if (clean(search.value) !== clean(term)) {
+                        throw new Error('Vector reset the owner search during pagination. Inspection blocked.');
+                    }
+                }
+            }
+            if (!byItem.size) throw new Error(
+                'No PPE could be verified for ' + ownerName +
+                ' with PPE prefix ' + ownerPrefix +
+                ' and Responsible Party. Verify your saved PPE prefix and Vector assignment.'
+            );
+            return {
+                items: [...byItem.values()],
+                pageCount: scannedPages,
+                rowCount: scannedRows,
+                searched,
+                source: 'Vector PPE Responsible Party column',
+                scope: 'verified-owner-search',
+                capturedAt: new Date().toISOString()
+            };
+        } finally {
+            // Leave the verified asset-prefix search visible. Restoring an old
+            // full-name search would make Vector show "No PPE item found" again
+            // and falsely suggest that the inspection ignored the PPE prefix.
+            if (search.isConnected &&
+                clean(search.value).toUpperCase() !== ownerPrefix) {
+                nativeSetInput(search, ownerPrefix);
+            }
+        }
+    }
+
+    // A PERSON-* identifier is a master-roster key, not a PPE search term.
+    // Prefer an inspector's own saved prefix, then a previous explicit
+    // person-directory gear prefix, then a credible legacy roster gear prefix.
+    // For names not previously configured, search the surname as a candidate
+    // term only; the Responsible Party column must still confirm each result.
+    function crewPpeSearchPrefix(owner, config = getConfig()) {
+        const nameKey = masterNameKey(owner?.name);
+        if (!nameKey) throw new Error('Captain crew member has no name.');
+        const expected = expectedSurnamePrefix(owner.name);
+        const valid = value => {
+            const term = clean(value).toUpperCase();
+            return term.length >= 2 && term.length <= 60 &&
+                /^[A-Z0-9._-]+$/.test(term) &&
+                !term.startsWith('PERSON-');
+        };
+        const override = clean(owner?.gearSearchPrefix).toUpperCase();
+        if (override) {
+            if (!valid(override)) throw new Error(owner.name + ': invalid configured PPE search prefix "' +
+                override + '". Edit Settings → Captain Sets.');
+            return { prefix: override, source: 'captain-set-override' };
+        }
+        const inspectorPrefix = masterNameKey(config.inspectorName) === nameKey
+            ? clean(config.selfPrefix).toUpperCase() : '';
+        if (valid(inspectorPrefix)) return { prefix: inspectorPrefix, source: 'inspector-profile' };
+        const configured = (config.peopleDirectory || []).filter(p =>
+            masterNameKey(p.name) === nameKey && valid(p.prefix));
+        if (configured.length === 1) {
+            return { prefix: clean(configured[0].prefix).toUpperCase(), source: 'local-person-directory' };
+        }
+        const legacy = clean(owner.legacyPrefix).toUpperCase();
+        // Legacy M and WS0122 were known generic inventory series incorrectly
+        // linked to people. Never reuse an arbitrary mismatching serial prefix.
+        const legacySurnameMatch = valid(legacy) && expected &&
+            legacy.replace(/[^A-Z]/g, '').endsWith(expected);
+        if (legacySurnameMatch) {
+            return { prefix: legacy, source: 'legacy-surname-matched' };
+        }
+        if (valid(expected)) return { prefix: expected, source: 'surname-candidate' };
+        throw new Error('No safe PPE search prefix for ' + owner.name +
+            '. Configure the person gear prefix; department-wide discovery is disabled for this check.');
+    }
+
+    // Read-only scoped crew discovery: one bounded Vector search per selected
+    // person. Never invoke scanPpeOwnerInventory(), follow general inventory
+    // pagination, or claim that PERSON-* keys identify gear. A missing member
+    // blocks the audit or monthly preview rather than producing false compliance.
+    async function scanPpeCrewOwners(owners, progress = null) {
+        const config = getConfig();
+        if (!Array.isArray(owners) || !owners.length) {
+            throw new Error('Choose at least one crew member.');
+        }
+        const uniqueNames = new Set();
+        const byItem = new Map();
+        const searches = [];
+        let pageCount = 0;
+        let rowCount = 0;
+        for (let i = 0; i < owners.length; i++) {
+            const owner = owners[i];
+            const nameKey = masterNameKey(owner?.name);
+            if (!nameKey || uniqueNames.has(nameKey)) {
+                throw new Error('Captain Set has a missing or duplicate person identity.');
+            }
+            uniqueNames.add(nameKey);
+            if (progress) progress('Crew PPE ' + (i + 1) + '/' + owners.length +
+                ': filtering Responsible Party = ' + owner.name + '…');
+            let scoped;
+            try {
+                scoped = await scanPpeByResponsibleParty(owner.name, progress);
+            } catch (error) {
+                throw new Error(owner.name + ': ' +
+                    (error?.message || String(error)) +
+                    '. Crew check stopped; no incomplete roster was accepted.');
+            }
+            if (!scoped.items.length) throw new Error(owner.name +
+                ': no PPE ownership confirmed. Crew check stopped.');
+            searches.push({
+                name: owner.name, filter: 'Responsible Party',
+                source: 'Vector PPE', assetCount: scoped.items.length
+            });
+            pageCount += scoped.pageCount;
+            rowCount += scoped.rowCount;
+            for (const item of scoped.items) {
+                if (masterNameKey(item.ownerName) !== nameKey) {
+                    throw new Error('PPE ownership conflict for ' + item.assetId);
+                }
+                const key = item.pool + ':' + item.itemId;
+                const previous = byItem.get(key);
+                if (previous && masterNameKey(previous.ownerName) !== nameKey) {
+                    throw new Error('One PPE item was assigned to two selected crew members: ' + key);
+                }
+                if (previous && previous.assetId !== item.assetId) {
+                    throw new Error('PPE asset ID changed during crew discovery: ' + key);
+                }
+                byItem.set(key, item);
+            }
+        }
+        if (progress) progress('Verified ' + byItem.size + ' assigned PPE item(s) for ' +
+            owners.length + ' crew members using targeted searches.');
+        return {
+            items: [...byItem.values()],
+            pageCount,
+            rowCount,
+            searches,
+            source: 'Vector PPE Responsible Party column',
+            scope: 'verified-crew-search',
+            capturedAt: new Date().toISOString()
+        };
+    }
+
+    async function scanPpeOwnerInventory(progress = null) {
+        await ensurePpeEquipmentPage(progress);
+        const search = getSearchInput();
+        if (!search) throw new Error('PPE search control unavailable.');
+        const original = search.value || '';
+        try {
+            if (clean(original)) {
+                const beforeClear = visibleAssetLinksSignature();
+                nativeSetInput(search, '');
+                await waitForPpeRowsReady(22000, beforeClear, progress);
+            }
+            await goToFirstPpePage(progress);
+            await waitForPpeRowsReady(22000, null, progress);
+            const items = new Map(), seenPages = new Set();
+            let pageCount = 0, rowCount = 0, unassignedCount = 0;
+            for (let guard = 0; guard < 1000; guard++) {
+                // The previous wait verified a complete populated page; reread
+                // that state immediately before processing its ownership rows.
+                const currentPage = ppeLoadedRowsSnapshot();
+                const sig = visibleAssetLinksSignature();
+                if (!currentPage.ready || !sig || seenPages.has(sig)) {
+                    throw new Error('PPE pagination repeated or rows became incomplete; inventory not saved.');
+                }
+                seenPages.add(sig);
+                pageCount++;
+                const anchors = getVisiblePpeAnchors(getPpeResultsContainer() || document);
+                if (!anchors.length) throw new Error('PPE page contained no verifiable equipment links.');
+                for (const anchor of anchors) {
+                    const item = responsiblePartyPpeRow(anchor);
+                    rowCount++;
+                    if (!item.ownerName) unassignedCount++;
+                    const key = item.pool + ':' + item.itemId;
+                    const old = items.get(key);
+                    if (old && (old.assetId !== item.assetId ||
+                        masterNameKey(old.ownerName) !== masterNameKey(item.ownerName))) {
+                        throw new Error('PPE item ' + key + ' has conflicting ownership rows.');
+                    }
+                    items.set(key, item);
+                }
+                if (progress) progress('PPE page ' + pageCount + ' · ' +
+                    items.size + ' assets · ' + unassignedCount + ' unassigned');
+                const next = getPaginationControl('next');
+                if (!paginationControlEnabled(next)) return {
+                    items: [...items.values()],
+                    pageCount, rowCount, unassignedCount,
+                    source: 'Vector PPE Responsible Party column',
+                    capturedAt: new Date().toISOString()
+                };
+                if (guard === 999) throw new Error('PPE census exceeds 1000 pages, incomplete.');
+                next.click();
+                await waitForPpePageChange(sig);
+            }
+            throw new Error('PPE census ended without a verified last page.');
+        } finally {
+            if (clean(original) && search.isConnected) nativeSetInput(search, original);
+        }
+    }
+
     function getPaginationControl(kind) {
         const testIds = {
             first: ['first-page-button', 'pagination-first-button'],
@@ -7019,26 +9881,106 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             !cls.includes('disabled');
     }
 
-    async function waitForPpePageChange(previousSignature, timeoutMs = 8000) {
-        const started = Date.now();
-        let changedAt = 0;
-        let last = '';
-        let stable = 0;
-
-        while (Date.now() - started < timeoutMs) {
-            await sleep(160);
-            const current = visibleAssetLinksSignature();
-            if (current && current !== previousSignature) {
-                if (!changedAt) changedAt = Date.now();
-                if (current === last) stable += 1;
-                else {
-                    last = current;
-                    stable = 0;
-                }
-                if (stable >= 3 && Date.now() - changedAt >= 400) return current;
+    // Vector renders the Equipment/PPE shell before it renders the equipment
+    // table. A selected PPE tab or an empty table is NOT evidence that the list
+    // has finished loading. Wait for a populated, stable page containing the
+    // authoritative Responsible Party values before counting or paginating.
+    function ppeLoadedRowsSnapshot() {
+        const root = getPpeResultsContainer();
+        const anchors = root ? getVisiblePpeAnchors(root) : [];
+        const items = [];
+        let ready = anchors.length > 0;
+        for (const anchor of anchors) {
+            const row = ppeRowForAnchor(anchor);
+            const table = row?.closest('table');
+            const headers = table ? [...table.querySelectorAll('thead th')].map(cell =>
+                clean(cell.innerText || cell.textContent || '').toLowerCase()) : [];
+            const cells = row ? [...row.querySelectorAll(':scope > td, :scope > [role="cell"]')] : [];
+            const nameIndex = headers.indexOf('name');
+            const partyIndex = headers.indexOf('responsible party');
+            if (nameIndex < 0 || partyIndex < 0 || !cells[nameIndex] || !cells[partyIndex]) {
+                ready = false;
+                break;
             }
+            const name = clean(cells[nameIndex].innerText || cells[nameIndex].textContent || '');
+            const party = clean(cells[partyIndex].innerText || cells[partyIndex].textContent || '');
+            const href = anchor.getAttribute('href') || '';
+            if (!name || !/\/app\/equipment\/PPE\/pool\/\d+\/\d+\/item/i.test(href)) {
+                ready = false;
+                break;
+            }
+            items.push(href + '::' + name + '::' + party);
         }
-        throw new Error('Vector PPE pagination did not settle in time.');
+        // The visible footer normally says "1-10 of N". If present, it is
+        // authoritative evidence that a transient partial page is incomplete.
+        // If absent, a longer stable-row dwell is still required.
+        const region = root?.parentElement || root;
+        const regionText = clean(region?.innerText || region?.textContent || '').slice(-1500);
+        const range = regionText.match(/(?:^|\s)(\d+)\s*[-–]\s*(\d+)\s+of\s+(\d+)(?:\s|$)/i);
+        const expectedCount = range ? Number(range[2]) - Number(range[1]) + 1 : null;
+        if (expectedCount !== null && (!Number.isInteger(expectedCount) ||
+            expectedCount < 1 || expectedCount > 500 || anchors.length !== expectedCount)) {
+            ready = false;
+        }
+        return {
+            ready, count: anchors.length,
+            signature: items.join('|'),
+            expectedCount,
+            reason: !anchors.length ? 'waiting for first PPE item' :
+                !ready ? 'waiting for complete PPE rows' : 'PPE rows stabilizing'
+        };
+    }
+
+    async function waitForPpeRowsReady(timeoutMs = 22000, previousSignature = null, progress = null) {
+        const started = Date.now();
+        let firstReadyAt = 0, stableSince = 0, signature = '';
+        let lastProgressAt = -Infinity;
+        let latest = { reason: 'waiting for PPE list', count: 0 };
+        while (Date.now() - started < timeoutMs) {
+            const tab = findVectorNavigationTarget('PPE');
+            const selected = !!tab && vectorControlLooksActive(tab);
+            const snapshot = selected ? ppeLoadedRowsSnapshot() :
+                { ready: false, count: 0, reason: 'waiting for PPE tab to activate' };
+            latest = snapshot;
+            // Callers pass visibleAssetLinksSignature() before navigation.
+            // Compare like-for-like; snapshot.signature additionally tracks the
+            // owner cells that may finish rendering after the asset links.
+            const changed = previousSignature === null ||
+                (snapshot.ready && visibleAssetLinksSignature() !== previousSignature);
+            if (selected && snapshot.ready && changed) {
+                const now = Date.now();
+                if (!firstReadyAt) firstReadyAt = now;
+                if (snapshot.signature !== signature) {
+                    signature = snapshot.signature;
+                    stableSince = now;
+                }
+                // Keep at least 1.4 seconds of post-population observation,
+                // including at least 0.9 seconds with no row/owner changes.
+                if (now - firstReadyAt >= 1400 && now - stableSince >= 900) {
+                    return snapshot;
+                }
+            } else {
+                firstReadyAt = 0;
+                stableSince = 0;
+                signature = '';
+            }
+            if (progress && Date.now() - lastProgressAt >= 900) {
+                progress('Waiting for Vector PPE to load — ' + snapshot.reason +
+                    (snapshot.count ? ' (' + snapshot.count + ' visible)' : '') + '…');
+                lastProgressAt = Date.now();
+            }
+            await sleep(200);
+        }
+        throw new Error('Vector PPE did not finish loading within ' +
+            Math.round(timeoutMs / 1000) + ' seconds (' + latest.reason +
+            ', ' + latest.count + ' visible). No master roster was saved.');
+    }
+
+    async function waitForPpePageChange(previousSignature, timeoutMs = 22000) {
+        // A changed link signature can be the first transient row of the next
+        // page. Wait for the full table and Responsible Party cells to settle.
+        const loaded = await waitForPpeRowsReady(timeoutMs, previousSignature);
+        return loaded.signature;
     }
 
     async function goToFirstPpePage(progress = null) {
@@ -7068,6 +10010,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const root = getPpeResultsContainer() || document;
         const anchors = getVisiblePpeAnchors(root);
         const byPrefix = new Map();
+        const unverified = [];
 
         for (const anchor of anchors) {
             const assetId = genericAssetIdFromAnchor(anchor);
@@ -7079,6 +10022,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const row = ppeRowForAnchor(anchor);
             const name = clean(likelyPersonFromPpeRow(row, assetId));
             if (!name) continue;
+
+            // Generic asset prefixes are not proof of assignment. Fail closed.
+            if (!rosterHasPersonSpecificPrefix({ name, prefix })) {
+                unverified.push({ name, prefix, assetId, reason: 'person_to_asset_not_verified' });
+                continue;
+            }
 
             const cells = rowCellTexts(row);
             const ppeType = cells.map(normalizedPpeTypeText).find(Boolean) || '';
@@ -7110,6 +10059,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         return {
             people: [...byPrefix.values()],
+            unverified,
             visibleAssetCount: anchors.length
         };
     }
@@ -7168,13 +10118,22 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             !!getPpeResultsContainer();
     }
 
-    async function waitForPpeListReady(timeoutMs = 12000) {
-        const started = Date.now();
-        while (Date.now() - started < timeoutMs) {
-            if (isConfirmedPpeEquipmentPage()) return true;
-            await sleep(200);
+    async function waitForPpeListReady(timeoutMs = 22000, progress = null, requireRows = true) {
+        if (!requireRows) {
+            const start = Date.now();
+            while (Date.now() - start < timeoutMs) {
+                if (isConfirmedPpeEquipmentPage()) return true;
+                if (progress) progress('Waiting for Vector PPE search controls…');
+                await sleep(200);
+            }
+            return false;
         }
-        return false;
+        try {
+            await waitForPpeRowsReady(timeoutMs, null, progress);
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     async function waitForVectorNavigationTarget(label, timeoutMs = 10000) {
@@ -7187,7 +10146,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return null;
     }
 
-    async function ensurePpeEquipmentPage(progress = null) {
+    async function ensurePpeEquipmentPage(progress = null, requireRows = true) {
         if (getRun()) {
             throw new Error(
                 'An inspection run is active. Finish or abort that run before Vector Rebel navigates away.'
@@ -7195,7 +10154,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
 
         if (isConfirmedPpeEquipmentPage()) {
-            if (progress) progress('Already on Equipment → PPE.');
+            if (progress) progress(requireRows
+                ? 'Already on Equipment → PPE; waiting for inventory rows…'
+                : 'PPE tab ready; using the saved asset-prefix search…');
+            if (requireRows) await waitForPpeRowsReady(22000, null, progress);
             return true;
         }
 
@@ -7223,7 +10185,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ppe.click();
         }
 
-        if (await waitForPpeListReady(15000)) {
+        if (await waitForPpeListReady(22000, progress, requireRows)) {
             if (progress) progress('Equipment → PPE opened.');
             return true;
         }
@@ -7233,7 +10195,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const retryPpe = findVectorNavigationTarget('PPE');
         if (retryPpe) {
             retryPpe.click();
-            if (await waitForPpeListReady(10000)) {
+            if (await waitForPpeListReady(22000, progress, requireRows)) {
                 if (progress) progress('Equipment → PPE opened.');
                 return true;
             }
@@ -7245,129 +10207,43 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     async function scanPpeRosterCandidates(progress = null) {
-        await ensurePpeEquipmentPage(progress);
-
-        const search = getSearchInput();
-        const root = getPpeResultsContainer();
-        if (!search || !root) {
-            throw new Error('Vector Rebel could not confirm the Equipment → PPE list. No scan was started.');
-        }
-
-        const originalSearch = search.value || '';
-        if (clean(originalSearch)) {
-            nativeSetInput(search, '');
-            const started = Date.now();
-            let prior = '';
-            let stable = 0;
-            while (Date.now() - started < 8000) {
-                await sleep(180);
-                const current = visibleAssetLinksSignature();
-                if (current === prior && current) stable += 1;
-                else {
-                    prior = current;
-                    stable = 0;
-                }
-                if (stable >= 4) break;
+        const inventory = await scanPpeOwnerInventory(progress);
+        const byName = new Map(), byId = new Map(), unverified = [];
+        for (const item of inventory.items) {
+            if (!item.ownerName) {
+                if (unverified.length < 60) unverified.push({
+                    assetId: item.assetId, reason: 'Responsible Party is blank or unassigned'
+                });
+                continue;
             }
-        }
-
-        if (progress) progress('Reading the complete PPE list…');
-        await goToFirstPpePage(progress);
-
-        const peopleByPrefix = new Map();
-        const seenPageSignatures = new Set();
-        let pageCount = 0;
-        let assetCount = 0;
-
-        for (let guard = 0; guard < 300; guard++) {
-            const signature = visibleAssetLinksSignature();
-            if (!signature) {
-                throw new Error('No PPE asset rows were visible while scanning.');
+            const nameKey = masterNameKey(item.ownerName);
+            const prefix = ownerRosterKey(item.ownerName);
+            if (byId.has(prefix) && byId.get(prefix) !== nameKey) {
+                throw new Error('Conflicting people have the same personnel key.');
             }
-            if (seenPageSignatures.has(signature)) {
-                throw new Error('Vector pagination repeated a page while scanning. Scan stopped instead of returning an incomplete list.');
-            }
-            seenPageSignatures.add(signature);
-
-            pageCount += 1;
-            const page = scanCurrentPpePagePeople();
-            assetCount += page.visibleAssetCount;
-
-            for (const person of page.people) {
-                const old = peopleByPrefix.get(person.prefix);
-                if (!old) {
-                    peopleByPrefix.set(person.prefix, {
-                        ...person,
-                        equipmentSamples: [...(person.equipmentSamples || [])]
-                    });
-                } else {
-                    old.assetCount += person.assetCount;
-                    old.nameVariants ||= [old.name];
-                    for (const variant of person.nameVariants || [person.name]) {
-                        if (!old.nameVariants.some(value => masterNameKey(value) === masterNameKey(variant))) {
-                            old.nameVariants.push(variant);
-                        }
-                    }
-                    if (person.name.length > old.name.length) old.name = person.name;
-                    for (const sample of person.equipmentSamples || []) {
-                        old.equipmentSamples ||= [];
-                        if (!old.equipmentSamples.some(x => x.assetId === sample.assetId) && old.equipmentSamples.length < 12) {
-                            old.equipmentSamples.push(sample);
-                        }
-                    }
-                }
-            }
-
-            if (progress) {
-                progress(`Scanning PPE page ${pageCount} · ${peopleByPrefix.size} people found · ${assetCount} gear items read`);
-            }
-
-            const next = getPaginationControl('next');
-            if (!paginationControlEnabled(next)) break;
-
-            const before = signature;
-            next.click();
-            await waitForPpePageChange(before);
-        }
-
-        // Restore the user's search text. We intentionally do not attempt to recreate
-        // the exact starting page because Vector may reset pagination when search changes.
-        if (clean(originalSearch)) {
-            nativeSetInput(search, originalSearch);
-        }
-
-        const config = getConfig();
-        const savedByPrefix = new Map((config.peopleDirectory || []).map(p => [p.prefix, p]));
-        const rawPeople = [...peopleByPrefix.values()]
-            .map(person => {
-                const saved = savedByPrefix.get(person.prefix);
-                return {
-                    ...person,
-                    name: clean(person.name || saved?.name || titleCasePrefix(person.prefix)),
-                };
+            byId.set(prefix, nameKey);
+            const existing = byName.get(nameKey);
+            if (existing) existing.assetCount++;
+            else byName.set(nameKey, {
+                name: item.ownerName, prefix, active: true, assetCount: 1
             });
-
-        const cleaned = normalizeMasterRoster(rawPeople);
-        const people = cleaned.people;
-
-        if (!people.length) {
-            throw new Error('The PPE list was scanned, but no assigned personnel names could be read from the gear rows.');
         }
-
+        const cleaned = normalizeMasterRoster([...byName.values()]);
+        if (!cleaned.people.length) throw new Error(
+            'Responsible Party supplied no people. Master roster was not changed.'
+        );
         return {
-            people,
-            pageCount,
-            visibleAssetCount: assetCount,
+            people: cleaned.people,
+            pageCount: inventory.pageCount,
+            visibleAssetCount: inventory.rowCount,
             rejected: cleaned.rejected,
             merged: cleaned.merged,
-            rawUniqueCandidates: rawPeople.length,
-            needsReview: rosterNeedsReview(rawPeople)
+            rawUniqueCandidates: byName.size,
+            needsReview: rosterNeedsReview(cleaned.people),
+            unverified,
+            unassignedCount: inventory.unassignedCount
         };
     }
-
-    // ============================================================
-    // SETTINGS / PEOPLE DIRECTORY / SAVED CAPTAIN LIST
-    // ============================================================
 
     function peopleDirectoryToText(people) {
         return (people || []).map(p => `${p.name}|${p.prefix}`).join('\n');
@@ -7780,6 +10656,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // ============================================================
 
     function showSettings(initialTab = 'profile') {
+        // The normal-user interface never exposes advanced configuration,
+        // even through an old tab link. Backend roster publishing separately
+        // enforces the administrator device's actual authorization.
+        if(initialTab==='admin' &&
+            (!isMasterOwnerInstallation() || panelInterfaceMode()==='user'))
+            initialTab='profile';
         const { overlay, box } = makeOverlayBox('920px');
         box.style.padding = '0';
         box.style.overflow = 'hidden';
@@ -7817,7 +10699,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ['history', 'History'],
             ['general', 'General']
         ];
-        tabs.push(['admin', 'Admin']);
+        if(isMasterOwnerInstallation() && panelInterfaceMode()==='master')
+            tabs.push(['admin', 'Admin']);
 
         let active = tabs.some(([key]) => key === initialTab) ? initialTab : 'profile';
 
@@ -7881,63 +10764,179 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         function renderProfile() {
             const config = getConfig();
-            const intro = card('My Profile', 'This identifies the inspector using this computer. Signatures stored here must belong only to this person.');
-            const name = field('Name', config.inspectorName, { placeholder: 'First Last' });
-            const prefix = field('My PPE asset prefix', config.selfPrefix, { placeholder: 'SMITH' });
-            const coat = field('Tour Bunker Coat assignment comment', config.tourCoatComment, { placeholder: 'Name / identifier written into the coat inspection' });
-            intro.append(name.wrap, prefix.wrap, coat.wrap);
-
-            const save = makeButton('Save Profile', { background: '#176b8e', color: '#fff' });
+            const intro = card('My Profile',
+                'Your name identifies the Responsible Party for all PPE. ' +
+                'Gear IDs and surname prefixes are not required. Saved signatures must belong to the inspector.');
+            const name = field('Inspector name / Responsible Party',
+                config.inspectorName, {placeholder:'First Last'});
+            const coat = field('Tour Bunker Coat assignment comment',
+                config.tourCoatComment, {placeholder:'Name / identifier written into the coat inspection'});
+            const profileFields = [
+                ['ID Number','idNumber'],['Shift','shift'],
+                ['Station picked up at','pickupStation'],
+                ['Preferred station delivery','deliveryStation']
+            ].map(([label,key])=>({
+                key,...field(label, config.ppeRepairProfile?.[key]||'', {
+                    placeholder:label+' for PPE clean/repair forms'
+                })
+            }));
+            intro.append(name.wrap,coat.wrap);
+            for(const entry of profileFields)intro.appendChild(entry.wrap);
+            const save = makeButton('Save Profile', {background:'#176b8e',color:'#fff'});
             save.onclick = () => {
                 try {
                     const next = cloneConfig();
-                    const oldPrefix = next.selfPrefix;
                     const newName = clean(name.input.value);
-                    const newPrefix = clean(prefix.input.value).toUpperCase();
-                    if (!newName) throw new Error('Name is required.');
-                    if (!newPrefix) throw new Error('My PPE asset prefix is required.');
-                    if (!/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(newPrefix)) {
-                        throw new Error('PPE prefix may contain only letters, numbers, and internal hyphens.');
-                    }
-
-                    // If this inspector already exists in the locally saved People list, keep that record synchronized.
-                    const selfIndex = next.peopleDirectory.findIndex(p => p.prefix === oldPrefix);
-                    if (selfIndex >= 0) {
-                        if (newPrefix !== oldPrefix && next.peopleDirectory.some((p, i) => i !== selfIndex && p.prefix === newPrefix)) {
-                            throw new Error(`PPE prefix ${newPrefix} is already assigned to another saved person.`);
-                        }
-                        next.peopleDirectory[selfIndex] = { name: newName, prefix: newPrefix };
-                        next.captainSets = (next.captainSets || []).map(set => ({
-                            ...set,
-                            memberPrefixes: (set.memberPrefixes || []).map(p => p === oldPrefix ? newPrefix : p)
-                        }));
-                        next.captainRosterPrefixes = (next.captainRosterPrefixes || []).map(p => p === oldPrefix ? newPrefix : p);
-                    }
-
+                    if (!newName) throw new Error('Inspector name is required.');
+                    // Preserve legacy prefixes and local rules only for backup /
+                    // backwards compatibility. PPE discovery no longer uses them.
                     next.initialized = true;
                     next.inspectorName = newName;
-                    next.selfPrefix = newPrefix;
                     next.tourCoatComment = clean(coat.input.value);
+                    next.ppeRepairProfile=Object.fromEntries(
+                        profileFields.map(entry=>[entry.key,clean(entry.input.value)]));
                     saveConfig(next);
                     refreshPanelInfo();
-                    setStatus('Profile saved.');
+                    setStatus('Profile saved. PPE discovery uses Responsible Party.');
                     renderContent();
-                } catch (error) {
-                    alert(error.message);
-                }
+                } catch (error) { alert(error.message); }
             };
             intro.appendChild(save);
             content.appendChild(intro);
         }
 
+        function renderLinkedEquipment() {
+            const config = getConfig();
+            const ownerOptions = [
+                ...getActiveMasterRoster(),
+                ...normalizePeopleDirectory(config.peopleDirectory || []),
+                {name: config.inspectorName, prefix: config.selfPrefix}
+            ].filter(person => clean(person?.name) && !isOrganizationOrBadRosterName(person.name));
+            const owners = new Map();
+            for (const person of ownerOptions) {
+                const nameKey = masterNameKey(person.name);
+                if (!owners.has(nameKey)) owners.set(nameKey, clean(person.name));
+            }
+            const cardEl = card('Assigned PPE — Exact Equipment IDs',
+                'Optional shortcuts to individual equipment records. Main inspections already find ALL gear automatically using Responsible Party, including SCBA masks and numeric IDs. ' +
+                'Use this to bookmark a specific item. Local links do not change Vector assignments or inspection templates.');
+            const personSelect = document.createElement('select');
+            personSelect.style.cssText =
+                'display:block;width:100%;padding:10px;margin:10px 0;border:1px solid #bdccd7;border-radius:7px;';
+            [...owners.entries()].sort((a,b)=>a[1].localeCompare(b[1])).forEach(([key,name]) => {
+                const opt = document.createElement('option');
+                opt.value = key;
+                opt.textContent = name;
+                personSelect.appendChild(opt);
+            });
+            const ownKey = masterNameKey(config.inspectorName);
+            if (owners.has(ownKey)) personSelect.value = ownKey;
+            const input = field('Exact Vector PPE Name / equipment ID', '', {
+                placeholder: 'E004015306F2D8FE'
+            });
+            const msg = document.createElement('div');
+            msg.style.cssText='font-size:11px;line-height:1.5;margin:8px 0;color:#35566d;';
+            const list = document.createElement('div');
+            list.style.cssText='margin:10px 0;';
+            const help = document.createElement('div');
+            help.style.cssText='font-size:11px;line-height:1.45;color:#9a5a10;margin-top:9px;';
+            help.textContent='Exact equipment-ID links are legacy bookmarks. Current inspections find assigned gear automatically by Responsible Party.';
+            const add = makeButton('Find, Verify & Link This PPE', {
+                background:'#176b8e',color:'#fff'
+            });
+            const linked = () => {
+                list.innerHTML = '';
+                const owner = owners.get(personSelect.value);
+                const rows = linkedPpeForPerson(owner);
+                if (!rows.length) {
+                    list.textContent = 'No exact-ID equipment linked for this person yet.';
+                    return;
+                }
+                for (const record of rows) {
+                    const row = document.createElement('div');
+                    row.style.cssText =
+                        'padding:9px;border:1px solid #d8e5ec;border-radius:7px;margin:6px 0;';
+                    const label = document.createElement('div');
+                    label.style.cssText='font-size:12px;line-height:1.5;';
+                    label.textContent = record.assetId + ' — ' +
+                        (record.type === 'UNKNOWN' ? 'PPE pool '+record.pool : record.type) +
+                        ' · ' + record.status + ' · Verified ' +
+                        (record.verifiedAt.slice(0,10) || 'previously');
+                    const inspect = makeButton('Recheck Owner');
+                    inspect.onclick = async () => {
+                        inspect.disabled = true; msg.textContent = 'Checking ' + record.assetId + '…';
+                        try {
+                            const verified = await verifyExactPpeOwnership(owner, record.assetId,
+                                t=>{msg.textContent=t;});
+                            const next = cloneConfig();
+                            linkVerifiedPpeAsset(next,owner,verified,record.assetId);
+                            saveConfig(next);
+                            msg.textContent = 'Responsible Party verified: ' + verified.ownerName +
+                                ' · ' + verified.assetId + '.';
+                            linked();
+                        } catch(e) {msg.textContent = e.message;}
+                        finally {inspect.disabled = false;}
+                    };
+                    const open = makeButton('Open Item');
+                    open.onclick = () => {
+                        const url = new URL('/app/equipment/PPE/pool/' +
+                            record.pool + '/' + record.itemId + '/item', location.origin);
+                        window.open(url.href, '_blank','noopener,noreferrer');
+                    };
+                    const remove = makeButton('Unlink Local');
+                    remove.onclick = () => {
+                        if (!confirm('Remove the local link for ' + record.assetId +
+                            '? This will NOT change the equipment assignment in Vector.')) return;
+                        const next = cloneConfig();
+                        unlinkPpeAsset(next,owner,record.pool,record.itemId);
+                        saveConfig(next);
+                        msg.textContent = 'Local link removed (Vector unchanged).';
+                        linked();
+                    };
+                    row.append(label,inspect,open,remove);
+                    list.appendChild(row);
+                }
+            };
+            personSelect.addEventListener('change',linked);
+            add.onclick = async () => {
+                const owner = owners.get(personSelect.value);
+                const wanted = clean(input.input.value).toUpperCase();
+                if (!owner) {msg.textContent='Choose a person first.';return;}
+                if (!wanted) {msg.textContent='Enter the exact PPE ID first.';return;}
+                add.disabled = true;
+                msg.textContent = 'Searching Vector PPE for ' + wanted + '…';
+                try {
+                    const verified = await verifyExactPpeOwnership(owner,wanted,
+                        t=>{msg.textContent=t;});
+                    const next = cloneConfig();
+                    const count = linkVerifiedPpeAsset(next,owner,verified,wanted);
+                    saveConfig(next);
+                    msg.textContent = 'Verified & linked: ' + verified.assetId +
+                        ' · Responsible Party: ' + verified.ownerName +
+                        ' · ' + verified.status +
+                        '. (' + count + ' linked item(s) for this person.)';
+                    input.input.value='';
+                    linked();
+                } catch(e) {
+                    msg.textContent = 'NOT LINKED: ' + (e?.message || String(e));
+                } finally {
+                    add.disabled = false;
+                }
+            };
+            cardEl.append(personSelect,input.wrap,add,msg,list,help);
+            content.appendChild(cardEl);
+            linked();
+        }
+
         function renderCaptainSets() {
             const config = getConfig();
             const rosterState = getMasterRosterState();
-            const roster = rosterState.people.filter(person => person.active !== false);
+            const roster = getCaptainPersonOptions();
+            const centrallyManaged=getMasterRosterState().source==='shared-command';
 
             const c = card(
                 'Captain Sets',
-                'Choose your crew from the department master roster. Your saved Captain Sets stay only on this computer.'
+                'Choose your crew from the available names or add people using their exact Vector Responsible Party names. PPE is found by verified ownership; no gear prefixes are needed.'
             );
 
             const source = document.createElement('div');
@@ -7945,9 +10944,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 'padding:9px 10px;margin:8px 0 11px;background:#f3f7f9;border:1px solid #dce7ed;' +
                 'border-radius:8px;font-size:11px;line-height:1.45;color:#607483;';
             source.innerHTML =
-                `<b>Department roster:</b> ${escapeHtml(rosterState.version)} · ` +
-                `${roster.length} active people · ` +
-                `${rosterState.source === 'local-admin' ? 'local admin copy' : 'included with Vector Rebel'}`;
+                `<b>Crew sources:</b> ${escapeHtml(rosterState.version)} · ` +
+                `${roster.length} crew choices · ` +
+                `${rosterState.source === 'local-admin' ? 'local admin copy' : 'personal profile and saved crew'}`;
             c.appendChild(source);
 
             if (!roster.length) {
@@ -7956,16 +10955,29 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     'padding:11px;background:#fff8e8;border:1px solid #ead39a;border-radius:8px;' +
                     'font-size:12px;line-height:1.45;color:#735d2c;';
                 empty.textContent =
-                    'The department roster has not been embedded in this refinement build yet. ' +
-                    'An administrator can create it under Settings → Admin → Master Roster.';
+                    'No crew names are saved yet. Add a firefighter by their exact Vector Responsible Party name ' +
+                    'in the New Captain Set form, then save the set. Equipment ownership is verified live.';
                 c.appendChild(empty);
             }
 
             const controls = document.createElement('div');
             controls.style.cssText = 'display:flex;gap:7px;flex-wrap:wrap;margin:10px 0;';
             const newSet = makeButton('New Captain Set', { background: '#176b8e', color: '#fff' });
-            newSet.disabled = !roster.length;
+            newSet.disabled = false;
             controls.appendChild(newSet);
+            const syncRoster=makeButton('Refresh approved roster');
+            syncRoster.onclick=async()=>{
+                syncRoster.disabled=true;
+                const good=await refreshSharedRebelRoster(true);
+                syncRoster.disabled=false;
+                if(!good){
+                    setStatus('Approved roster unavailable: '+
+                        (sharedRosterSyncState().error||'Unknown error'),false);
+                    return;
+                }
+                renderContent();
+            };
+            controls.append(syncRoster);
             c.appendChild(controls);
 
             const savedHost = document.createElement('div');
@@ -8004,9 +11016,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         'display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid #edf2f5;';
                     const text = document.createElement('div');
                     text.style.flex = '1';
+                    const unresolvedCount = (set.memberPrefixes || []).length - members.length;
                     text.innerHTML =
-                        `<b>${escapeHtml(set.name)}</b><br>` +
-                        `<span style="font-size:11px;color:#6b7f8c">${members.length} crew member${members.length === 1 ? '' : 's'}</span>`;
+                        `<b>${escapeHtml(set.name)}</b> · ${escapeHtml(captainShiftLabel(set.shift))}-shift<br>` +
+                        `<span style="font-size:11px;color:${unresolvedCount > 0 ? '#a55e00' : '#6b7f8c'}">` +
+                        `${members.length} crew member${members.length === 1 ? '' : 's'}` +
+                        (unresolvedCount > 0 ? ` · ${unresolvedCount} legacy/unresolved key(s): edit before use` : '') +
+                        `</span>`;
 
                     const edit = makeButton('Edit');
                     edit.style.cssText += 'padding:6px 9px;font-size:11px;';
@@ -8051,9 +11067,35 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     { placeholder: 'My Crew' }
                 );
                 editor.appendChild(setName.wrap);
+                const shiftWrap=document.createElement('label');
+                shiftWrap.style.cssText='display:block;font:700 12px Arial;color:#385c72;margin:7px 0;';
+                shiftWrap.textContent='Regular shift (sets two-day tour dates)';
+                const shiftSelect=document.createElement('select');
+                shiftSelect.setAttribute('aria-label','Captain Set regular shift');
+                shiftSelect.style.cssText='display:block;margin-top:5px;width:100%;padding:9px;border:1px solid #afc8d7;border-radius:6px;';
+                for(const s of ['C','A','B']){
+                    const option=document.createElement('option');
+                    option.value=s;option.textContent=s+' shift';shiftSelect.appendChild(option);
+                }
+                shiftSelect.value=captainShiftLabel(currentSet?.shift);
+                shiftWrap.appendChild(shiftSelect);
+                editor.appendChild(shiftWrap);
 
                 const searchWrap = field('Find a person', '', { placeholder: 'Start typing a name…' });
                 editor.appendChild(searchWrap.wrap);
+
+                const addCrewName=field('Add person by exact Vector Responsible Party name','',
+                    {placeholder:'First and Last Name as shown in Vector'});
+                const addCrewPerson=makeButton('Add to Captain Set',
+                    {background:'#176b8e',color:'#fff'});
+                editor.append(addCrewName.wrap,addCrewPerson);
+                if(centrallyManaged){
+                    addCrewName.input.disabled=true;addCrewPerson.disabled=true;
+                    const note=document.createElement('div');
+                    note.textContent='Personnel choices are managed centrally in Rebel Command. Select people from the approved roster above.';
+                    note.style.cssText='font:11px Arial;color:#54758b;padding:5px;';
+                    editor.appendChild(note);
+                }
 
                 const count = document.createElement('div');
                 count.style.cssText = 'font-size:11px;color:#6a7f8c;margin:5px 0;';
@@ -8064,7 +11106,161 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     'border:1px solid #d9e3ea;border-radius:8px;padding:4px 9px;max-height:380px;overflow:auto;';
                 editor.appendChild(list);
 
-                const selected = new Set(currentSet?.memberPrefixes || []);
+                const selected = new Set((currentSet?.memberPrefixes || [])
+                    .map(prefix => roster.find(p=>p.prefix===prefix)?.prefix ||
+                        rosterPersonByPrefix(prefix)?.prefix || prefix));
+                const assignmentWindows={...(currentSet?.assignmentWindows||{})};
+                // Station crew is a dated, read-only suggestion. Only exact
+                // Vector identities or explicitly admin-reviewed aliases can
+                // be applied, and never without the captain's confirmation.
+                const importBox=document.createElement('section');
+                importBox.style.cssText='border:1px solid #9ebccc;background:#f2f8fb;border-radius:8px;padding:9px;margin:8px 0;color:#254b62;';
+                const importHeading=document.createElement('strong');
+                importHeading.textContent='Start from department assignments (Nov 10)';
+                const importDescription=document.createElement('p');
+                importDescription.textContent='Select a station to preview its dated regular crew. This does not know current leave, overtime or swaps. Review the crew before saving your Captain Set.';
+                importDescription.style.cssText='font:11px/1.45 Arial;margin:6px 0;';
+                const stationSelect=document.createElement('select');
+                stationSelect.setAttribute('aria-label','Import crew station');
+                stationSelect.style.cssText='margin-right:7px;padding:8px;border:1px solid #a4becd;border-radius:5px;color:#23435c;';
+                for(let number=1;number<=7;number++){
+                    const choice=document.createElement('option');
+                    choice.value=String(number);choice.textContent='Station '+number;
+                    stationSelect.appendChild(choice);
+                }
+                const previewCrew=makeButton('Preview Crew',{background:'#176b8e',color:'#fff'});
+                const applyCrew=makeButton('Use Matched Crew',{background:'#176b8e',color:'#fff'});
+                applyCrew.disabled=true;applyCrew.style.display='none';
+                const importStatus=document.createElement('div');
+                importStatus.setAttribute('role','status');
+                importStatus.style.cssText='white-space:pre-wrap;font:11px/1.5 Arial;margin-top:7px;';
+                const importActions=document.createElement('div');
+                importActions.style.cssText='display:flex;gap:6px;flex-wrap:wrap;align-items:center;';
+                importActions.append(stationSelect,previewCrew,applyCrew);
+                importBox.append(importHeading,importDescription,importActions,importStatus);
+                editor.appendChild(importBox);
+                let stagedImport=null;
+                const resetImport=()=>{
+                    stagedImport=null;applyCrew.disabled=true;applyCrew.style.display='none';
+                    importStatus.textContent='';
+                };
+                stationSelect.onchange=resetImport;
+                shiftSelect.addEventListener('change',resetImport);
+                previewCrew.onclick=async()=>{
+                    resetImport();
+                    previewCrew.disabled=true;
+                    importStatus.textContent='Loading dated station assignment and verifying names...';
+                    try{
+                        const result=await readCaptainStationCrew(
+                            shiftSelect.value,stationSelect.value);
+                        if(!result.people.length)
+                            throw Error('No approved Vector identity matches found for this station.');
+                        stagedImport=result;
+                        importStatus.textContent=result.people.length+' of '+
+                            result.sourceCount+' names matched the approved Vector roster: '+
+                            result.people.map(p=>p.name).join(', ')+'.'+
+                            (result.unresolved.length?'\nNEEDS REVIEW: '+
+                            result.unresolved.join(', ')+'. Add these only after resolving their official Vector names.':'')+
+                            '\nNo Captain Set changes have been saved.';
+                        applyCrew.disabled=false;applyCrew.style.display='inline-block';
+                    }catch(error){
+                        importStatus.textContent='Crew preview unavailable: '+
+                            clean(error?.message||error);
+                    }finally{previewCrew.disabled=false;}
+                };
+                applyCrew.onclick=()=>{
+                    if(!stagedImport||stagedImport.shift!==captainShiftLabel(shiftSelect.value)||
+                        stagedImport.station!==Number(stationSelect.value))return;
+                    if(!confirm('Replace this draft Captain Set selection with '+
+                        stagedImport.people.length+' matched Station '+
+                        stagedImport.station+' / '+stagedImport.shift+' members? '+
+                        'Unresolved identities stay unselected. Review personnel off, swaps and transfers before saving.'))
+                        return;
+                    selected.clear();
+                    for(const person of stagedImport.people)selected.add(person.prefix);
+                    tempMemberOptions();drawPeople();
+                    importStatus.textContent='Staged '+selected.size+
+                        ' matched crew members. Review remaining names and click Save Captain Set to keep this selection.';
+                    applyCrew.disabled=true;
+                };
+                // Crew selection is person-based. Vector's Responsible Party
+                // filter finds every equipment ID; no gear prefix inputs.
+
+                // Keep six-month / other temporary assignment boundaries in the
+                // existing Captain Set, not a separate crew or a fake OFF record.
+                const tempBox=document.createElement('div');
+                tempBox.style.cssText='border:1px solid #c4d8e5;border-radius:7px;padding:9px;margin:9px 0;background:#f2f9fc;font:11px Arial;color:#31586f;';
+                const tempTitle=document.createElement('strong');
+                tempTitle.textContent='Temporary Captain Set assignment dates';
+                const tempDescription=document.createElement('div');
+                tempDescription.textContent='For people temporarily assigned to this Captain Set, enter the first and last two-day TOUR START dates on the selected regular shift. Earlier/later tours stay blank unless a real Vector check was completed. Leave the last date empty for an ongoing assignment.';
+                tempDescription.style.cssText='margin:5px 0 8px;line-height:1.45;';
+                const tempPerson=document.createElement('select');
+                tempPerson.setAttribute('aria-label','Crew member with temporary assignment');
+                const tempStart=document.createElement('input');
+                tempStart.type='date';tempStart.setAttribute('aria-label','First temporary tour start');
+                const tempEnd=document.createElement('input');
+                tempEnd.type='date';tempEnd.setAttribute('aria-label','Last temporary tour start optional');
+                for(const c of [tempPerson,tempStart,tempEnd]){
+                    c.style.cssText='padding:7px;border:1px solid #afc8d7;border-radius:5px;background:white;color:#19415a;max-width:100%;';
+                }
+                const tempControls=document.createElement('div');
+                tempControls.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
+                const markTemp=makeButton('Save temporary dates',{background:'#176b8e',color:'#fff'});
+                const clearTemp=makeButton('Make permanent again');
+                const tempStatus=document.createElement('div');
+                tempStatus.style.cssText='font:10px Arial;color:#48657a;margin-top:5px;';
+                tempControls.append(tempPerson,tempStart,tempEnd,markTemp,clearTemp);
+                tempBox.append(tempTitle,tempDescription,tempControls,tempStatus);
+                editor.appendChild(tempBox);
+                const temporaryMemberOptions=()=>{
+                    const old=tempPerson.value;
+                    tempPerson.innerHTML='';
+                    const members=roster.filter(p=>selected.has(p.prefix))
+                        .sort((a,b)=>a.name.localeCompare(b.name));
+                    members.forEach(p=>{
+                        const opt=document.createElement('option');
+                        opt.value=p.prefix;opt.textContent=p.name;
+                        tempPerson.appendChild(opt);
+                    });
+                    if(members.some(p=>p.prefix===old))tempPerson.value=old;
+                    tempPerson.disabled=!members.length;
+                    const range=assignmentWindows[tempPerson.value]||{};
+                    tempStart.value=range.startDate||'';
+                    tempEnd.value=range.endDate||'';
+                    clearTemp.disabled=!range.startDate;
+                    const count=members.filter(p=>assignmentWindows[p.prefix]?.startDate).length;
+                    tempStatus.textContent=count+' of '+members.length+
+                        ' selected members have a dated temporary assignment.';
+                };
+                tempPerson.onchange=temporaryMemberOptions;
+                markTemp.onclick=()=>{
+                    const prefix=tempPerson.value;
+                    if(!selected.has(prefix)){alert('Select a crew member first.');return;}
+                    const start=validDateKey(tempStart.value);
+                    const end=tempEnd.value?validDateKey(tempEnd.value):'';
+                    if(!start||(tempEnd.value&&!end)||(end&&end<start)){
+                        alert('Choose a valid first tour date and optional last tour date after it.');return;
+                    }
+                    const shift=captainShiftLabel(shiftSelect.value);
+                    const firstTour=inferRegularTourWindow(new Date(start+'T12:00:00'),shift);
+                    if(firstTour.startDate!==start){
+                        alert('The first date must be the start day of a two-day '+shift+'-shift tour ('+
+                            firstTour.startDate+' for the chosen date).');return;
+                    }
+                    if(end&&inferRegularTourWindow(new Date(end+'T12:00:00'),shift).startDate!==end){
+                        alert('The last date must also be a two-day '+shift+'-shift tour start.');return;
+                    }
+                    assignmentWindows[prefix]={startDate:start,endDate:end};
+                    temporaryMemberOptions();
+                    setStatus('Temporary dates staged. Save Captain Set to apply them to the saved PPE history.');
+                };
+                clearTemp.onclick=()=>{
+                    delete assignmentWindows[tempPerson.value];
+                    temporaryMemberOptions();
+                    setStatus('Permanent membership staged. Save Captain Set to apply.');
+                };
+                temporaryMemberOptions();
 
                 function drawPeople() {
                     const q = clean(searchWrap.input.value).toLowerCase();
@@ -8093,6 +11289,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             else selected.delete(person.prefix);
                             count.textContent =
                                 `${roster.length} people available · ${filtered.length} shown · ${selected.size} selected`;
+                            temporaryMemberOptions();
                         };
 
                         const text = document.createElement('div');
@@ -8105,6 +11302,25 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
                 searchWrap.input.addEventListener('input', drawPeople);
                 drawPeople();
+                addCrewPerson.onclick=()=>{
+                    try{
+                        const added=repairSavePersonName(clean(addCrewName.input.value));
+                        const existing=roster.find(person=>masterNameKey(person.name)===
+                            masterNameKey(added.name));
+                        if(!existing)roster.push(added);
+                        roster.sort((a,b)=>a.name.localeCompare(b.name));
+                        selected.add((existing||added).prefix);
+                        temporaryMemberOptions();
+                        searchWrap.input.value='';
+                        addCrewName.input.value='';
+                        drawPeople();
+                        setStatus(added.name+' added to the Captain Set. Save the set to enable Daily Captain Check.');
+                    }catch(error){alert(error.message||String(error));}
+                };
+                addCrewName.input.addEventListener('keydown',event=>{
+                    if(event.key==='Enter'){event.preventDefault();addCrewPerson.click();}
+                });
+
 
                 const save = makeButton('Save Captain Set', { background: '#176b8e', color: '#fff' });
                 save.style.cssText += 'margin-top:9px;';
@@ -8113,11 +11329,25 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         const name = clean(setName.input.value);
                         if (!name) throw new Error('Captain Set name is required.');
                         if (!selected.size) throw new Error('Select at least one person.');
+                        const unknown = [...selected].filter(prefix => !roster.some(p=>p.prefix===prefix));
+                        if (unknown.length) throw new Error(
+                            'This Captain Set contains unresolved legacy members: ' +
+                            unknown.join(', ') + '. Remove or correct them before saving.'
+                        );
 
                         const latest = cloneConfig();
                         const otherSets = (latest.captainSets || []).filter(s => s.id !== editingSetId);
                         const duplicate = otherSets.find(s => clean(s.name).toLowerCase() === name.toLowerCase());
                         if (duplicate) throw new Error(`A Captain Set named "${name}" already exists.`);
+                        const newShift=captainShiftLabel(shiftSelect.value);
+                        for(const [member,dates] of Object.entries(assignmentWindows)){
+                            if(!selected.has(member)||!dates?.startDate)continue;
+                            for(const date of [dates.startDate,dates.endDate].filter(Boolean)){
+                                if(inferRegularTourWindow(new Date(date+'T12:00:00'),newShift).startDate!==date)
+                                    throw new Error('Temporary assignment date '+date+
+                                        ' is not a '+newShift+'-shift tour start. Adjust temporary dates before saving the shift change.');
+                            }
+                        }
 
                         const required = new Set(otherSets.flatMap(s => s.memberPrefixes || []));
                         for (const prefix of selected) required.add(prefix);
@@ -8130,7 +11360,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         // still required by My Profile or a local asset rule.
                         const snapshots = [];
                         for (const prefix of required) {
-                            const person = rosterPersonByPrefix(prefix);
+                            const person = roster.find(p=>p.prefix===prefix)||
+                                rosterPersonByPrefix(prefix);
                             if (!person) continue;
                             snapshots.push({
                                 name: person.name,
@@ -8143,7 +11374,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             {
                                 id: editingSetId || `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                                 name,
+                                shift:captainShiftLabel(shiftSelect.value),
                                 memberPrefixes: [...selected],
+                                assignmentWindows:Object.fromEntries(
+                                    Object.entries(assignmentWindows)
+                                        .filter(([prefix])=>selected.has(prefix))
+                                ),
                                 orphanedPrefixes: []
                             }
                         ];
@@ -8228,12 +11464,20 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
 
         function renderGeneral() {
+            if(!isMasterOwnerInstallation()){
+                const access=card('Master Interface Access',
+                    'Owner-only tools require an administrator-linked Rebel Command pairing. Ordinary user installations cannot activate Master by toggling a setting.');
+                const connect=makeButton('Connect Master Interface');
+                connect.onclick=()=>{overlay.remove();showMasterPairing();};
+                access.appendChild(connect);
+                content.appendChild(access);
+            }
             const updates = card('Production Build', 'This is the clean local Vector Rebel production build created from the preserved Tampermonkey baseline.');
             const line = document.createElement('div');
             line.style.cssText = 'font-size:12px;line-height:1.55;margin:8px 0;';
             line.innerHTML =
                 `<b>Installed:</b> v${escapeHtml(VERSION)}<br>` +
-                '<b>Update mode:</b> managed automatic updates<br>' +
+                '<b>Update mode:</b> Tampermonkey-managed installation; midnight release check<br>' +
                 '<b>Runtime holds:</b> none';
             updates.appendChild(line);
             const privacyNote = document.createElement('div');
@@ -8276,6 +11520,28 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             backup.append(backupInfo, exportBackup, importBackup, importBackupFile);
             content.appendChild(backup);
 
+            const sharedRoster=card('Shared Master List',
+                'Get the latest firefighter names approved by the maintainer. PPE ownership is still checked directly in Vector.');
+            const sharedStatus=document.createElement('div');
+            sharedStatus.style.cssText='font-size:12px;color:#546f80;margin:8px 0';
+            const published=sharedRosterFromCache();
+            sharedStatus.textContent=published?
+                published.people.length+' approved names · '+published.version:
+                'No shared roster received on this installation yet.';
+            const getLatest=makeButton('Get Latest Master List',{background:'#176b8e',color:'#fff'});
+            getLatest.onclick=async()=>{
+                getLatest.disabled=true;
+                sharedStatus.textContent='Downloading the latest approved names...';
+                const ok=await refreshSharedRebelRoster(true);
+                getLatest.disabled=false;
+                sharedStatus.textContent=ok?
+                    'Latest names received. Crew selection will use this list.':
+                    'Could not update: '+(sharedRosterSyncState().error||'Connection unavailable');
+                if(ok)setTimeout(renderContent,850);
+            };
+            sharedRoster.append(sharedStatus,getLatest);
+            content.appendChild(sharedRoster);
+
             const feedback = card('Feedback', 'Send a comment or problem report to the Vector Rebel maintainer.');
             const feedbackBox = document.createElement('textarea');
             feedbackBox.placeholder = 'Type feedback here...';
@@ -8283,6 +11549,19 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             feedbackBox.style.cssText = 'width:100%;min-height:88px;resize:vertical;border:1px solid #cbd9e2;border-radius:7px;padding:8px 9px;font:12px/1.4 Arial,sans-serif;color:#233b4a;background:#fff;';
             const feedbackStatus = document.createElement('div');
             feedbackStatus.style.cssText = 'min-height:16px;margin-top:6px;font-size:10px;color:#607483;';
+            const fillLastError=makeButton('Use Last Error');
+            fillLastError.onclick=()=>{
+                const last=loadJSON(LAST_DIAGNOSTIC_KEY,null);
+                const stopped=loadJSON(STOPPED_RUN_KEY,null);
+                const message=last?.message||stopped?.stopReason||'';
+                feedbackBox.value=message ?
+                    errorFeedbackText(message,
+                        stopped?.modeKey||'unknown',stopped?.stoppedFromPhase||'manual_review') :
+                    'I encountered an error in Vector Rebel v'+VERSION+'. Here is what happened: ';
+                feedbackStatus.textContent=message ?
+                    'Last error loaded. Review and click Send Feedback.' :
+                    'Describe the error, then click Send Feedback.';
+            };
             const feedbackSend = makeButton('Send Feedback');
             feedbackSend.onclick = async () => {
                 const message = String(feedbackBox.value || '').trim();
@@ -8296,12 +11575,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 feedbackSend.disabled = false;
                 if (sent) {
                     feedbackBox.value = '';
-                    feedbackStatus.textContent = 'Feedback sent.';
+                    feedbackStatus.textContent = 'Received by Rebel Command. Thank you.';
                 } else {
                     feedbackStatus.textContent = 'Feedback could not be sent. Try again later.';
                 }
             };
-            feedback.append(feedbackBox, feedbackSend, feedbackStatus);
+            feedback.append(feedbackBox, fillLastError, feedbackSend, feedbackStatus);
             content.appendChild(feedback);
 
             const run = getRun();
@@ -8325,13 +11604,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         function renderAdmin() {
             const rosterCard = card(
                 'Master Roster',
-                'Admin-only roster maintenance. Refresh Master from PPE can be started from anywhere in Vector; Vector Rebel opens Equipment → PPE automatically before the read-only scan.'
+                'Master roster and inspection discovery use the explicit Responsible Party column, not inventory-number prefixes or Location. Inspections reread ownership live.'
             );
 
             const rosterStatus = document.createElement('div');
             rosterStatus.style.cssText =
                 'font-size:12px;line-height:1.5;margin:8px 0;padding:9px;background:#f3f7f9;border-radius:7px;';
             rosterCard.appendChild(rosterStatus);
+            const centralNote=document.createElement('p');
+            centralNote.style.cssText='padding:9px;border-radius:6px;background:#eaf4f7;color:#285872;font:12px/1.5 Arial;';
+            centralNote.textContent='Maintain your master list here, save it locally, then click Share My Master List. Other installations can download it without changing PPE records.';
+            rosterCard.appendChild(centralNote);
 
             const rosterProgress = document.createElement('div');
             rosterProgress.style.cssText = 'font-size:11px;color:#607483;min-height:16px;margin:5px 0 8px;';
@@ -8380,7 +11663,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 note.style.cssText =
                     'font-size:11px;line-height:1.4;color:#6a7f8c;margin-bottom:7px;';
                 note.textContent =
-                    'These people are not being deleted. Their names look valid, but the stored PPE prefix is unusual. You can inspect the person’s actual gear, inspect the suspect prefix, or correct the mapping.';
+                    'These are LEGACY equipment-prefix mappings from the older roster scanner. ' +
+                    'The prefixes are ignored for ownership and crew selection now uses person identity. ' +
+                    'Do not associate the listed old gear with these people. ' +
+                    'Refresh Master from PPE to rebuild using Responsible Party, or edit names in the master roster.';
                 reviewHost.appendChild(note);
 
                 currentFlags.forEach(item => {
@@ -8392,81 +11678,32 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     const text = document.createElement('div');
                     text.style.cssText = 'font-size:12px;line-height:1.45;';
                     const samples = (item.equipmentSamples || [])
-                        .map(sample => `${sample.assetId}${sample.ppeType ? ` — ${sample.ppeType}` : ''}`)
+                        .map(sample => escapeHtml(
+                            `${sample.assetId}${sample.ppeType ? ` — ${sample.ppeType}` : ''}`
+                        ))
                         .join('<br>');
                     text.innerHTML =
                         `<b>${escapeHtml(item.name)}</b> · <code>${escapeHtml(item.prefix)}</code><br>` +
                         `<span style="font-size:11px;color:#7b672e">${item.reasons.map(escapeHtml).join('; ')}</span>` +
-                        `${samples ? `<div style="margin-top:5px;font-size:11px;color:#607483"><b>Scanned gear:</b><br>${samples}</div>` : ''}`;
+                        `${samples ? `<div style="margin-top:5px;font-size:11px;color:#607483"><b>Legacy equipment-row examples (ownership NOT verified):</b><br>${samples}</div>` : ''}`;
 
-                    const findPerson = makeButton("Find Person's Gear");
-                    findPerson.style.cssText += 'padding:6px 9px;font-size:11px;margin-top:6px;';
-                    findPerson.onclick = async () => {
-                        try {
-                            overlay.remove();
-                            setStatus(`Opening PPE gear for ${item.name}…`);
-                            const result = await searchPpeForRosterReview(item, message => setStatus(message));
-                            setStatus(
-                                result.matches.length
-                                    ? `${item.name}: ${result.matches.length} matching PPE item(s) shown using "${result.term}".`
-                                    : `${item.name}: no PPE items matched the full name or suspect prefix ${item.prefix}.`,
-                                result.matches.length > 0
-                            );
-                        } catch (error) {
-                            saveDiagnostic(error.message);
-                            setStatus(error.message, false);
-                        }
-                    };
-
-                    const showSuspect = makeButton(`Show ${item.prefix} Gear`);
-                    showSuspect.style.cssText += 'padding:6px 9px;font-size:11px;margin-top:6px;';
-                    showSuspect.onclick = async () => {
-                        try {
-                            overlay.remove();
-                            setStatus(`Searching PPE for suspect prefix ${item.prefix}…`);
-                            const assets = await searchPpeByPrefix(item.prefix, message => setStatus(message));
-                            setStatus(
-                                assets.length
-                                    ? `${item.prefix}: ${assets.length} matching PPE item(s) shown.`
-                                    : `${item.prefix}: no matching PPE items were found.`,
-                                assets.length > 0
-                            );
-                        } catch (error) {
-                            saveDiagnostic(error.message);
-                            setStatus(error.message, false);
-                        }
-                    };
-
-                    const fix = makeButton('Fix Mapping', { background: '#176b8e', color: '#fff' });
-                    fix.style.cssText += 'padding:6px 9px;font-size:11px;margin-top:6px;';
-                    fix.onclick = async () => {
-                        try {
-                            overlay.remove();
-                            setStatus(`Finding the actual PPE prefix for ${item.name}…`);
-                            const lookup = await findActualPpePrefixCandidates(
-                                item,
-                                message => setStatus(message)
-                            );
-                            showPrefixCorrectionDialog(item, lookup);
-                        } catch (error) {
-                            saveDiagnostic(error.message);
-                            setStatus(error.message, false);
-                        }
-                    };
-
-                    row.append(text, findPerson, showSuspect, fix);
+                    // Older "Fix Mapping", "Find Person's Gear", and generic
+                    // "Show Prefix" buttons were based on equipment-number
+                    // guesses. They are intentionally not exposed now that
+                    // Responsible Party is the sole authority for ownership.
+                    row.append(text);
                     reviewHost.appendChild(row);
                 });
             };
 
             const refreshRosterStatus = () => {
-                const state = getMasterRosterState();
+                const state = getLocallyMaintainedMasterRosterState();
                 rosterStatus.innerHTML =
                     `<b>Current master:</b> ${escapeHtml(state.version)}<br>` +
                     `<b>People:</b> ${state.people.length}<br>` +
                     `<b>Source:</b> ${state.source === 'local-admin' ? 'Local admin-maintained roster' : 'Embedded with Vector Rebel'}<br>` +
                     `${state.updatedAt ? `<b>Updated:</b> ${escapeHtml(state.updatedAt)}<br>` : ''}` +
-                    `<span style="color:#6a7f8c">PPE prefixes are kept internally for gear matching.</span>`;
+                    `<span style="color:#6a7f8c">Personnel identity is independent from equipment numbers; PPE ownership is verified separately.</span>`;
                 renderNeedsReview();
             };
 
@@ -8479,7 +11716,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         rosterProgress.textContent = message;
                     });
 
-                    const prior = getMasterRosterState().people;
+                    const prior = getLocallyMaintainedMasterRosterState().people;
                     const priorByName = new Map(prior.map(p => [masterNameKey(p.name), p]));
                     const nextByName = new Map(result.people.map(p => [masterNameKey(p.name), p]));
 
@@ -8515,7 +11752,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         `New people vs current master: ${added.length}\n` +
                         `Missing from scan: ${missing.length}\n` +
                         `Prefix changes: ${prefixChanges.length}\n` +
-                        `Needs prefix review: ${result.needsReview.length}\n\n` +
+                        `Needs prefix review: ${result.needsReview.length}\n` +
+                        `Unassigned PPE rows: ${result.unassignedCount}\n` +
+                        `Ownership verified using: Responsible Party\n\n` +
                         `Save this cleaned scan as your local master roster?`;
 
                     if (!confirm(summary)) {
@@ -8531,7 +11770,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     });
                     rosterProgress.textContent =
                         `Saved local master: ${saved.people.length} people. ` +
-                        `${result.merged.length} duplicate value(s) merged; ${result.rejected.length} non-person value(s) rejected.`;
+                        `${result.merged.length} duplicate value(s) merged; ${result.rejected.length} non-person value(s) rejected; ` +
+                        `${result.unassignedCount} unassigned PPE rows excluded.`;
                     refreshRosterStatus();
                     renderTabs();
                 } catch (error) {
@@ -8544,7 +11784,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
             const editRoster = makeButton('Edit Master Roster');
             editRoster.onclick = () => {
-                const current = getMasterRosterState();
+                const current = getLocallyMaintainedMasterRosterState();
                 const { overlay: editOverlay, box: editBox } = makeOverlayBox('900px');
 
                 const title = document.createElement('div');
@@ -8555,8 +11795,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const note = document.createElement('div');
                 note.style.cssText = 'font-size:11px;color:#607483;line-height:1.45;margin-bottom:10px;';
                 note.textContent =
-                    'Changes here stay local until they are incorporated into a Vector Rebel program update. ' +
-                    'Normal users do not see this admin screen.';
+                    'Save changes locally, then click Share My Master List to update everyone. ' +
+                    'Only an administrator-paired installation can publish.';
                 editBox.appendChild(note);
 
                 let working = current.people.map(p => ({ ...p }));
@@ -8590,11 +11830,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             edit.style.cssText += 'padding:6px 8px;font-size:11px;';
                             edit.onclick = () => {
                                 const name = prompt('Name', person.name);
-                                if (name === null) return;
-                                const prefix = prompt('PPE prefix', person.prefix);
-                                if (prefix === null) return;
+                                if (name === null || !clean(name)) return;
                                 person.name = clean(name);
-                                person.prefix = clean(prefix).toUpperCase();
+                                person.prefix = ownerRosterKey(name);
                                 draw();
                             };
 
@@ -8616,14 +11854,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const add = makeButton('Add Person');
                 add.onclick = () => {
                     const name = prompt('Name');
-                    if (name === null) return;
-                    const prefix = prompt('PPE prefix');
-                    if (prefix === null) return;
-                    working.push({
-                        name: clean(name),
-                        prefix: clean(prefix).toUpperCase(),
-                        active: true
-                    });
+                    if (name === null || !clean(name)) return;
+                    working.push({ name: clean(name), prefix: ownerRosterKey(name), active: true });
                     draw();
                 };
 
@@ -8652,14 +11884,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
             const copyRoster = makeButton('Copy Master Roster JSON');
             copyRoster.onclick = async () => {
-                const payload = JSON.stringify(masterRosterExportPayload(), null, 2);
+                const payload = JSON.stringify(masterRosterExportPayload(getLocallyMaintainedMasterRosterState().people), null, 2);
                 const ok = await copyText(payload);
                 setStatus(ok ? 'Master roster JSON copied.' : 'Could not copy master roster JSON.', ok);
             };
 
             const downloadRoster = makeButton('Download Master Roster JSON');
             downloadRoster.onclick = () => {
-                const payload = JSON.stringify(masterRosterExportPayload(), null, 2);
+                const payload = JSON.stringify(masterRosterExportPayload(getLocallyMaintainedMasterRosterState().people), null, 2);
                 downloadTextFile(
                     `vector-rebel-master-roster-${new Date().toISOString().slice(0, 10)}.json`,
                     payload
@@ -8674,7 +11906,37 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 refreshRosterStatus();
             };
 
-            rosterCard.append(refreshFromPpe, editRoster, copyRoster, downloadRoster, useEmbedded);
+            const shareRoster=makeButton('Share My Master List',{background:'#176b8e',color:'#fff'});
+            shareRoster.onclick=async()=>{
+                const local=loadJSON(MASTER_ROSTER_OVERRIDE_KEY,null);
+                if(!Array.isArray(local?.people)||!local.people.length){
+                    rosterProgress.textContent='Use Edit Master Roster and Save Local Master first.';
+                    return;
+                }
+                const normalized=normalizeMasterRoster(local.people);
+                if(!normalized.people.length||normalized.rejected.length||normalized.merged.length||
+                   normalized.people.length!==local.people.length){
+                    rosterProgress.textContent='The local roster has invalid or duplicate names. Fix those before sharing.';
+                    return;
+                }
+                const count=normalized.people.length,active=normalized.people.filter(p=>p.active!==false).length;
+                if(!confirm('Share '+count+' approved names ('+active+' active) with everyone using Vector Rebel?\n\nOnly personnel identities are shared. PPE and inspection records are never changed.'))return;
+                shareRoster.disabled=true;
+                rosterProgress.textContent='Sharing the approved master list...';
+                try{
+                    const receipt=await publishLocalMasterRoster();
+                    const downloaded=await refreshSharedRebelRoster(true);
+                    rosterProgress.textContent='Shared '+receipt.count+' names. '+
+                        (downloaded?'Your list is current.':'Your own download will retry.')+
+                        ' Others can click Get Latest Master List or will update automatically while Vector Rebel is open.';
+                    refreshRosterStatus();
+                }catch(error){
+                    rosterProgress.textContent='Could not share roster: '+(error?.message||String(error));
+                }finally{shareRoster.disabled=false;}
+            };
+            rosterCard.append(refreshFromPpe, editRoster);
+            if(!rebelCommandPairing()?.autoEnrolled)rosterCard.append(shareRoster);
+            rosterCard.append(copyRoster, downloadRoster, useEmbedded);
             refreshRosterStatus();
             content.appendChild(rosterCard);
 
@@ -8731,6 +11993,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         function renderContent() {
             content.innerHTML = '';
             if (active === 'profile') renderProfile();
+            else if (active === 'equipment') renderLinkedEquipment();
             else if (active === 'captain') renderCaptainSets();
             else if (active === 'signatures') renderSignatures();
             else if (active === 'history') renderHistory();
@@ -8759,6 +12022,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ? `\n\nAlready completed/submitted-or-uncertain asset(s):\n${protectedIds.join('\n')}`
             : '\n\nNo item in this run is recorded as submitted yet.';
         if (!confirm('Abort the active PPE run? Already submitted inspections remain submitted.' + detail)) return;
+        const deferred = loadJSON(CAPTAIN_DAILY_DEFERRED_KEY, null);
+        if (deferred?.runId === run.runId) persistentRemoveRaw(CAPTAIN_DAILY_DEFERRED_KEY);
         saveDiagnostic('Run manually aborted by inspector.', run);
         archiveStoppedRun(run, 'Run manually aborted by inspector.');
         rebelCommandEvent('ppe_workflow_cancelled', {
@@ -8827,6 +12092,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         mini.style.boxShadow = '0 5px 18px rgba(13,50,72,.28)';
         mini.style.background = '#ffffff';
         mini.style.color = '#153e5c';
+        const badge=mini.querySelector('#vector-ppe-mini-badge-v1');
+        if(badge){
+            const count=isMasterOwnerInstallation()&&panelInterfaceMode()==='master'?
+                Math.max(0,Number(errorInbox.count)||0):0;
+            const failure=run?.phase==='stopped'||badge.dataset.failure==='1';
+            const text=failure?'!':(count?String(Math.min(count,99))+(count>99?'+':''):'');
+            badge.textContent=text;
+            badge.style.display=text?'flex':'none';
+        }
 
         if (run?.phase === 'stopped') {
             mini.style.borderColor = '#a83b3b';
@@ -8846,6 +12120,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             return;
         }
 
+        if(isMasterOwnerInstallation() && errorInbox.count>0){
+            mini.style.borderColor='#bf4230';
+            mini.style.boxShadow='0 0 0 3px rgba(191,66,48,.2),0 5px 18px rgba(13,50,72,.28)';
+            mini.setAttribute('aria-label','Expand Vector Rebel. '+errorInbox.count+' new error reports.');
+            mini.title='Vector Rebel: '+errorInbox.count+' error reports in Master';
+            return;
+        }
         mini.setAttribute('aria-label', 'Expand Vector Rebel.');
         mini.title = 'Vector Rebel';
     }
@@ -8870,10 +12151,3569 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         } else {
             info.innerHTML =
                 `<b>${escapeHtml(config.inspectorName)}</b>` +
-                `<br>${escapeHtml(config.selfPrefix)} · ${sigCount} signature variant${sigCount === 1 ? '' : 's'}`;
+                `<br>${sigCount} signature variant${sigCount === 1 ? '' : 's'} · PPE by Responsible Party`;
         }
 
         updateMinimizedPanelBadge(run);
+    }
+
+    // Read-only PPE Clean & Repair worksheet exporter. Source fields are
+    // scanned using the SAME verified Responsible Party finder as inspections.
+    // No safety inspection, pass/fail answer, CrewSense write, or PPE edit occurs.
+    const PPE_REPAIR_ROWS = Object.freeze([
+        'Primary Pant', 'Primary Coat', 'Primary Gloves', 'Primary Hood',
+        'Secondary Pant', 'Secondary Coat', 'Secondary Gloves', 'Secondary Hood',
+        'Helmet', 'Helmet (Personal)', 'Boots'
+    ]);
+    function repairGearMatches(label, item) {
+        const type = String(item?.type || '').toLowerCase();
+        const category = label.replace(/^(primary|secondary) /i,'').toLowerCase();
+        if (category.includes('pant')) return /\bpant\b/.test(type);
+        if (category.includes('coat')) return /\bcoat\b/.test(type);
+        if (category.includes('glove')) return /\bglove/.test(type);
+        if (category.includes('hood')) return /\bhood\b/.test(type);
+        if (category.includes('helmet')) return /\bhelmet\b/.test(type);
+        if (category.includes('boot')) return /\bboot/.test(type);
+        return false;
+    }
+    function repairXml(value) {
+        return String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g,'')
+            .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+            .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+    }
+    function repairXmlCell(ref, value, style = 0) {
+        const v = String(value ?? '');
+        return '<c r="'+ref+'" s="'+style+'" t="inlineStr"><is><t xml:space="preserve">'+
+            repairXml(v)+'</t></is></c>';
+    }
+    function repairSheetName(name, used) {
+        const safe = String(name || 'Person').replace(/[\\\/\?\*\[\]:]/g,'').slice(0,31).trim()||'Person';
+        let proposal=safe, n=2;
+        while (used.has(proposal.toLowerCase())) proposal=safe.slice(0,27)+' '+n++;
+        used.add(proposal.toLowerCase());
+        return proposal;
+    }
+    function repairFormSheet(form) {
+        const rows=[], merges=['A1:H1','A3:H3','A4:B4','C4:F4','A5:B5','C5:F5',
+            'B6:C6','E6:F6','A8:H8','A9:B9','C9:D9','G9:H9',
+            'A22:B22','C22:D22','E22:F22','G22:H22',
+            'A23:B23','C23:D23','E23:F23','G23:H23','A25:H25'];
+        const row=(num,height,cells)=>{
+            rows.push('<row r="'+num+'" ht="'+height+'" customHeight="1">'+
+                cells.map(x=>repairXmlCell(x[0]+num,x[1],x[2])).join('')+'</row>');
+        };
+        row(1,39,[['A','PPE CLEAN AND REPAIR FORM',1]]);
+        row(2,10,[]);
+        row(3,27,[['A','CUSTOMER INFORMATION',2]]);
+        row(4,26,[['A','Department',4],['C','Flower Mound Fire Dept.',5],
+            ['G','Date',4],['H',form.date,5]]);
+        row(5,26,[['A','First and Last Name',4],['C',form.name,5],
+            ['G','ID Number',4],['H',form.idNumber,5]]);
+        row(6,26,[['A','Picked up at',4],['B',form.pickupStation,5],
+            ['D','Preferred delivery',4],['E',form.deliveryStation,5],
+            ['G','Shift',4],['H',form.shift,5]]);
+        row(7,13,[]);
+        row(8,30,[['A','PPE ITEMS SENT IN',2]]);
+        row(9,32,[['A','Item',3],['C','Serial Number',3],['E','Size',3],
+            ['F','Date of Manuf.',3],['G','Known Issues',3]]);
+        PPE_REPAIR_ROWS.forEach((label,index)=>{
+            const r=10+index;
+            const item=form.items[index]||{};
+            const arr=[['A',label,4],['C',item.serial,5],['E',item.size,5],
+                ['F',item.manufacture,5],['G',item.issues,5]];
+            row(r,36,arr);
+            merges.push('A'+r+':B'+r,'C'+r+':D'+r,'G'+r+':H'+r);
+        });
+        row(21,16,[]);
+        row(22,28,[['A','Pick-up By',4],['C',form.pickupBy,5],
+            ['E','Pick-up Date',4],['G',form.pickupDate,5]]);
+        row(23,28,[['A','Returned By',4],['C',form.returnedBy,5],
+            ['E','Returned Date',4],['G',form.returnedDate,5]]);
+        row(24,10,[]);
+        row(25,42,[['A','Editable form. Verify serial numbers, sizes, manufacture dates and issues before sending items. The Source Index sheet lists the exact verified Vector item links.',6]]);
+        const columnWidths=[18,17,17,17,15,19,24,24];
+        const cols=columnWidths.map((w,i)=>'<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>').join('');
+        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+            '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView showGridLines="0" workbookViewId="0"/></sheetViews>'+
+            '<sheetFormatPr defaultRowHeight="17"/><cols>'+cols+'</cols><sheetData>'+rows.join('')+'</sheetData>'+
+            '<mergeCells count="'+merges.length+'">'+merges.map(ref=>'<mergeCell ref="'+ref+'"/>').join('')+'</mergeCells>'+
+            '<printOptions horizontalCentered="1"/><pageMargins left=".3" right=".3" top=".4" bottom=".4" header=".1" footer=".1"/>'+
+            '<pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="1"/></worksheet>';
+    }
+    function repairSourceSheet(forms) {
+        const rows=[['Person','Form line','Vector PPE name','Pool ID','Item ID',
+            'Responsible Party verified','Captured at','Vector item URL',
+            'Exported Serial','Exported Size','Exported Manufacturing']];
+        for (const form of forms) for (let i=0;i<PPE_REPAIR_ROWS.length;i++) {
+            const item=form.items[i]||{};
+            if (!item.asset) continue;
+            rows.push([form.name,PPE_REPAIR_ROWS[i],item.asset.assetId,item.asset.pool,
+                item.asset.itemId,item.asset.ownerName,form.capturedAt,item.asset.url,
+                item.serial||'',item.size||'',item.manufacture||'']);
+        }
+        const rowXml=rows.map((row,i)=>'<row r="'+(i+1)+'">'+row.map((v,j)=>
+            repairXmlCell(String.fromCharCode(65+j)+(i+1),v,i===0?3:0)).join('')+'</row>').join('');
+        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+            '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'+
+            '<cols><col min="1" max="2" width="24" customWidth="1"/>'+
+            '<col min="3" max="3" width="30" customWidth="1"/>'+
+            '<col min="4" max="5" width="12" customWidth="1"/>'+
+            '<col min="6" max="6" width="25" customWidth="1"/>'+
+            '<col min="7" max="7" width="22" customWidth="1"/>'+
+            '<col min="8" max="8" width="75" customWidth="1"/>'+
+            '<col min="9" max="11" width="22" customWidth="1"/></cols>'+
+            '<sheetData>'+rowXml+'</sheetData></worksheet>';
+    }
+    const REPAIR_XLSX_STYLES='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+        '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+        '<fonts count="4"><font><sz val="11"/><name val="Aptos"/></font>'+
+        '<font><b/><sz val="19"/><color rgb="FFFFFFFF"/><name val="Aptos"/></font>'+
+        '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/></font>'+
+        '<font><b/><sz val="11"/><color rgb="FF24394A"/></font></fonts>'+
+        '<fills count="4"><fill><patternFill patternType="none"/></fill>'+
+        '<fill><patternFill patternType="gray125"/></fill>'+
+        '<fill><patternFill patternType="solid"><fgColor rgb="FF1D3446"/><bgColor indexed="64"/></patternFill></fill>'+
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFDCE7ED"/><bgColor indexed="64"/></patternFill></fill></fills>'+
+        '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'+
+        '<border><left style="thin"><color rgb="FF9DABB4"/></left>'+
+        '<right style="thin"><color rgb="FF9DABB4"/></right>'+
+        '<top style="thin"><color rgb="FF9DABB4"/></top>'+
+        '<bottom style="thin"><color rgb="FF9DABB4"/></bottom><diagonal/></border></borders>'+
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'+
+        '<cellXfs count="7">'+
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'+
+        '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center"/></xf>'+
+        '<xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'+
+        '<xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>'+
+        '<xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>'+
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>'+
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>'+
+        '</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+    // Minimal standards-compliant, uncompressed ZIP for Excel .xlsx.
+    // Entirely local; no cloud export endpoint or new userscript dependency.
+    function repairZip(files) {
+        const enc=new TextEncoder(), parts=[], central=[]; let offset=0;
+        const crc32=bytes=>{
+            let c=-1;
+            for(const b of bytes){c^=b;for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xEDB88320:0);}
+            return (c^-1)>>>0;
+        };
+        const u16=(v)=>[v&255,(v>>>8)&255],u32=(v)=>[v&255,(v>>>8)&255,(v>>>16)&255,(v>>>24)&255];
+        for(const [name,text] of Object.entries(files)){
+            const path=enc.encode(name),body=enc.encode(text),crc=crc32(body);
+            const head=Uint8Array.from([80,75,3,4,...u16(20),...u16(0),...u16(0),
+                ...u16(0),...u16(0),...u32(crc),...u32(body.length),...u32(body.length),
+                ...u16(path.length),...u16(0)]);
+            parts.push(head,path,body);
+            central.push(Uint8Array.from([80,75,1,2,...u16(20),...u16(20),...u16(0),...u16(0),
+                ...u16(0),...u16(0),...u32(crc),...u32(body.length),...u32(body.length),
+                ...u16(path.length),...u16(0),...u16(0),...u16(0),...u16(0),
+                ...u32(0),...u32(offset)]),path);
+            offset+=head.length+path.length+body.length;
+        }
+        const centralSize=central.reduce((sum,b)=>sum+b.length,0), n=Object.keys(files).length;
+        const end=Uint8Array.from([80,75,5,6,...u16(0),...u16(0),...u16(n),...u16(n),
+            ...u32(centralSize),...u32(offset),...u16(0)]);
+        return new Blob([...parts,...central,end],
+            {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    }
+    function repairWorkbook(forms) {
+        if (!Array.isArray(forms)||!forms.length) throw new Error('Select at least one person.');
+        const used=new Set(['source index']);
+        const sheetNames=forms.map(f=>repairSheetName(f.name,used));
+        const names=[...sheetNames,'Source Index'];
+        const paths=['[Content_Types].xml','_rels/.rels','xl/workbook.xml','xl/_rels/workbook.xml.rels','xl/styles.xml'];
+        const files={};
+        files[paths[0]]='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
+            '<Default Extension="xml" ContentType="application/xml"/>'+
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+
+            names.map((_,i)=>'<Override PartName="/xl/worksheets/sheet'+(i+1)+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join('')+'</Types>';
+        files[paths[1]]='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+        files[paths[2]]='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '+
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'+
+            '<sheets>'+names.map((n,i)=>'<sheet name="'+repairXml(n)+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>').join('')+
+            '</sheets></workbook>';
+        files[paths[3]]='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+            names.map((_,i)=>'<Relationship Id="rId'+(i+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>').join('')+
+            '<Relationship Id="rId'+(names.length+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
+        files[paths[4]]=REPAIR_XLSX_STYLES;
+        forms.forEach((f,i)=>{files['xl/worksheets/sheet'+(i+1)+'.xml']=repairFormSheet(f)});
+        files['xl/worksheets/sheet'+names.length+'.xml']=repairSourceSheet(forms);
+        return repairZip(files);
+    }
+
+    // Reuse a person's explicitly entered station/shift on future exports.
+    // These are not inferred from fire staffing assignments or PPE labels.
+    const PPE_REPAIR_PROFILE_FIELDS=Object.freeze([
+        'idNumber','shift','pickupStation','deliveryStation'
+    ]);
+    // My own saved PPE repair details belong in Vector Rebel's normal profile,
+    // not only an export-specific draft. Other firefighters remain local entries.
+    function repairPersonDefaults(person) {
+        const saved=loadJSON('vr_ppe_repair_contact_v1', {});
+        const key=masterNameKey(person.name);
+        const manual=saved && typeof saved==='object' ? saved[key]||{} : {};
+        const profile=getConfig();
+        const mine=key && key===masterNameKey(profile.inspectorName);
+        const own=mine?profile.ppeRepairProfile||{}:{};
+        return Object.fromEntries(PPE_REPAIR_PROFILE_FIELDS.map(field=>[
+            field,clean(String(own[field]||manual[field]||person[field]||
+                (field==='pickupStation'?person.station:'')||''))
+        ]));
+    }
+    function repairPersistPersonDefaults(forms) {
+        const saved=loadJSON('vr_ppe_repair_contact_v1', {})||{};
+        let next=null;
+        for (const form of forms) {
+            const key=masterNameKey(form.originalName);
+            if(!key)continue;
+            saved[key]=Object.fromEntries(PPE_REPAIR_PROFILE_FIELDS.map(field=>
+                [field,clean(String(form[field]||''))]));
+            if(key===masterNameKey(getConfig().inspectorName)){
+                next=next||cloneConfig();
+                next.ppeRepairProfile={...saved[key]};
+            }
+        }
+        saveJSON('vr_ppe_repair_contact_v1',saved);
+        if(next)saveConfig(next);
+    }
+    // FL / BU identify primary and secondary structural gear on this
+    // department's item names, not ownership. Ownership remains Responsible Party.
+    function repairGearTier(asset) {
+        const suffix=String(asset?.assetId||'').match(/(?:^|[-_])(FL|BU)$/i)?.[1];
+        return suffix==='FL'||suffix==='fl'?'primary':
+            suffix==='BU'||suffix==='bu'?'secondary':'unmarked';
+    }
+    function repairDefaultAsset(label,assets){
+        const group=assets.filter(item=>repairGearMatches(label,item));
+        const tier=/^Secondary |\(Personal\)/i.test(label)?'secondary':'primary';
+        const targeted=group.filter(item=>repairGearTier(item)===tier);
+        if(targeted.length===1)return targeted[0];
+        if(targeted.length>1)return null;
+        if(tier==='primary'){
+            const unknown=group.filter(item=>repairGearTier(item)==='unmarked');
+            // One identifiable helmet or boots is safely a primary choice.
+            if(unknown.length===1)return unknown[0];
+        }
+        return null;
+    }
+    function repairSlotFromAsset(asset) {
+        const accepted=value=>{
+            const v=clean(String(value||''));
+            return !v||v==='-'||/^n\/?a$|^unknown$/i.test(v)?'':v;
+        };
+        return {asset:asset||null,serial:repairFieldValid('serial',asset?.serial)?accepted(asset.serial):'',
+            size:repairFieldValid('size',asset?.size)?accepted(asset.size):'',
+            manufacture:repairFieldValid('manufacture',asset?.manufacture)?accepted(asset.manufacture):'',issues:''};
+    }
+    const PPE_REPAIR_DETAIL_CACHE='vr_ppe_repair_verified_details_v1';
+    function repairFieldValid(key,value){
+        const text=clean(String(value||''));
+        if(!text||text.length>80||/^(?:-|n\/?a|none|unknown|tags?|length|price|year|size|serial number|barcode|purchase date|check out date|end of life)$/i.test(text))return false;
+        if(key==='serial')return text.length<=64&&/\d/.test(text);
+        if(key==='size')return text.length<=40&&/[a-z0-9]/i.test(text);
+        if(key==='manufacture')return /^(?:19|20)\d{2}$/.test(text)||
+            /^\d{1,2}[\/.-]\d{1,2}[\/.-](?:19|20)\d{2}$/.test(text)||
+            /^(?:19|20)\d{2}-\d{2}-\d{2}$/.test(text);
+        return false;
+    }
+    function repairReadDetailText(text){
+        const lines=String(text||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+        const find=(rx,key)=>{
+            for(let i=0;i<lines.length-1;i++){
+                if(rx.test(lines[i])&&repairFieldValid(key,lines[i+1]))return lines[i+1];
+            }
+            return '';
+        };
+        return {
+            serial:find(/^Serial (?:Number|No\.?|#)$/i,'serial'),
+            size:find(/^Size\s*:?$/i,'size'),
+            manufacture:find(/^(?:Date of Manuf(?:acture|acturing)?\.?|Manufactur(?:e|ing) Date|Mfg\.? Date)$/i,'manufacture')||
+                find(/^Year$/i,'manufacture')
+        };
+    }
+    function repairReadDetailDocument(doc){
+        if(!doc?.body)return {serial:'',size:'',manufacture:''};
+        // Vector renders label/value pairs inside two side-by-side information
+        // columns. Read the label's own container rather than relying on the
+        // arbitrary document-wide text order.
+        const all=[...doc.querySelectorAll('dt,label,p,span,div,strong,b,th')];
+        const leaf=all.filter(el=>el.children.length===0 && !el.closest(
+            '#vector-ppe-helper-v23,#vector-ppe-overlay-v23'));
+        const find=(pattern,key)=>{
+            for(const label of leaf){
+                if(!pattern.test(clean(label.textContent||'')))continue;
+                const p=label.parentElement;
+                const choices=[
+                    label.nextElementSibling,
+                    p?.nextElementSibling,
+                    ...[...(p?.children||[])].filter(el=>el!==label),
+                    p?.parentElement?.nextElementSibling
+                ];
+                for(const candidate of choices){
+                    if(!candidate)continue;
+                    const value=clean(candidate.innerText||candidate.textContent||'');
+                    if(repairFieldValid(key,value))return value;
+                }
+            }
+            return '';
+        };
+        const raw=repairReadDetailText(doc.body.innerText||'');
+        // DOM-local values take precedence over text-flow fallbacks.
+        return {
+            serial:find(/^Serial (?:Number|No\.?|#)$/i,'serial')||raw.serial,
+            size:find(/^Size\s*:?$/i,'size')||raw.size,
+            manufacture:find(/^(?:Date of Manuf(?:acture|acturing)?\.?|Manufactur(?:e|ing) Date|Mfg\.? Date)$/i,'manufacture')||
+                raw.manufacture||find(/^Year$/i,'manufacture')
+        };
+    }
+    function repairDetailCacheKey(url){
+        const m=String(url||'').match(/\/app\/equipment\/PPE\/pool\/(\d+)\/(\d+)\/item/i);
+        return m?m[1]+':'+m[2]:'';
+    }
+    function repairCachedDetail(url){
+        const key=repairDetailCacheKey(url);
+        const record=key?loadJSON(PPE_REPAIR_DETAIL_CACHE,{})?.[key]:null;
+        return record&&typeof record==='object'?{
+            serial:record.serial||'',size:record.size||'',
+            manufacture:record.manufacture||''
+        }:{};
+    }
+    function repairRecordDetail(url,values){
+        const key=repairDetailCacheKey(url);
+        if(!key)return;
+        const cache=loadJSON(PPE_REPAIR_DETAIL_CACHE,{})||{};
+        const old=cache[key]||{},newData={...old};
+        for(const field of ['serial','size','manufacture']){
+            if(repairFieldValid(field,values?.[field]))newData[field]=values[field];
+        }
+        if(['serial','size','manufacture'].every(field=>newData[field]===old[field]))return;
+        newData.readAt=new Date().toISOString();cache[key]=newData;
+        // Bound local metadata storage; no department-wide crawl.
+        const ids=Object.keys(cache);
+        if(ids.length>250){
+            ids.sort((x,y)=>String(cache[x]?.readAt||'').localeCompare(String(cache[y]?.readAt||'')));
+            for(const id of ids.slice(0,ids.length-250))delete cache[id];
+        }
+        saveJSON(PPE_REPAIR_DETAIL_CACHE,cache);
+    }
+    async function repairReadItemDetail(asset) {
+        if(!asset?.url)return {};
+        const itemURL=new URL(asset.url,location.origin);
+        if(itemURL.origin!==location.origin)throw Error('Vector PPE item has a different origin.');
+        const already=repairCachedDetail(itemURL.href);
+        const fields=['serial','size','manufacture'];
+        if(fields.every(field=>repairFieldValid(field,already[field])))return already;
+        const frame=document.createElement('iframe');
+        frame.setAttribute('aria-hidden','true');frame.tabIndex=-1;
+        frame.style.cssText='position:fixed;bottom:0;right:0;width:2px;height:2px;opacity:0;pointer-events:none;border:0';
+        frame.src=itemURL.href;document.body.appendChild(frame);
+        let merged={...already},firstFieldAt=0,lastChangeAt=0;
+        try{
+            const start=Date.now();
+            while(Date.now()-start<8500){
+                await sleep(180);
+                let doc,pathname;
+                try{
+                    doc=frame.contentDocument;
+                    pathname=frame.contentWindow?.location?.pathname;
+                }catch{throw Error('Vector blocked item preview. Open the item link instead.');}
+                if(!doc||pathname!==itemURL.pathname)continue;
+                const found=repairReadDetailDocument(doc);
+                const now=Date.now();
+                let changed=false;
+                for(const field of fields){
+                    if(repairFieldValid(field,found[field])&&found[field]!==merged[field]){
+                        merged[field]=found[field];changed=true;
+                    }
+                }
+                if(changed){
+                    repairRecordDetail(itemURL.href,merged);
+                    if(!firstFieldAt)firstFieldAt=now;
+                    lastChangeAt=now;
+                }
+                if(fields.every(field=>repairFieldValid(field,merged[field])))break;
+                // React can render serial/year first, then size. Allow the rest
+                // of the item page to settle instead of returning immediately.
+                if(firstFieldAt&&now-firstFieldAt>=3000&&now-lastChangeAt>=1250)break;
+            }
+            return merged;
+        }finally{frame.remove();}
+    }
+    // On an actual Vector equipment page, remember the page's own visible
+    // read-only item metadata. A separate tab can then complete missing form
+    // fields without requiring an iframe or guessing serial/size/year.
+    function repairCaptureVisibleItemPage(){
+        const key=repairDetailCacheKey(location.href);
+        if(!key)return;
+        const values=repairReadDetailDocument(document);
+        if(Object.values(values).some(Boolean))repairRecordDetail(location.href,values);
+    }
+    // Official 9.28.26 FMFD form layout, matched to the source document's
+    // 612 x 792pt page dimensions and field boundaries. Not a second design.
+    // The logo is the department logo extracted from the supplied original.
+    const REPAIR_OFFICIAL_LOGO_BASE64='/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABQODxIPDRQSEBIXFRQYHjIhHhwcHj0sLiQySUBMS0dARkVQWnNiUFVtVkVGZIhlbXd7gYKBTmCNl4x9lnN+gXz/2wBDARUXFx4aHjshITt8U0ZTfHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHz/wAARCABqAH0DASIAAhEBAxEB/8QAGwAAAgMBAQEAAAAAAAAAAAAABAUAAwYCAQf/xABDEAABAwMABgMMCQMDBQAAAAABAgMEAAURBhITITFBFFGxIjVTVGFxc4GRkpTRFSMyNEJScqHBM5PwFiR0NkSy4fH/xAAZAQADAQEBAAAAAAAAAAAAAAACAwQBAAX/xAAtEQACAgEBBgQGAwEAAAAAAAABAgARAyEEEjFBUfATMmHhFCKBkaHRQmLBcf/aAAwDAQACEQMRAD8ACqVKlLiJK6bbW6oJbSVKPICrm2EIZ6RLc2LA581nqA51EvSZchMNlQtbTidZAVuddHn5f5xpbZAsYqE8ZHWGIn36U2yfBjul+wVyiSysgQ7ZJknkp06iT5qTymHosJxp9rZyGn0kqx3SgQcHPMZFN31szLFBmSVqDiELZC+OF/hJPnH70tmOhvj33rGBQJzBuMu4KcTDiwGi2NZQcBJx11xNul1iMMyD0NbD32HG2wR5t9c6LtPNXZaXQfrY5UfXgjNS+tl6zxHIeURWcpWwftNr555/55aEkeLu8oXKCjSadwKIxHlaFMJc+TDZZemW+I608MpU2SnO7PqrMx2FyH0NNpKlKOMCtTIdYlWiR0tWERJZ1U4wVJxuSPPTMlIwqYNZwmZBcaS49FlxEqGQ5q66PbVqYgfQXITzclA46h3jzjjXF6Q9NNptySlDjiNZQHBOfJ1DB9lBrjwI92agQ1SA/rBCpKXMaqvIMcKBchIvuphQS8gg4IwRyNeVEXYGQ5DvCQVtqKOktjeMbt45irpEdTBSchbahlC07woU8NcUy1KalSpRQJKIaS0ywuZLOGG+Q4rVyAqthpT7yGk8VHFLNIJvSJCWGc9Fj5Qg8lK5mhNk7ojEHMwmQ8xKkMvXd59naJCmUMAarSDwOfVyppIcZYEZi5uiTFWQqNM/EgjrP80tQ5AudnYbnLMV9gbNt/VJSoDkcdlVoYRLitxukEwYilKckapGSfwpB/zfUxXeNGxXekddS2ZPk3JuTbAyZLqXfqnWxnuQefk8tdR2noUMRZNwYjoCtYttIDq8+XkKodnYa6PDR0aN+VJ7pflUedCVbj2QlabQdO9Ils3SGrVbdcrcE6UtXFTjoTn2V3HNufkNtC2I7tWNZTyiaX0Tbvv8f9Yqj4XGBz+5gDKxMdKsluP/AGiU+VLqhVK7BGzrMuSGiDkd0FjPXg4ptUqXwh1P3/cfcTOxbm1cI81Ljc1bG7AGosp6sc+JoKG/b7dOemvrdckAqLbCmilSSfzE7s1piARg76EuFvYntar4OsB3Lg+0j5jyUpsVD09O/wBTQYr1GbYy5cbmlLs2WFFuPyAV11Ra5io8cdJTi3PLICc5LR/MM78VxcE7SahE1h52U02AA0coeSOB6x6v2rqDa3Ljc0Ce6lCuJZSMlKRywNyR+9LFBbY9+k2GyWFR3SgkEcUqHBQ66pqy3uplRn4IXtHIaiWV/nbzw9VV09TY1iGWjLw6YdulSk/1CNk1+pX/AKoJuTCZaRbbxb1NbPg6k5WkniTRc5xllNqakL1GtdUhw+bhXibfb5cZbcKdGddWrWBkJwsZ4jO48aQ7C/m75fuOUUIHJjNQI6mYEsSkz9VDYA4AHifLnd7a9uCks6kFg/Ux9xI/Gv8AEr27qqtcbo99KFuBzoaVrJ5ZSOXrqgkqJJOSd5qzZkt7Juv99orK1CpKJahqcgvSd/1agMeTn/FDVq4EQC3COsfbbOt5zVuRt0RKLcylO7VY5an0PugMpQcgK3lXqrmy2xDqpLkxI2LQUg56+Z9QquCw9cYhdXcXUw2goJbQopUjAJAO7fuqHadqItENVxNXxjcePmZoXG1tb1p7n8w3iuKSpcetzkI9Idft8ggKUpetqq8hwCKeut7JwoA7ninzUjFlJpWOvf5jiJxUr2pVMCK71HUqIX2TqvRvrEKHHH4h/PtpbaH4tutMh56QESZIKEBA1lhPM45c+NaRSAvCVcFHVPmO7+ay1rXEZiPl+39MdZdwAOQPM9YyP3qXKOI/4e/rDEqhT22Jcd2NHLbUdXdrKslSFHB1vbTaazsJbiB9nOU+Y1S5MkzbdKQbc1EhJaJKgjHdDhg899XuKMmBBkDeVshKj5U7q5CS3D/e+cFxYizSk4mx2+SI6R7c0kBIORypzpT30T6FHZSanY/KJp4xrZFKXImqUcqMVwknr3UZAuSomELQHGuogZHmoKw/1pf/ABXP4ryqMCglgfSKyEiqmwjvsSGw40ltaT1JG6rxuJIGM9dJNG2cF59WdUAJHnpwH29sG1rSFrG5JO81jLRoQlNi5ZhtDTyHlBLTiTrK4Y3YP7VnLNLZgx3IiwpsK11B9bgSlRwUjVyP/lHX9kmIFDOG1ZI6waphX5GzDE2MhbaRhOokbvUajy7OSpdRd8fpDV/mCwFU83RyJGUlTUZt4KdecVrFShu3kADgKNv85T03ZNqISzuyDxJ41zPvXSGjHjx0NsHkpIz8hSmlomoYiq5T0sGAqd5p3tXPCL941Nq54RfvGuKlPldCGW5xZuMUFaiC6ncSeulCZj8G4OvRnC2sLUMjmM8DTW298ovpU9tI5X3p79au2sUAuQek87bNGFQu4XqdcWw3Jey2N+qkYBPlrQ6Pp29kZHHZuLT2H+ax1bTQ/vU56Y9ia5wMYG6OckGsSaU99E+hR2UmpzpT30T6FHZSamY/KJh4xpYf60r/AIrnYK8r2wKQJT6VuIb1460grUEjJHWaK+j1eNQ/iU/OmYsiIzbxrhFZFJqoUm5JhwG48bCnCNZa+QJ7aWLcWtZWtRKyc5J30T9Hq8ah/Ep+dT6PV4zD+JT86cM2EfygFXPKFxrttWFRpxKkqSUhzmPPSoDC8caK+j1eNQ/iU/OvU29QP3qH8Sn51hzYQDTQ0Db6k8jB6lFdBPjUP4hPzqdBPjUP4hPzqDfXrPe8bH1gtSiugnxqH8Qn51OgnxqH8Qn512+vWd42PrJbe+UX0qe2kcr709+tXbWjhRQzNYdXKh6qHEqOJCeAPnrNySDJdIOQVnBHnosZBc10kG1MrMCDK62mh/epz0x7BWLraaH96nPTHsFdn8smWCTojU7SmPHfBLa2U5wcH7JpmdFbUlJUpLoAGSS5woI/9ZRPQj/xNad0JU0tLhwgpIUc43Y315+fI6kBTWkNQDM19E6N+No+IFBXi32WPbnHIMhK3wRqpDwVz37qO+iNHPGk/EClV/hWuLHaVbng44V4UA5rbsU7GbcDeaYeEAssVubdGI74JbWSDg4PA1q39FrY3HcWlDuUoJH1nkrNaM9/ov6j2Gt/K+6PejV2Gs2vI65AFM5QCJ8srY2nRy3y7ZHfeS4XHEZVheBxrHc6+kWDvJD9H/Jpu2OyICpqYgsxe7o7ZGVarrhQrGcKeANRvRmzvg7Fa144lDwOK9vejrl1miQiQhsagTgpJ4ZqyxWBVpfceXIDhWnVwE4HGpPE+S/EN9Ida8IkvujSbfGMqK6pbaSNZKxvGeeaQx0ByQ2hXBSwD7a2mllxQ1b1xAhzaO4GSghIGc8efCsbE+9s+kT21dszu2K3i2AB0m3/ANJ2v8jv9yhV2bR1takLkpSpJwQXxkGtNzrLSl6M9Ke6QFbbXOvuX9rO+vPxZMjnUn6RhAEi7To4EKKZSM4OP9wKs0P71OemPYKXzFaNGI90YK2+odnuXx5Uw0P71OemPYKqF7mt8ecHnBZkpqHpVHfkKKW0spyQM/hNMpGktrXGdQl9RUpBAGzVxxTdltCmUFSEk6o3kV3sWvBo90UhyjHUcPX2mi58pqV9W2LXg0e6Kmxa8Gj3RVPxf9YO5PnNjktQ7qw++opbQTk4zyNa2RpLa1x3UJfUVKQQPq1ccU52LXg0e6Kmxa8Gj3RU+V1ytvEfn2hAET5TW1tGkFui2uMw88pLiEYUNQnBzWh2LXg0e6Kmxa8Gj3RR5cy5RTD8+04LUw99vi354XbpbyWdQDCSUjO/O6rdH7+ph90XKU4poo7nWBV3WflWz2LXg0e6Kmxa8Gj3RWHIhTc3e/tOo3czF/vlvnWl1hh0rdJSUgoI4EfxWUjqDchpatyUrBPtr6lsWvBo90VNi14NHuitx5lxrugfn2nEXFX+p7V4wr+2r5UIu56NrWpa22lKUcklg5J9laDYteDR7oqbFrwaPdFIAQcL+/tN1md+kdGcf0mv7B+Ve6IY+i3ccNursFaHYteDR7orhxKUYCQEjyDFNRh5Rf1Mwif/2Q==';
+    function repairPdfAscii(value) {
+        return String(value??'').normalize('NFKD')
+            .replace(/[\u0300-\u036f]/g,'')
+            .replace(/[\u2018\u2019]/g,"'")
+            .replace(/[\u201c\u201d]/g,'"')
+            .replace(/[\u2013\u2014]/g,'-')
+            .replace(/[^\x20-\x7e]/g,'?');
+    }
+    function repairPdfEscape(value) {
+        return repairPdfAscii(value).replace(/[\\()]/g,'\\$&');
+    }
+    function repairPdfWrap(value,limit=35) {
+        const output=[];
+        for(const segment of String(value??'').split(/\r?\n/)){
+            const words=repairPdfAscii(segment).split(/\s+/).filter(Boolean);
+            if(!words.length){output.push('');continue;}
+            let line='';
+            for(let word of words){
+                while(word.length>limit){
+                    if(line){output.push(line);line='';}
+                    output.push(word.slice(0,limit));word=word.slice(limit);
+                }
+                if(!word)continue;
+                if(line.length+word.length+1>limit){output.push(line);line=word;}
+                else line=line?line+' '+word:word;
+            }
+            if(line)output.push(line);
+        }
+        return output;
+    }
+    function repairPdfOfficialPaint(form){
+        const draw=[];
+        const rgb=(r,g,b)=>{draw.push(r+' '+g+' '+b+' rg')};
+        const box=(x,y,w,h,fill=null,stroke=null,line=.5)=>{
+            const bottom=792-y-h;
+            if(fill){rgb(...fill);draw.push(x+' '+bottom+' '+w+' '+h+' re f');}
+            if(stroke){draw.push(stroke.join(' ')+' RG '+line+' w '+x+' '+bottom+' '+w+' '+h+' re S');}
+        };
+        const text=(x,top,value,size=9,bold=false,white=false,max=200)=>{
+            draw.push((white?'1 1 1':'0 0 0')+' rg');
+            draw.push('BT /'+(bold?'F2':'F1')+' '+size+' Tf 1 0 0 1 '+x+' '+(792-top)+' Tm ('+
+                repairPdfEscape(String(value??'').slice(0,max))+') Tj ET');
+        };
+        const line=(x1,y1,x2,y2,thickness=.5,gray=0)=>{
+            draw.push(gray+' '+gray+' '+gray+' RG '+thickness+' w '+
+                x1+' '+(792-y1)+' m '+x2+' '+(792-y2)+' l S');
+        };
+        // FMFD source header: exact official band color and logo placement.
+        box(18.36,50.76,569.28,31.07,[.082,.376,.51]);
+        text(27.8,75.0,'PPE CLEAN AND REPAIR FORM',26,false,true);
+        draw.push('q 97.97 0 0 83.50 489.80 695.20 cm /FMFDLogo Do Q');
+        box(18,97.68,558,19.56,[0,0,0]);
+        text(23.4,112,'CUSTOMER INFORMATION',12,true,true);
+        const grid=[118.2,139.2,156.72,174.24];
+        for(const y of grid)line(18,y,576,y,.8,.5);
+        for(const [a,b] of [[18,174.24],[403.9,174.24],[576,174.24]])
+            line(a,118.2,a,b,.8,.5);
+        text(23.4,133,'Flower Mound Fire Dept.',12,true);
+        text(409.4,133,'Date:',10);
+        text(445,133,form.date||'',10);
+        text(23.4,151,'First and Last Name:',10);
+        text(117,151,form.name||'',10,false,false,53);
+        text(409.4,151,'ID Number:',10);
+        text(465,151,form.idNumber||'',10);
+        text(23.4,169,'Station picked up at:',9);
+        text(119,169,form.pickupStation||'',9);
+        text(214,169,'Preferred Station delivery:',9);
+        text(331,169,form.deliveryStation||'',9);
+        text(409.4,169,'Shift:',9);
+        text(438,169,form.shift||'',9);
+        box(18,175.2,561,37.56,[0,0,0]);
+        text(234,198,'PPE ITEMS SENT IN',13,true,true);
+        const xs=[18,141,287,331,399,579];
+        box(18,213.2,561,38.08,[.745,.745,.745]);
+        text(23.4,235,'Item',10,true);
+        text(146.4,235,'Serial Number',10,true);
+        text(290,235,'Size',10,true);
+        text(334,229,'Date of',9,true);
+        text(334,240,'Manuf.',9,true);
+        text(403,235,'Known Issues',10,true);
+        for(const x of xs)line(x,213.2,x,669.72,.52,0);
+        for(let i=0;i<=11;i++)line(18,251.28+i*38.04,579,251.28+i*38.04,.52,0);
+        line(18,213.2,579,213.2,.7,.5);
+        // Original table row positions. Data is always inside the correct
+        // Primary/Secondary/Helmet/Boots boxes of the supplied form.
+        for(let i=0;i<PPE_REPAIR_ROWS.length;i++){
+            const label=PPE_REPAIR_ROWS[i],item=form.items?.[i]||{};
+            const baseline=276.2+i*38.04;
+            text(23.4,baseline,label,9.5,false,false,29);
+            if(!item.asset)continue;
+            text(146.4,baseline,item.serial||'',9,false,false,28);
+            text(291,baseline,item.size||'',9,false,false,8);
+            text(334,baseline,item.manufacture||'',9,false,false,12);
+            const issues=repairPdfWrap(item.issues||'',39);
+            for(let lineNum=0;lineNum<Math.min(2,issues.length);lineNum++){
+                const end=issues.length>2&&lineNum===1?'...':issues[lineNum];
+                text(402.5,baseline-5+lineNum*11,end,7.5,false,false,44);
+            }
+        }
+        const footX=[18,96.2,293.3,371.3,471.25], footY=[695.0,716.3,738.0];
+        for(const x of footX)line(x,footY[0],x,footY[2],.5,0);
+        for(const y of footY)line(footX[0],y,footX[4],y,.5,0);
+        text(23.6,709.9,'Pick-up By',9,true);
+        text(98.7,709.9,form.pickupBy||'',9,false,false,42);
+        text(298.7,709.9,'Pick-up Date',9,true);
+        text(375,709.9,form.pickupDate||'',9,false,false,21);
+        text(23.6,732.4,'Returned By',9,true);
+        text(98.7,732.4,form.returnedBy||'',9,false,false,42);
+        text(298.7,732.4,'Returned Date',9,true);
+        text(375,732.4,form.returnedDate||'',9,false,false,21);
+        return draw.join('\n')+'\n';
+    }
+    function repairPdfDocument(forms){
+        if(!Array.isArray(forms)||!forms.length)throw Error('No person selected.');
+        const enc=new TextEncoder(),objects=[];
+        const add=body=>{objects.push(body);return objects.length};
+        const font=add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+        const bold=add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
+        const raw=atob(REPAIR_OFFICIAL_LOGO_BASE64);
+        const hex=Array.from(raw,x=>x.charCodeAt(0).toString(16).padStart(2,'0')).join('')+'>';
+        const image=add('<< /Type /XObject /Subtype /Image /Width 145 /Height 125 '+
+            '/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter [/ASCIIHexDecode /DCTDecode] '+
+            '/Length '+hex.length+' >>\nstream\n'+hex+'\nendstream');
+        const root=add(''),pages=add(''),ids=[];
+        for(const form of forms){
+            const body=repairPdfOfficialPaint(form);
+            const stream=add('<< /Length '+enc.encode(body).length+' >>\nstream\n'+body+'endstream');
+            ids.push(add('<< /Type /Page /Parent '+pages+' 0 R /MediaBox [0 0 612 792] '+
+                '/Resources << /Font << /F1 '+font+' 0 R /F2 '+bold+' 0 R >> '+
+                '/XObject << /FMFDLogo '+image+' 0 R >> >> '+
+                '/Contents '+stream+' 0 R >>'));
+        }
+        objects[root-1]='<< /Type /Catalog /Pages '+pages+' 0 R >>';
+        objects[pages-1]='<< /Type /Pages /Kids ['+ids.map(x=>x+' 0 R').join(' ')+'] /Count '+ids.length+' >>';
+        const pieces=[],offsets=[0];let offset=0;
+        const append=txt=>{const u=enc.encode(txt);pieces.push(u);offset+=u.length};
+        append('%PDF-1.4\n');
+        objects.forEach((body,i)=>{offsets.push(offset);append((i+1)+' 0 obj\n'+body+'\nendobj\n')});
+        const xref=offset;append('xref\n0 '+(objects.length+1)+'\n0000000000 65535 f \n');
+        for(let i=1;i<offsets.length;i++)append(String(offsets[i]).padStart(10,'0')+' 00000 n \n');
+        append('trailer\n<< /Size '+(objects.length+1)+' /Root '+root+' 0 R >>\n'+
+            'startxref\n'+xref+'\n%%EOF\n');
+        return new Blob(pieces,{type:'application/pdf'});
+    }    const PPE_REPAIR_DRAFTS_KEY='vr_ppe_clean_repair_saved_info_v1';
+    const PPE_REPAIR_FORM_FIELDS=[
+        'date','name','idNumber','shift','pickupStation','deliveryStation',
+        'pickupBy','pickupDate','returnedBy','returnedDate'
+    ];
+    function repairAssetKey(asset){
+        return asset?String(asset.pool||'')+':'+String(asset.itemId||''):'';
+    }
+    function repairPersistDraft(forms){
+        const drafts=loadJSON(PPE_REPAIR_DRAFTS_KEY,{})||{};
+        const now=new Date().toISOString();
+        for(const form of forms){
+            const key=masterNameKey(form.originalName);
+            if(!key)continue;
+            const fields=Object.fromEntries(PPE_REPAIR_FORM_FIELDS.map(k=>[k,
+                String(form[k]||'').slice(0,500)]));
+            drafts[key]={
+                savedAt:now,fields,
+                slots:PPE_REPAIR_ROWS.map((label,i)=>{
+                    const slot=form.items[i]||{};
+                    return {
+                        label,assetKey:repairAssetKey(slot.asset),
+                        serial:String(slot.serial||'').slice(0,100),
+                        size:String(slot.size||'').slice(0,100),
+                        manufacture:String(slot.manufacture||'').slice(0,100),
+                        issues:String(slot.issues||'').slice(0,2000)
+                    };
+                })
+            };
+        }
+        const keys=Object.keys(drafts);
+        if(keys.length>30){
+            keys.sort((a,b)=>String(drafts[a]?.savedAt||'').localeCompare(String(drafts[b]?.savedAt||'')));
+            for(const key of keys.slice(0,keys.length-30))delete drafts[key];
+        }
+        saveJSON(PPE_REPAIR_DRAFTS_KEY,drafts);
+        repairPersistPersonDefaults(forms);
+        return now;
+    }
+    function repairRestoreDraft(form){
+        const key=masterNameKey(form.originalName);
+        const draft=loadJSON(PPE_REPAIR_DRAFTS_KEY,{})?.[key];
+        if(!draft?.fields||!Array.isArray(draft.slots))return '';
+        for(const k of PPE_REPAIR_FORM_FIELDS){
+            if(typeof draft.fields[k]==='string')form[k]=draft.fields[k];
+        }
+        let missing=0;
+        for(let i=0;i<PPE_REPAIR_ROWS.length;i++){
+            const saved=draft.slots[i];
+            if(!saved||saved.label!==PPE_REPAIR_ROWS[i])continue;
+            if(!saved.assetKey){
+                // A deliberately unselected form row remains unselected.
+                form.items[i]={
+                    asset:null,serial:saved.serial||'',size:saved.size||'',
+                    manufacture:saved.manufacture||'',issues:saved.issues||''
+                };
+                continue;
+            }
+            // Only restore saved item data when the live Responsible Party
+            // scan still verifies the SAME pool/item ID for THIS person.
+            const asset=form.sourceItems.find(item=>repairAssetKey(item)===saved.assetKey);
+            if(!asset){
+                missing++;
+                if(!form.sourceItems.some(item=>repairAssetKey(item)===repairAssetKey(form.items[i]?.asset))){
+                    form.items[i]={asset:null,serial:'',size:'',manufacture:'',issues:''};
+                }
+                continue;
+            }
+            form.items[i]={
+                ...repairSlotFromAsset(asset),
+                serial:saved.serial||repairSlotFromAsset(asset).serial,
+                size:saved.size||repairSlotFromAsset(asset).size,
+                manufacture:saved.manufacture||repairSlotFromAsset(asset).manufacture,
+                issues:saved.issues||''
+            };
+        }
+        return 'Saved form restored ('+String(draft.savedAt||'').slice(0,16).replace('T',' ')+
+            ')'+(missing?'; '+missing+' former item(s) no longer assigned and omitted':'');
+    }
+
+    const PPE_REPAIR_PEOPLE_KEY='vr_ppe_repair_people_v1';
+    // Fresh installs have no shared roster. All owners still require a live
+    // Vector Responsible Party match; manual names grant no PPE ownership.
+    function repairPersonChoices(masterPeople, directoryPeople, ownName, addedPeople) {
+        const byKey=new Map();
+        for(const raw of [...(Array.isArray(masterPeople)?masterPeople:[]),
+            ...(Array.isArray(directoryPeople)?directoryPeople:[]),
+            ...(Array.isArray(addedPeople)?addedPeople:[]),{name:ownName}]){
+            const name=clean(raw?.name);
+            if(!name||isOrganizationOrBadRosterName(name))continue;
+            const key=masterNameKey(name);
+            if(!key||byKey.has(key))continue;
+            byKey.set(key,{name,prefix:ownerRosterKey(name)});
+        }
+        return [...byKey.values()].sort((a,b)=>a.name.localeCompare(b.name));
+    }
+    function repairSavedPersonNames() {
+        const saved=loadJSON(PPE_REPAIR_PEOPLE_KEY,[]);
+        return Array.isArray(saved)?saved.filter(p=>typeof p?.name==='string').slice(0,40):[];
+    }
+    function repairSavePersonName(name) {
+        const candidates=repairPersonChoices([],[],name,[]);
+        if(candidates.length!==1||clean(name).split(/\s+/).length<2){
+            throw new Error('Enter the firefighter full first and last name exactly as Vector lists the Responsible Party.');
+        }
+        const saved=repairSavedPersonNames();
+        if(!saved.some(p=>masterNameKey(p.name)===masterNameKey(name))){
+            saved.push({name:clean(name)});
+            saveJSON(PPE_REPAIR_PEOPLE_KEY,saved.slice(-40));
+        }
+        return candidates[0];
+    }
+
+    function showPpeCleanRepairForm() {
+        if (getRun()) {
+            setStatus('Finish or abort the active inspection before preparing a clean/repair form.',false);
+            return;
+        }
+        const config=getConfig();
+        const centrallyManaged=getMasterRosterState().source==='shared-command';
+        const roster=centrallyManaged ?
+            repairPersonChoices(getActiveMasterRoster(),[],'',[]) :
+            repairPersonChoices(getActiveMasterRoster(),
+                config.peopleDirectory||[],config.inspectorName,repairSavedPersonNames());
+        const {overlay,box}=makeOverlayBox('1150px');
+        const h=document.createElement('h2');
+        h.textContent='PPE Clean and Repair Form';
+        h.style.cssText='margin:0 0 6px;color:#153e5c;font:700 23px Arial,sans-serif';
+        const info=document.createElement('p');
+        info.textContent='Select people, load their PPE by verified Responsible Party, choose which gear is being sent, then export an editable Excel workbook. Nothing is submitted to Vector.';
+        info.style.cssText='margin:0 0 12px;color:#577083;font:13px/1.5 Arial,sans-serif';
+        const note=document.createElement('p');
+        note.textContent='Date and owner name are filled automatically. Station and shift reuse values you previously entered for each person. Serial number, size and manufacture date fill from verified Vector equipment records when present; use Fill missing details from Vector to check the item pages. Every field remains editable. A Vector Year value is year-only; it is not converted into an invented manufacturing day/month.';
+        note.style.cssText='padding:9px;border:1px solid #c0d5e4;background:#eff6fb;color:#234760;border-radius:7px;font:12px/1.45 Arial,sans-serif';
+        const status=document.createElement('div');
+        status.setAttribute('role','status');
+        status.style.cssText='margin:9px 0;color:#36556b;font:12px/1.5 Arial,sans-serif;min-height:17px';
+        const close=makeButton('Close');
+        close.onclick=()=>overlay.remove();
+        const controls=document.createElement('div');
+        controls.style.cssText='display:flex;flex-wrap:wrap;gap:7px;align-items:center';
+        const search=document.createElement('input');
+        search.placeholder='Find crew member...';
+        search.setAttribute('aria-label','Search crew members');
+        search.style.cssText='padding:10px;border:1px solid #b9cad6;border-radius:6px;flex:1;min-width:170px;font:13px Arial';
+        const counter=document.createElement('span');
+        counter.style.cssText='font:11px Arial;color:#567085';
+        controls.append(search,counter,close);
+        const manualRow=document.createElement('div');
+        manualRow.style.cssText='display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin:7px 0';
+        const manualName=document.createElement('input');
+        manualName.type='text';
+        manualName.placeholder='Full Vector Responsible Party name (First Last)';
+        manualName.setAttribute('aria-label','Add firefighter by exact Responsible Party name');
+        manualName.style.cssText='padding:9px;border:1px solid #b9cad6;border-radius:6px;flex:1;min-width:240px;font:13px Arial';
+        const addPerson=makeButton('Add firefighter',{background:'#176b8e',color:'#fff'});
+        const guidance=document.createElement('div');
+        guidance.style.cssText='font:11px/1.5 Arial;color:#567085;width:100%';
+        guidance.textContent='Your Profile name appears automatically. Add others by their exact Vector Responsible Party name; names are remembered on this browser. PPE ownership is verified before export.';
+        manualRow.append(manualName,addPerson,guidance);
+        if(centrallyManaged){
+            manualName.disabled=true;addPerson.disabled=true;
+            guidance.textContent='Approved department roster is managed in Rebel Command. Contact your roster administrator to add or change a name.';
+        }
+        const list=document.createElement('div');
+        list.style.cssText='border:1px solid #d6e3eb;border-radius:8px;margin:8px 0;max-height:180px;overflow:auto;padding:4px 8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:3px 14px';
+        const selection=new Set();
+        const myName=masterNameKey(config.inspectorName);
+        const me=roster.find(p=>masterNameKey(p.name)===myName);
+        if(me)selection.add(myName);
+        function drawCount(){
+            counter.textContent=selection.size+' selected / '+roster.length+' available';
+        }
+        const draw=()=>{
+            list.innerHTML='';
+            const term=search.value.trim().toLowerCase();
+            const visiblePeople=roster.filter(p=>!term||p.name.toLowerCase().includes(term));
+            for(const person of visiblePeople) {
+                const row=document.createElement('label');
+                row.style.cssText='display:flex;align-items:center;gap:8px;padding:4px 0;font:12px Arial;color:#28465b;cursor:pointer';
+                const key=masterNameKey(person.name);
+                const cb=document.createElement('input');cb.type='checkbox';cb.checked=selection.has(key);
+                cb.onchange=()=>{if(cb.checked)selection.add(key);else selection.delete(key);drawCount();};
+                const n=document.createElement('span');n.textContent=person.name;row.append(cb,n);list.appendChild(row);
+            }
+            drawCount();
+        };
+        draw();search.addEventListener('input',draw);
+        const syncRosterBtn=makeButton('Refresh approved roster',{background:'#dceef6',color:'#153e5c'});
+        syncRosterBtn.onclick=async()=>{
+            syncRosterBtn.disabled=true;
+            status.textContent='Checking the central approved roster...';
+            const good=await refreshSharedRebelRoster(true);
+            syncRosterBtn.disabled=false;
+            if(!good){
+                status.textContent='Roster sync unavailable: '+
+                    (sharedRosterSyncState().error||'Unknown error')+
+                    '. Existing names were not replaced.';
+                return;
+            }
+            overlay.remove();
+            showPpeCleanRepairForm();
+        };
+        controls.append(syncRosterBtn);
+        if(!roster.length)status.textContent='No names saved on this installation. Enter the full Vector Responsible Party name above, then click Add firefighter.';
+        addPerson.onclick=()=>{
+            try{
+                const person=repairSavePersonName(clean(manualName.value));
+                const key=masterNameKey(person.name);
+                if(!roster.some(p=>masterNameKey(p.name)===key))roster.push(person);
+                roster.sort((a,b)=>a.name.localeCompare(b.name));
+                selection.add(key);
+                search.value='';
+                manualName.value='';
+                draw();
+                status.textContent=person.name+' added and selected. Load PPE to verify exact Responsible Party ownership.';
+            }catch(error){
+                status.textContent=error?.message||String(error);
+            }
+        };
+        manualName.addEventListener('keydown',event=>{
+            if(event.key==='Enter'){event.preventDefault();addPerson.click();}
+        });
+        const load=makeButton('Load selected PPE',{background:'#176b8e',color:'#fff'});
+        const review=document.createElement('div');
+        review.style.cssText='margin-top:12px;';
+        const footer=document.createElement('div');
+        footer.style.cssText='display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:10px 0;';
+        const detailsBtn=makeButton('Fill missing details from Vector',{background:'#265a81',color:'#fff'});
+        detailsBtn.disabled=true;
+        const saveInfoBtn=makeButton('Save Info',{background:'#265a81',color:'#fff'});
+        saveInfoBtn.disabled=true;
+        const pdfBtn=makeButton('Save as PDF',{background:'#187450',color:'#fff'});
+        pdfBtn.disabled=true;
+        const exportBtn=makeButton('Download editable Excel (.xlsx)',{background:'#187450',color:'#fff'});
+        exportBtn.disabled=true;
+        footer.append(load,detailsBtn,saveInfoBtn,pdfBtn,exportBtn);
+        footer.style.cssText+='position:sticky;top:0;z-index:25;background:#f8fbff;padding:9px 5px;border-bottom:1px solid #b3c7d3;border-radius:6px;';
+        box.append(h,info,note,controls,manualRow,list,footer,status,review);
+        const forms=[];
+        const makeInput=(placeholder,value,onchange)=>{
+            const el=document.createElement('input');el.type='text';
+            el.placeholder=placeholder;el.value=String(value||'');
+            el.style.cssText='min-width:0;width:100%;box-sizing:border-box;padding:7px;border:1px solid #c3d4de;border-radius:5px;font:12px Arial;color:#173e56';
+            el.addEventListener('input',()=>onchange(el.value));
+            return el;
+        };
+        const field=(parent,label,value,onchange)=>{
+            const wrap=document.createElement('label');wrap.style.cssText='display:flex;flex-direction:column;gap:4px;min-width:140px;flex:1;font:700 11px Arial;color:#385972';
+            const title=document.createElement('span');title.textContent=label;
+            wrap.append(title,makeInput(label,value,onchange));parent.appendChild(wrap);
+        };
+        function showReview(){
+            review.innerHTML='';
+            for(const form of forms){
+                const section=document.createElement('section');
+                section.style.cssText='border:1px solid #b9d0df;border-radius:9px;padding:12px;margin:12px 0;background:#f8fbfd';
+                const title=document.createElement('h3');
+                title.textContent=form.name+' · '+form.sourceItems.length+' assigned PPE found';
+                title.style.cssText='margin:0 0 6px;font:700 16px Arial;color:#174561';
+                const verified=document.createElement('p');
+                verified.textContent='Verified by Vector Responsible Party · '+form.capturedAt+' · Only selected gear will appear on the form.';
+                verified.style.cssText='font:11px/1.4 Arial;color:#637f90;margin:0 0 10px';
+                const fields=document.createElement('div');
+                fields.style.cssText='display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px';
+                for(const [label,key] of [['Date','date'],['First and Last Name','name'],['ID Number','idNumber'],['Shift','shift'],
+                    ['Station picked up at','pickupStation'],['Preferred station delivery','deliveryStation'],
+                    ['Pick-up By','pickupBy'],['Pick-up Date','pickupDate'],
+                    ['Returned By','returnedBy'],['Returned Date','returnedDate']]){
+                    const entry=field(fields,label,form[key],v=>{form[key]=v;});
+                    if(PPE_REPAIR_PROFILE_FIELDS.includes(key)){
+                        const input=entry?.querySelector?.('input')||
+                            fields.lastElementChild?.querySelector?.('input');
+                        input?.addEventListener('blur',()=>repairPersistPersonDefaults([form]));
+                    }
+                }
+                const table=document.createElement('table');
+                table.style.cssText='width:100%;border-collapse:collapse;font:11px Arial;color:#26465b';
+                const thead=document.createElement('thead');thead.innerHTML='<tr>'+
+                    ['Form line','Choose owned PPE','Serial number','Size','Date of manuf.','Known issues'].map(t=>
+                        '<th style="text-align:left;padding:6px;border-bottom:2px solid #8faebf">'+t+'</th>').join('')+'</tr>';
+                table.append(thead);
+                const tbody=document.createElement('tbody');
+                PPE_REPAIR_ROWS.forEach((label,i)=>{
+                    const slot=form.items[i],tr=document.createElement('tr');
+                    tr.style.background=i%2?'#ffffff':'#eef4f7';
+                    const labelCell=document.createElement('td');
+                    labelCell.textContent=label;labelCell.style.cssText='min-width:105px;padding:6px;font-weight:bold';
+                    tr.appendChild(labelCell);
+                    const optionCell=document.createElement('td');
+                    optionCell.style.cssText='padding:4px;min-width:180px';
+                    const picker=document.createElement('select');
+                    picker.style.cssText='width:100%;max-width:230px;min-height:31px;border:1px solid #aac1d0;border-radius:4px;background:#fff;font:11px Arial';
+                    const empty=document.createElement('option');empty.value='';empty.textContent='Not included';picker.append(empty);
+                    const options=form.sourceItems.filter(item=>repairGearMatches(label,item));
+                    for(const item of options){
+                        const opt=document.createElement('option');
+                        opt.value=item.pool+':'+item.itemId;
+                        opt.textContent=item.assetId+' ('+item.type+')';
+                        picker.append(opt);
+                    }
+                    const chosen=slot.asset;
+                    if(chosen)picker.value=chosen.pool+':'+chosen.itemId;
+                    picker.onchange=()=>{
+                        const selected=form.sourceItems.find(item=>item.pool+':'+item.itemId===picker.value)||null;
+                        Object.assign(slot,repairSlotFromAsset(selected));
+                        const values=[slot.serial,slot.size,slot.manufacture,slot.issues];
+                        [...tr.querySelectorAll('input')].forEach((el,i)=>{el.value=values[i]||'';});
+                        detailLink.href=selected?.url||'#';detailLink.hidden=!selected;
+                    };
+                    const detailLink=document.createElement('a');
+                    detailLink.textContent='View item in Vector';
+                    detailLink.href=chosen?.url||'#';detailLink.hidden=!chosen;
+                    detailLink.target='_blank';detailLink.rel='noopener noreferrer';
+                    detailLink.style.cssText='margin-top:3px;font:10px Arial;color:#147099';
+                    optionCell.append(picker,detailLink);tr.appendChild(optionCell);
+                    for(const [placeholder,key] of [['Serial','serial'],['Size','size'],['Mfg. date','manufacture'],['Describe issue','issues']]){
+                        const td=document.createElement('td');td.style.cssText='padding:4px';
+                        const input=makeInput(placeholder,slot[key],v=>{slot[key]=v;});
+                        td.append(input);tr.append(td);
+                    }
+                    tbody.append(tr);
+                });
+                table.append(tbody);section.append(title,verified,fields,table);
+                review.append(section);
+            }
+            status.textContent=forms.length+' person form(s) ready for review. Primary/secondary gear identified from FL/BU. Item metadata lookup starts automatically.';
+            exportBtn.disabled=!forms.length;
+            pdfBtn.disabled=!forms.length;
+            saveInfoBtn.disabled=!forms.length;
+            detailsBtn.disabled=!forms.length;
+        }
+        detailsBtn.onclick=async()=>{
+            const queue=[];
+            for(const form of forms)for(const slot of form.items){
+                if(slot.asset && (!slot.serial||!slot.size||!slot.manufacture))
+                    queue.push({form,slot});
+            }
+            if(!queue.length){status.textContent='All selected PPE details have values. You may edit them before downloading.';return;}
+            if(queue.length>36){status.textContent='Select fewer items (up to 36 detail pages per lookup).';return;}
+            detailsBtn.disabled=true;load.disabled=true;exportBtn.disabled=true;pdfBtn.disabled=true;
+            let next=0,completed=0,updated=0,failed=0;
+            const worker=async()=>{
+                while(next<queue.length){
+                    const {form,slot}=queue[next++];
+                    status.textContent='Reading Vector PPE details: '+completed+'/'+queue.length+
+                        ' · '+form.name+' · '+slot.asset.assetId;
+                    try{
+                        const extra=await repairReadItemDetail(slot.asset);
+                        for(const k of ['serial','size','manufacture']){
+                            if(!slot[k]&&extra[k]){slot[k]=extra[k];updated++;}
+                        }
+                    }catch{failed++;}
+                    completed++;
+                }
+            };
+            try{
+                await Promise.all(Array.from({length:Math.min(2,queue.length)},worker));
+                showReview();
+                status.textContent='Vector detail lookup complete: '+completed+' item(s), '+
+                    updated+' field(s) filled'+(failed?'; '+failed+' could not be read':'')+
+                    '. Verify remaining blanks or open item links to enter them manually.';
+            }finally{detailsBtn.disabled=false;load.disabled=false;exportBtn.disabled=!forms.length;pdfBtn.disabled=!forms.length;}
+        };
+        load.onclick=async()=>{
+            if(getRun()){status.textContent='An inspection is active. Finish or abort it before exporting.';return;}
+            const chosen=roster.filter(p=>selection.has(masterNameKey(p.name)));
+            if(!chosen.length){status.textContent='Choose at least one person.';return;}
+            if(chosen.length>12){status.textContent='Select up to 12 people per export to keep live PPE searches bounded.';return;}
+            load.disabled=true;detailsBtn.disabled=true;exportBtn.disabled=true;pdfBtn.disabled=true;saveInfoBtn.disabled=true;forms.length=0;review.innerHTML='';
+            try{
+                const restored=[];
+                for(let i=0;i<chosen.length;i++){
+                    const person=chosen[i];
+                    status.textContent='Scanning '+(i+1)+'/'+chosen.length+': '+person.name;
+                    const inventory=await scanPpeByResponsibleParty(person.name,msg=>{
+                        status.textContent='Scanning '+(i+1)+'/'+chosen.length+': '+person.name+' · '+msg;
+                    });
+                    // No guesses from family names, equipment prefixes, or prior ownership.
+                    const sourceItems=inventory.items.map(item=>({...item}));
+                    const slots=PPE_REPAIR_ROWS.map(label=>{
+                        return repairSlotFromAsset(repairDefaultAsset(label,sourceItems));
+                    });
+                    const d=new Date();
+                    const localDate=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+                    forms.push({name:person.name,originalName:person.name,
+                        ...repairPersonDefaults(person),date:localDate,
+                        pickupBy:'',pickupDate:'',
+                        returnedBy:'',returnedDate:'',items:slots,sourceItems,
+                        capturedAt:inventory.capturedAt});
+                    const note=repairRestoreDraft(forms[forms.length-1]);
+                    if(note)restored.push(person.name+': '+note);
+                }
+                showReview();
+                if(restored.length)status.textContent=restored.join(' | ');
+                await detailsBtn.onclick();
+                if(restored.length)status.textContent+=' | '+restored.join(' | ');
+            }catch(error){
+                forms.length=0;
+                review.innerHTML='';
+                status.textContent='Cannot verify full PPE inventory: '+(error?.message||error)+
+                    '. No partial workbook was produced. Refresh Vector and retry.';
+            }finally{load.disabled=false;}
+        };
+        saveInfoBtn.onclick=()=>{
+            if(!forms.length){status.textContent='Load PPE for at least one person first.';return;}
+            try{
+                const savedAt=repairPersistDraft(forms);
+                status.textContent='Saved Info for '+forms.length+
+                    ' person(s) on this browser ('+savedAt.slice(0,16).replace('T',' ')+
+                    '). Station/shift/ID are also saved in Profile. No Vector changes made.';
+            }catch(error){status.textContent='Save Info failed: '+(error?.message||error);}
+        };
+        pdfBtn.onclick=()=>{
+            try{
+                if(!forms.length)throw Error('Load PPE for at least one person first.');
+                for(const form of forms){
+                    const seen=new Set();
+                    for(const slot of form.items){
+                        if(!slot?.asset)continue;
+                        const key=repairAssetKey(slot.asset);
+                        if(seen.has(key))throw Error(form.name+': same PPE selected in two rows.');
+                        seen.add(key);
+                    }
+                    if(!seen.size)throw Error(form.name+': select at least one PPE item.');
+                }
+                repairPersistDraft(forms);
+                const blob=repairPdfDocument(forms);
+                const url=URL.createObjectURL(blob),anchor=document.createElement('a');
+                const date=new Date().toISOString().slice(0,10);
+                anchor.href=url;
+                anchor.download='PPE_Clean_and_Repair_'+date+
+                    (forms.length===1?'_'+forms[0].originalName.replace(/[^A-Za-z0-9]+/g,'_'):'_Crew')+'.pdf';
+                document.body.append(anchor);anchor.click();anchor.remove();
+                setTimeout(()=>URL.revokeObjectURL(url),30000);
+                status.textContent='Saved PDF for '+forms.length+
+                    ' person(s). Form information was also saved on this browser.';
+            }catch(error){status.textContent='Save as PDF failed: '+(error?.message||error);}
+        };
+        exportBtn.onclick=()=>{
+            try{
+                if(!forms.length)throw Error('Load one or more people first.');
+                for(const form of forms){
+                    const seen=new Set();
+                    for(const slot of form.items){
+                        if(!slot.asset)continue;
+                        const k=slot.asset.pool+':'+slot.asset.itemId;
+                        if(seen.has(k))throw Error(form.name+': '+slot.asset.assetId+
+                            ' was selected in two form lines. Choose one line per asset.');
+                        seen.add(k);
+                    }
+                    if(!seen.size)throw Error(form.name+': choose at least one PPE item to send.');
+                }
+                repairPersistDraft(forms);
+                const xlsx=repairWorkbook(forms);
+                const url=URL.createObjectURL(xlsx),a=document.createElement('a');
+                const stamp=new Date().toISOString().slice(0,10);
+                a.href=url;a.download='PPE_Clean_and_Repair_'+stamp+
+                    (forms.length===1?'_'+forms[0].name.replace(/[^A-Za-z0-9]+/g,'_'):'_Crew')+'.xlsx';
+                document.body.appendChild(a);a.click();a.remove();
+                setTimeout(()=>URL.revokeObjectURL(url),30000);
+                status.textContent='Editable Excel workbook downloaded for '+forms.length+
+                    ' people. The Source Index lists the exact verified Vector PPE records.';
+                setStatus('PPE clean/repair Excel form prepared for '+forms.length+' selected people.');
+            }catch(error){status.textContent=error?.message||String(error);}
+        };
+    }
+
+    // ============================================================
+    // STATION 4 SCBA AIRPACKS — STANDARD EQUIPMENT (NOT PPE MASKS)
+    // ============================================================
+    // This is an attended discovery/review draft for self-contained
+    // breathing apparatus assigned to THREE exact native locations.
+    // Neither a PPE-mask inspection nor an official Vector inspection
+    // is inferred from a row appearing on the Standard equipment list.
+    const SCBA_AIRPACK_DRAFT_KEY = 'vector-rebel-station4-airpack-draft-v1';
+    const SCBA_AIRPACK_PENDING_SELECTION_KEY = 'vector-rebel-scba-airpack-location-setup-v1';
+    const SCBA_AIRPACK_NATIVE_HANDOFF_KEY = 'vector-rebel-scba-airpack-native-check-v1';
+    const SCBA_AIRPACK_NATIVE_BANNER_ID = 'vector-rebel-scba-native-check-banner';
+    // Confirmed from live authenticated Vector Standard SCBA Frame AP-04:
+    // equipment pool 299946, official 'SCBA Inspection' template 113271.
+    // The separate SCBA Face Mask Tour PPE form is template 119122 (7 items).
+    const SCBA_FRAME_POOL = '299946';
+    const SCBA_FRAME_INSPECTION_TEMPLATE = '113271';
+    const SCBA_FRAME_INSPECTION_TITLE = 'SCBA Inspection';
+    const SCBA_FRAME_INSPECTION_QUESTIONS = Object.freeze([
+        'All of the following SCBA components are present',
+        'Facepiece Inspection',
+        'Backframe and harness assembly inspection shall include',
+        'Breathing air cylinder assembly inspection shall include the following',
+        'Hose inspection shall include',
+        'End-Of-Service-Time Indicator (EOSTI) inspection shall include',
+        'Regulator inspection shall include',
+        'Pressure indicator inspection shall include',
+        'Integrated PASS device inspection shall include',
+        'SCBA Pressure Retention Inspection',
+        'Following the Pressure Retention Inspection, the system pressure is released'
+    ]);
+    let scbaAirpackFormBusy = false;
+    const SCBA_AIRPACK_LOCATIONS = Object.freeze([
+        { id: 'truck504', label: 'Truck 504', location: 'Truck 504: 63000-13',
+          exact: /^Truck 504\s*:\s*63000-13$/i },
+        { id: 'medic504', label: 'Medic 504', location: 'Medic 504: 61000-12',
+          exact: /^Medic 504\s*:\s*61000-12$/i },
+        { id: 'station4', label: 'Station 4 SCBA Room',
+          location: 'Station 4 SCBA Supply Room',
+          exact: /^Station 4 SCBA Supply Room$/i }
+    ]);
+    let scbaAirpackBusy = false;
+
+    function scbaAirpackStandardTable() {
+        if (!/\/main\/asset-manager\/?$/i.test(location.pathname)) return null;
+        const standard = findVectorNavigationTarget('Standard');
+        const ppe = findVectorNavigationTarget('PPE');
+        if (!standard || !ppe || !vectorControlLooksActive(standard)) return null;
+        for (const table of document.querySelectorAll('table,[role="table"]')) {
+            if (!visible(table) || table.closest('#' + PANEL_ID + ',#' + OVERLAY_ID)) continue;
+            const labels = [...table.querySelectorAll('thead th,[role="columnheader"]')]
+                .map(cell => clean(cell.textContent || '').toLowerCase());
+            if (['name','pool','location','item status'].every(name => labels.includes(name))) {
+                return { table, labels };
+            }
+        }
+        return null;
+    }
+
+    // Remember location choices only during a temporary native-filter setup.
+    // Successful searches clear the pending selection. Future checks start
+    // with no locations selected.
+    function scbaAirpackPendingSelection() {
+        try {
+            const raw=sessionStorage.getItem(SCBA_AIRPACK_PENDING_SELECTION_KEY);
+            const entry=raw?JSON.parse(raw):null;
+            if(!entry || Date.now()-entry.savedAt>10*60*1000) {
+                sessionStorage.removeItem(SCBA_AIRPACK_PENDING_SELECTION_KEY);
+                return [];
+            }
+            return SCBA_AIRPACK_LOCATIONS.filter(loc=>entry.ids?.includes(loc.id))
+                .map(loc=>loc.id);
+        } catch {return [];}
+    }
+
+    function scbaAirpackFilterScope(requestedIds=[]) {
+        // The inspector chooses which of the three stations to inspect.
+        // Verify those SAME locations are applied to the underlying Vector
+        // Standard Equipment list; panel selections do not silently change it.
+        const content = [...document.querySelectorAll(
+            'main,[role="main"],.main-content,.asset-manager,[class*="asset-manager"]')]
+            .filter(el => !el.closest('#' + PANEL_ID + ',#' + OVERLAY_ID))
+            .map(el => el.innerText || '').find(t => /Filtered To\s*:/i.test(t)) ||
+            (document.body.innerText || '');
+        const match = content.match(/Filtered To\s*:\s*([\s\S]{0,500})/i);
+        const band = match ? match[1].split(
+            /(?:Search:|Name\s+Pool\s+Location|Responsible Party|Items per page)/i)[0] : '';
+        const active=SCBA_AIRPACK_LOCATIONS.filter(loc=>
+            band.toLowerCase().includes(loc.location.toLowerCase()));
+        const requested=SCBA_AIRPACK_LOCATIONS.filter(loc=>requestedIds.includes(loc.id));
+        const missing=requested.filter(loc=>!active.includes(loc));
+        const extra=active.filter(loc=>!requested.includes(loc));
+        return {
+            ready:requested.length>0 && !missing.length && !extra.length,
+            selected:active.map(loc=>loc.id),
+            requested:requested.map(loc=>loc.id),
+            missing:missing.map(loc=>loc.location),
+            extra:extra.map(loc=>loc.location)
+        };
+    }
+
+
+    // Vector Equipment > Standard uses the same React-select Filters widget
+    // as the live-proven PPE Responsible Party lookup. It is NOT a checkbox list.
+    // This code only operates on the native filter controls, never inspections.
+    function scbaAirpackLocationPicker() {
+        return [...document.querySelectorAll('input[role="combobox"]')]
+            .find(el => visible(el) &&
+                /filter-equip-.*-locations?$/i.test(el.id || '')) || null;
+    }
+
+    function scbaAirpackSelectedLocationLabels(input) {
+        // Read actual React-select multi-value chips, not the text currently
+        // being typed into the combobox. Nested labels must count only once.
+        const box=input?.parentElement?.parentElement;
+        if(!box)return [];
+        const chips=[...box.querySelectorAll('[class*="multiValue"],[class*="singleValue"]')]
+            .filter(el=>visible(el) && !el.parentElement?.closest(
+                '[class*="multiValue"],[class*="singleValue"]'));
+        return chips.map(chip=>{
+            const label=chip.querySelector?.('[class*="multiValueLabel"],[class*="multi-value__label"],[class*="singleValue"]');
+            return clean((label || chip).innerText || (label || chip).textContent || '')
+                .replace(/\s*[×✕]\s*$/,'');
+        }).filter(Boolean);
+    }
+
+    async function scbaAirpackWaitLocationPicker(ms=5500) {
+        const started=Date.now();
+        while(Date.now()-started<ms){
+            const input=scbaAirpackLocationPicker();
+            if(input)return input;
+            await sleep(125);
+        }
+        return null;
+    }
+
+    async function scbaAirpackChooseNativeLocation(loc, selectedIds,report) {
+        const expected=SCBA_AIRPACK_LOCATIONS
+            .filter(item=>selectedIds.includes(item.id)).map(item=>item.location);
+        const probes=[loc.location,loc.label,
+            loc.location.split(':')[0]].filter((value,index,all)=>
+                value && all.indexOf(value)===index);
+        for(const term of probes) {
+            const input=await scbaAirpackWaitLocationPicker(1400);
+            if(!input)throw new Error('Vector location picker closed before '+loc.label+'.');
+            input.focus();
+            input.click();
+            nativeSetInput(input,term);
+            const started=Date.now();
+            while(Date.now()-started<3500){
+                await sleep(130);
+                const current=scbaAirpackLocationPicker();
+                if(!current)continue;
+                const listId=current.getAttribute('aria-controls');
+                const list=listId?document.getElementById(listId):null;
+                const options=[...(list || document).querySelectorAll(
+                    '[role="option"],[id*="-option-"]')].filter(el=>
+                    visible(el) && loc.exact.test(clean(el.innerText || el.textContent || '')));
+                if(!options.length)continue;
+                if(options.length!==1)
+                    throw new Error('Multiple native Vector options match '+loc.location+'.');
+                const target=options[0];
+                // Same known React-select selection gesture as Vector PPE.
+                target.dispatchEvent(new MouseEvent('mousedown',
+                    {bubbles:true,cancelable:true}));
+                await sleep(220);
+                let chosen=scbaAirpackSelectedLocationLabels(
+                    scbaAirpackLocationPicker());
+                if(!chosen.includes(loc.location) && visible(target)){
+                    target.click(); // React-select variant with click handler.
+                    await sleep(220);
+                    chosen=scbaAirpackSelectedLocationLabels(
+                        scbaAirpackLocationPicker());
+                }
+                if(chosen.some(value=>!expected.includes(value)) ||
+                    new Set(chosen).size!==chosen.length)
+                    throw new Error('Vector selected an unexpected or duplicate location. Filters were not applied.');
+                if(chosen.includes(loc.location)) {
+                    if(report)report('Vector location selected: '+loc.label);
+                    return;
+                }
+                throw new Error('Vector did not confirm '+loc.location+' as a selected location chip.');
+            }
+        }
+        throw new Error('Vector did not offer the exact location '+loc.location+
+            '. No equipment inspection was submitted.');
+    }
+
+    async function scbaAirpackEnsureNativeFilters(selectedIds,report) {
+        if(getRun())throw new Error('Finish the active PPE check before searching SCBA airpacks.');
+        const requested=SCBA_AIRPACK_LOCATIONS.filter(loc=>selectedIds.includes(loc.id));
+        if(!requested.length)throw new Error('Choose at least one SCBA location.');
+        if(!scbaAirpackStandardTable())
+            throw new Error('Open Vector Equipment > Standard before finding airpacks.');
+        // The native name search is independent from the location filter.
+        const search=getSearchInput();
+        if(search && clean(search.value)){
+            nativeSetInput(search,'');
+            await sleep(320);
+        }
+        // Always clear inherited Pool / Responsible Party / other filters,
+        // even when the visible location chips already match. Otherwise a
+        // hidden extra filter could silently omit airpacks from the scan.
+        if(report)report('Selecting locations in Vector Equipment > Standard...');
+        const findButton=label=>[...document.querySelectorAll('button,[role="button"]')]
+            .find(btn=>visible(btn) &&
+                (uiEquals(btn.getAttribute('aria-label') || '',label) ||
+                 uiEquals(btn.innerText || btn.textContent || '',label)));
+        let input=scbaAirpackLocationPicker();
+        if(!input){
+            // Same "Open filter options" control used by PPE.
+            const open=findButton('Open filter options') ||
+                findButton('Filters') || findVectorNavigationTarget('Filters');
+            if(!open)throw new Error('Vector Equipment Filters button was not found.');
+            open.click();
+            input=await scbaAirpackWaitLocationPicker();
+        }
+        if(!input)throw new Error('Vector Standard Location React-select filter was not found.');
+        // Clear the previous draft filters so another Location / Pool /
+        // Responsible Party condition cannot silently suppress airpacks.
+        const clear=findButton('Clear Filters');
+        if(!clear)throw new Error('Vector did not show Clear Filters.');
+        clear.click();
+        await sleep(220);
+        input=await scbaAirpackWaitLocationPicker(700);
+        if(!input){
+            const reopen=findButton('Open filter options') ||
+                findButton('Filters') || findVectorNavigationTarget('Filters');
+            reopen?.click();
+            input=await scbaAirpackWaitLocationPicker();
+        }
+        if(!input)throw new Error('Vector location picker closed after Clear Filters.');
+        const clearedAt=Date.now();
+        while(Date.now()-clearedAt<1600 &&
+              scbaAirpackSelectedLocationLabels(input).length){
+            await sleep(125);
+            input=scbaAirpackLocationPicker() || input;
+        }
+        if(scbaAirpackSelectedLocationLabels(input).length)
+            throw new Error('Vector retained old location chips after Clear Filters.');
+        for(const loc of requested){
+            await scbaAirpackChooseNativeLocation(loc,selectedIds,report);
+        }
+        const selected=scbaAirpackSelectedLocationLabels(
+            scbaAirpackLocationPicker());
+        if(selected.length!==requested.length ||
+            requested.some(loc=>!selected.includes(loc.location)) ||
+            selected.some(label=>!requested.some(loc=>loc.location===label)))
+            throw new Error('Vector selected locations changed before Apply Filters. No scan started.');
+        const apply=findButton('Apply Filters');
+        if(!apply)throw new Error('Vector did not show Apply Filters.');
+        apply.click();
+        // The applied chips are the receipt; a successful button click alone
+        // is NOT enough. This cannot accept the unfiltered 2,069-row inventory.
+        for(let attempt=0;attempt<100;attempt++){
+            if(scbaAirpackStandardTable() &&
+                scbaAirpackFilterScope(selectedIds).ready){
+                if(report)report('Selected Vector locations confirmed. Finding SCBA airpacks...');
+                return;
+            }
+            await sleep(220);
+        }
+        const scope=scbaAirpackFilterScope(selectedIds);
+        throw new Error('Vector did not confirm requested Standard location filters. '+
+            (scope.missing.length?'Missing: '+scope.missing.join('; ')+'. ':'')+
+            (scope.extra.length?'Extra: '+scope.extra.join('; ')+'. ':'')+
+            'No inspection was submitted.');
+    }
+
+    function isScbaAirpackStandardItem(item) {
+        // SCBA location text on its own is not proof of an airpack.
+        const type = clean(item.name + ' ' + item.pool).toLowerCase();
+        if (/\b(face\s*(?:mask|piece)|mask|cylinder|bottle|spare\s*air|battery|charger|hose|regulator)\b/i.test(type))
+            return false;
+        return /\b(?:air\s?packs?|scba(?:\s*(?:air\s?pack|pack|frame|harness|backpack))?|self[-\s]*contained\s+breathing\s+apparatus)\b/i.test(type);
+    }
+
+    function scbaAirpackLocation(item) {
+        return SCBA_AIRPACK_LOCATIONS.find(loc => loc.exact.test(clean(item.location))) || null;
+    }
+
+    function scbaAirpackVisibleRows() {
+        const target = scbaAirpackStandardTable();
+        if (!target) throw new Error('Open Equipment > Standard before looking for SCBA airpacks.');
+        const {table,labels} = target;
+        const indexes = Object.fromEntries(
+            ['name','pool','location','item status'].map(name=>[name,labels.indexOf(name)])
+        );
+        const rows = [...table.querySelectorAll('tbody tr,[role="rowgroup"] [role="row"]')];
+        const result=[];
+        for(const row of rows){
+            const cells=[...row.querySelectorAll(':scope > td,:scope > [role="cell"]')];
+            if(cells.length < labels.length) continue; // transient partial rendering
+            const name=clean(cells[indexes.name]?.innerText || cells[indexes.name]?.textContent || '');
+            const pool=clean(cells[indexes.pool]?.innerText || cells[indexes.pool]?.textContent || '');
+            const itemLocation=clean(cells[indexes.location]?.innerText || cells[indexes.location]?.textContent || '');
+            const status=clean(cells[indexes['item status']]?.innerText ||
+                cells[indexes['item status']]?.textContent || '');
+            const anchor=cells[indexes.name]?.querySelector('a[href]');
+            const href=anchor?.getAttribute('href') || '';
+            let url=null;
+            try {if(href)url=new URL(href,window.location.href);} catch {}
+            const safeHref=url && url.origin === window.location.origin &&
+                url.pathname !== '/main/asset-manager' && !/^javascript:/i.test(href)
+                ? url.href : '';
+            if(!name || !pool || !itemLocation || !status) continue;
+            const item={name,pool,location:itemLocation,status,href:safeHref};
+            const scope=scbaAirpackLocation(item);
+            if(scope && isScbaAirpackStandardItem(item)) {
+                item.scope=scope.id;
+                result.push(item);
+            }
+        }
+        return result;
+    }
+
+    function scbaAirpackRange() {
+        const table=scbaAirpackStandardTable()?.table;
+        if(!table)return null;
+        // Read the native paginator. Do not derive a total from the number of
+        // visible items (Vector defaults to ten per page).
+        const pagination=[...document.querySelectorAll(
+            '[class*="paginator"],[class*="pagination"],[aria-label*="pagination" i]')]
+            .filter(el=>visible(el) && !el.closest('#' + PANEL_ID + ',#' + OVERLAY_ID))
+            .map(el=>clean(el.innerText || el.textContent || ''));
+        // The SCBA review overlay is appended after native content. Do not
+        // look only at the last 900 characters, which can omit the native
+        // paginator beneath the review overlay.
+        pagination.push(clean(document.body.innerText || '').slice(0,12000));
+        for(const line of pagination){
+            const match=line.match(/\b(\d+)\s*[-–]\s*(\d+)\s+of\s+(\d+)\b/i);
+            if(!match)continue;
+            const first=Number(match[1]),last=Number(match[2]),total=Number(match[3]);
+            if(first>=1&&last>=first&&total>=last&&total<=1000&&last-first<200)
+                return {first,last,total};
+        }
+        return null;
+    }
+
+    async function scbaAirpackWaitForCompletePage(range,timeoutMs=14000) {
+        const expected=range.last-range.first+1;
+        const started=Date.now();
+        let unchangedSince=0, signature='';
+        while(Date.now()-started<timeoutMs) {
+            const t=scbaAirpackStandardTable();
+            const current=scbaAirpackRange();
+            const rows=t ? [...t.table.querySelectorAll(
+                'tbody tr,[role="rowgroup"] [role="row"]')] : [];
+            const complete=!!t && !!current && current.first===range.first &&
+                current.last===range.last && current.total===range.total &&
+                rows.length===expected && rows.every(row=>{
+                    const cells=[...row.querySelectorAll(':scope > td,:scope > [role="cell"]')];
+                    return cells.length>=t.labels.length && [
+                        'name','pool','location','item status'
+                    ].every(label=>clean(cells[t.labels.indexOf(label)]?.textContent || '').length>0);
+                });
+            if(complete) {
+                const currentSignature=scbaAirpackNativeSignature();
+                if(currentSignature && currentSignature===signature) {
+                    if(Date.now()-unchangedSince>=500)return true;
+                } else {signature=currentSignature;unchangedSince=Date.now();}
+            } else {signature='';unchangedSince=0;}
+            await sleep(140);
+        }
+        throw new Error('Standard equipment page '+range.first+'-'+range.last+
+            ' did not finish loading. No official SCBA inspection was changed.');
+    }
+
+    function scbaAirpackNativeSignature() {
+        const target=scbaAirpackStandardTable();
+        if(!target)return '';
+        return [...target.table.querySelectorAll('tbody tr,[role="rowgroup"] [role="row"]')]
+            .map(row => clean(row.innerText || row.textContent || '').slice(0,150))
+            .join('|');
+    }
+
+    async function scbaAirpackWaitForPageChange(oldSignature,oldRange,ms=13000) {
+        const begun=Date.now();let stableAt=0,last='',range=null;
+        while(Date.now()-begun<ms){
+            const target=scbaAirpackStandardTable();
+            range=scbaAirpackRange();
+            const signature=scbaAirpackNativeSignature();
+            const changed=target&&range&&signature &&
+                signature!==oldSignature && range.first!==oldRange.first;
+            if(changed){
+                const fingerprint=range.first+'-'+range.last+'|'+signature;
+                if(fingerprint!==last){last=fingerprint;stableAt=Date.now();}
+                if(Date.now()-stableAt>550)return range;
+            } else {stableAt=0;last='';}
+            await sleep(150);
+        }
+        throw new Error('Standard equipment page did not settle after pagination. No SCBA check was submitted.');
+    }
+
+    async function scbaAirpackReadInventory(report, selectedIds) {
+        if(scbaAirpackBusy)throw new Error('An SCBA airpack search is already running.');
+        if(getRun())throw new Error('An existing PPE inspection is active. Finish it first.');
+        const scope=scbaAirpackFilterScope(selectedIds);
+        if(!scope.requested.length)
+            throw new Error('Choose at least one location to check.');
+        if(!scope.ready)throw new Error(
+            'Vector filters do not match the selected SCBA locations. '+
+            (scope.missing.length?'Add: '+scope.missing.join('; ')+'. ':'')+
+            (scope.extra.length?'Remove: '+scope.extra.join('; ')+'. ':'')+
+            'Automatic location filter selection did not take effect. No SCBA check was submitted.'
+        );
+        if(!scbaAirpackStandardTable())throw new Error('Equipment > Standard inventory is not ready.');
+        const seen=new Map();
+        const original=scbaAirpackRange();
+        if(!original)throw new Error('Native Standard equipment paginator is unavailable. Cannot claim a full inventory.');
+        scbaAirpackBusy=true;
+        let pages=0,range=original;
+        try {
+            // First page ensures no rows from a prior portion of the list are omitted.
+            for(let guard=0;range.first>1&&guard<120;guard++){
+                const button=getPaginationControl('previous');
+                if(!paginationControlEnabled(button))
+                    throw new Error('Cannot reach the first Standard equipment page.');
+                const before=scbaAirpackNativeSignature(),prior=range;
+                button.click();range=await scbaAirpackWaitForPageChange(before,prior);
+            }
+            if(range.first!==1)throw new Error('Could not reach the first Standard equipment page.');
+            for(let guard=0;guard<120;guard++){
+                const current=scbaAirpackRange();
+                if(!current||current.total!==original.total||current.first!==range.first)
+                    throw new Error('Standard equipment totals or active page changed during scan.');
+                await scbaAirpackWaitForCompletePage(current);
+                const entries=scbaAirpackVisibleRows().filter(item=>
+                    scope.requested.includes(item.scope));
+                for(const item of entries){
+                    const key=item.href || [item.scope,item.pool,item.name].join('|');
+                    if(seen.has(key)){
+                        const other=seen.get(key);
+                        // Two same-name/same-pool assets with no unique native
+                        // detail link cannot be silently merged into one pack.
+                        if(!item.href || !other.href ||
+                            other.location!==item.location || other.pool!==item.pool)
+                            throw new Error('Ambiguous SCBA asset identity. Resolve the duplicate in Vector before recording.');
+                    }else seen.set(key,item);
+                }
+                pages++;
+                if(report)report('Scanning Equipment > Standard: page '+pages+
+                    ' of about '+Math.ceil(current.total/(current.last-current.first+1))+
+                    ', '+seen.size+' SCBA candidates...');
+                if(current.last>=current.total)break;
+                const button=getPaginationControl('next');
+                if(!paginationControlEnabled(button))
+                    throw new Error('Standard equipment has more pages but Next is unavailable.');
+                const old=scbaAirpackNativeSignature();
+                button.click();
+                range=await scbaAirpackWaitForPageChange(old,current);
+            }
+            if(!range||range.last!==original.total)
+                throw new Error('SCBA inventory search ended before the last Standard equipment page.');
+            if(!seen.size)throw new Error('No airpacks matched the selected locations. Inspect the actual Pool names; no equipment was guessed.');
+            return {items:[...seen.values()],pages,totalRows:original.total,scope:scope.requested,
+                capturedAt:new Date().toISOString(),complete:true};
+        } finally {
+            scbaAirpackBusy=false;
+            // Vector's page view has changed but no record was edited.
+            // Deliberately leave the native list on its last scanned page,
+            // rather than performing unverified extra clicks to restore it.
+        }
+    }
+
+
+    // SCBA Frame is Standard equipment. This operator-reviewed handoff uses
+    // the REAL item's Vector checklist. It does not assert the unknown native
+    // template, sign, submit, or claim an inspection from this local draft.
+
+    // A normal SCBA passes all eleven verified checks. Failed/missing gear
+    // expands its own detailed question list and requires an explanation.
+    function scbaAirpackBeginExceptionReview(item,kind) {
+        item.draftResult=kind;
+        item.comment='';
+        if(kind==='issue') {
+            // Proposed PASS elsewhere; the operator must mark actual failures.
+            item.questionAnswers=SCBA_FRAME_INSPECTION_QUESTIONS.map(()=> 'pass');
+        } else if(kind==='missing') {
+            // Missing is a whole-unit FAIL for all 11 checks, as requested.
+            // These are proposed inspection answers, not proof of tests performed.
+            item.questionAnswers=SCBA_FRAME_INSPECTION_QUESTIONS.map(()=> 'fail');
+        } else {
+            item.questionAnswers=null;
+        }
+    }
+
+    function scbaAirpackReviewProblem(item) {
+        if(item.draftResult==='present_working')return '';
+        if(!['issue','missing'].includes(item.draftResult))
+            return 'Choose Pass, Fail / Issue, or Missing for '+item.name+'.';
+        const note=clean(item.comment || '');
+        if(!note)return item.name+': explain the failed or missing SCBA.';
+        if(note.length>1000)return item.name+': comment must be 1,000 characters or fewer.';
+        if(!Array.isArray(item.questionAnswers) ||
+            item.questionAnswers.length!==SCBA_FRAME_INSPECTION_QUESTIONS.length ||
+            item.questionAnswers.some(v=>!['pass','fail',''].includes(v)))
+            return item.name+': inspection question selections are invalid.';
+        if(item.draftResult==='missing' &&
+            item.questionAnswers.some(value=>value!=='fail'))
+            return item.name+': a missing airpack must have all 11 checks marked Failed.';
+        if(!item.questionAnswers.some(v=>v==='fail'))
+            return item.name+': mark at least one failed inspection question.';
+        return '';
+    }
+
+    function scbaAirpackReadyNativeAnswers(item) {
+        if(item.result==='present_working')
+            return SCBA_FRAME_INSPECTION_QUESTIONS.map(()=> 'pass');
+        if(!['issue','missing'].includes(item.result))return null;
+        if(!Array.isArray(item.questionAnswers) ||
+           item.questionAnswers.length!==SCBA_FRAME_INSPECTION_QUESTIONS.length ||
+           item.questionAnswers.some(v=>!['pass','fail'].includes(v)) ||
+           !item.questionAnswers.some(v=>v==='fail') ||
+           (item.result==='missing' && item.questionAnswers.some(v=>v!=='fail')) ||
+           !clean(item.comment || ''))return null;
+        return item.questionAnswers.slice();
+    }
+
+    function scbaAirpackNativeQueue(scan) {
+        if(!scan?.complete || !Array.isArray(scan.items) || !scan.items.length)
+            throw new Error('Find the complete SCBA inventory before starting checks.');
+        const items=scan.items.map(item=>{
+            if(!SCBA_AIRPACK_LOCATIONS.some(loc=>loc.id===item.scope))
+                throw new Error('SCBA asset location is outside the selected sites.');
+            if(!['present_working','issue','missing'].includes(item.draftResult))
+                throw new Error('Review each SCBA result before starting native checks.');
+            const reviewProblem=scbaAirpackReviewProblem(item);
+            if(reviewProblem)throw new Error(reviewProblem);
+            let url;
+            try {url=new URL(item.href,location.href);}catch {}
+            if(!url || url.origin!==location.origin ||
+                !new RegExp('^/app/equipment/Standard/pool/'+
+                    SCBA_FRAME_POOL+'/[0-9]+/item/?$','i').test(url.pathname))
+                throw new Error('Vector has no safe native equipment link for '+item.name+'.');
+            return {
+                name:item.name,scope:item.scope,location:item.location,
+                pool:item.pool,href:url.href,result:item.draftResult,
+                questionAnswers:Array.isArray(item.questionAnswers)?
+                    item.questionAnswers.slice():null,
+                comment:clean(item.comment || '')
+            };
+        });
+        if(new Set(items.map(item=>item.href)).size!==items.length)
+            throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.78'};
+    }
+
+    function scbaAirpackReadNativeQueue() {
+        let entry=null;
+        try {entry=JSON.parse(sessionStorage.getItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY)||'null');}
+        catch {}
+        if(!entry || !Array.isArray(entry.items) ||
+            !Number.isInteger(entry.index) || entry.index<0 ||
+            entry.index>=entry.items.length ||
+            Date.now()-entry.createdAt>12*60*60*1000) {
+            sessionStorage.removeItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY);
+            return null;
+        }
+        return entry;
+    }
+
+    function scbaAirpackBeginNativeChecks(scan,physicallyConfirmed,autoSubmitApproved=false) {
+        if(!physicallyConfirmed)
+            throw new Error('Confirm that you physically checked the selected airpacks and marked exceptions.');
+        if(!autoSubmitApproved)
+            throw new Error('Authorize submission of the reviewed SCBA inspections before starting.');
+        if(getRun())
+            throw new Error('Finish the active PPE inspection before starting SCBA checks.');
+        const queue={...scbaAirpackNativeQueue(scan),
+            physicalInspectionConfirmedAt:new Date().toISOString(),
+            autoSubmitApproved:true};
+        // Save first, navigate second, and never create an official record by
+        // assuming that a local select value is a completed inspection.
+        GM_setValue(SCBA_AIRPACK_DRAFT_KEY,{
+            ...scan,savedAt:new Date().toISOString(),draftOnly:true,
+            nativeCheckStarted:true
+        });
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify(queue));
+        location.assign(queue.items[0].href);
+        return queue;
+    }
+
+    function scbaAirpackAdvanceNativeQueue(queue,confirmed) {
+        if(!confirmed)throw new Error('Confirm the official native Vector inspection was submitted first.');
+        if(!queue || !['native_form_opened','form_prefilled'].includes(queue.phase))
+            throw new Error('This airpack inspection has not been opened in Vector.');
+        const item=queue.items[queue.index];
+        const page=new URL(location.href),target=new URL(item.href);
+        if(page.origin!==target.origin || page.pathname!==target.pathname)
+            throw new Error('Return to the exact SCBA asset page before advancing.');
+        if(typeof findChooserRoot==='function' && findChooserRoot())
+            throw new Error('Close or complete the native inspection chooser before advancing.');
+        const confirmedItems=[...(queue.operatorConfirmed||[]),{
+            name:item.name,href:item.href,requestedResult:item.result,
+            questionAnswers:item.questionAnswers,comment:item.comment || '',
+            operatorConfirmedAt:new Date().toISOString(),officialReceiptVerified:false
+        }];
+        if(queue.index+1>=queue.items.length) {
+            sessionStorage.removeItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY);
+            GM_setValue(SCBA_AIRPACK_DRAFT_KEY+'-handoff',{
+                items:confirmedItems,finishedAt:new Date().toISOString(),
+                officialReceiptVerified:false,operatorReportedOnly:true
+            });
+            return {done:true,count:confirmedItems.length};
+        }
+        const next={...queue,index:queue.index+1,phase:'open_item',
+            operatorConfirmed:confirmedItems};
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify(next));
+        location.assign(next.items[next.index].href);
+        return {done:false,index:next.index,count:confirmedItems.length};
+    }
+
+
+    // Some Vector Standard variants add a checkmark/icon before "Passed"
+    // in the native button label. The shared PPE exactButtons() matcher can
+    // be too strict for that variant, so use a scoped exact word after icons.
+    function scbaAirpackNativeResponseButtons(label) {
+        return [...document.querySelectorAll('button')]
+            .filter(button=>visible(button) &&
+                !button.closest('#'+PANEL_ID+',#'+OVERLAY_ID+','+
+                    '#'+SCBA_AIRPACK_NATIVE_BANNER_ID) &&
+                uiEquals(uiText(button.innerText||button.textContent||'')
+                    .replace(/^[^A-Za-z]+/,''),label));
+    }
+
+    // Once the inspector confirms the physical SCBA checks, the program can
+    // select the exact already-verified native SCBA Inspection checklist.
+    // This is only a chooser click: NEVER click Submit Inspection.
+    // Save the once-only latch *before* clicking to prevent a duplicate
+    // form if Vector rerenders or SPA navigation races the interval.
+    function scbaAirpackSelectNativeTemplate() {
+        const queue=scbaAirpackReadNativeQueue();
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(queue.inspectionVersion) ||
+            queue.phase!=='native_form_opened' ||
+            queue.chooserSelectionAttemptedAt || getRun())return false;
+        const item=queue.items[queue.index];
+        if(!item)return false;
+        let target;
+        try{target=new URL(item.href,location.href);}catch{return false;}
+        if(target.origin!==location.origin ||
+            target.pathname.replace(/\/$/,'')!==location.pathname.replace(/\/$/,''))return false;
+        if(currentInspection())return false;
+        const root=typeof findChooserRoot==='function'?findChooserRoot():null;
+        if(!root || !visible(root))return false;
+        const card=typeof findInspectionCardInChooser==='function'?
+            findInspectionCardInChooser(SCBA_FRAME_INSPECTION_TITLE):null;
+        if(!card || !visible(card) ||
+            card.disabled || card.getAttribute('aria-disabled')==='true'){
+            // Do not guess which native checklist to open. Report once.
+            if(!queue.chooserBlockedReported){
+                sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
+                    JSON.stringify({...queue,chooserBlockedReported:true}));
+                setStatus('SCBA paused at the Vector inspection chooser: exact SCBA Inspection '+
+                    'template was not identified. No answers or submission were made.',false);
+                void rebelCommandEvent('scba_handoff_blocked',{
+                    success:false,errorType:'scba_template_not_found',
+                    errorMessage:'Exact SCBA Inspection card not found in native chooser.',
+                    metadata:{stage:'template_chooser',template:'113271'}});
+            }
+            return false;
+        }
+        // Choosing by visible title alone is insufficient for submitting any
+        // inspection. The existing prefill step separately verifies the
+        // actual native template id 113271 and eleven question controls.
+        const next={...queue,chooserSelectionAttemptedAt:Date.now(),
+            openedAt:Date.now(),chooserBlockedReported:false};
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify(next));
+        try{
+            card.click();
+        }catch(error){
+            setStatus('SCBA chooser click failed. Open the exact SCBA Inspection card '+
+                'manually and review the form. '+(error?.message||String(error)),false);
+            void rebelCommandEvent('scba_handoff_blocked',{
+                success:false,errorType:'scba_chooser_click_failed',
+                errorMessage:telemetrySafeErrorMessage(error?.message||'Chooser click failed'),
+                metadata:{stage:'template_chooser',template:'113271'}});
+            return false;
+        }
+        setStatus('SCBA: selected the official SCBA Inspection checklist. '+
+            'Verifying form 113271 before filling reviewed answers. Nothing submitted.');
+        return true;
+    }
+
+    // The 11-question Standard SCBA frame form was identified directly in
+    // Vector, not inferred from the separate seven-question PPE mask form.
+    // This step only PREFILLS answers. The separately authorized submit
+    // state machine sends the native form once, then verifies completion.
+    async function scbaAirpackPrefillVerifiedForm() {
+        if(scbaAirpackFormBusy)return false;
+        const queue=scbaAirpackReadNativeQueue();
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(queue.inspectionVersion) ||
+            queue.phase!=='native_form_opened' || getRun() ||
+            !Number.isFinite(queue.openedAt) ||
+            Date.now()-queue.openedAt>180000 || Date.now()<queue.openedAt)return false;
+        const inspection=currentInspection();
+        if(!inspection)return false;
+        const item=queue.items[queue.index];
+        const answers=scbaAirpackReadyNativeAnswers(item);
+        // If a missing unit could not be physically checked, leave blank
+        // questions alone. It requires careful manual native handling.
+        if(!answers)return false;
+        if(inspection.template!==SCBA_FRAME_INSPECTION_TEMPLATE) {
+            sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
+                JSON.stringify({...queue,phase:'wrong_template',formTemplate:inspection.template}));
+            setStatus('SCBA stopped: Vector opened template '+inspection.template+
+                ', expected verified Standard SCBA Inspection 113271. Nothing was submitted.',false);
+            return false;
+        }
+        if(isCompletedInspectionView(SCBA_FRAME_INSPECTION_TITLE) ||
+            !uiIncludes(document.body?.innerText||'',SCBA_FRAME_INSPECTION_TITLE) ||
+            !exactButton('Submit Inspection'))return false;
+        const passed=scbaAirpackNativeResponseButtons('Passed');
+        const failed=scbaAirpackNativeResponseButtons('Failed');
+        if(passed.length!==11 || failed.length!==11) {
+            sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
+                JSON.stringify({...queue,phase:'form_review_required'}));
+            setStatus('SCBA form layout changed: expected 11 Passed and 11 Failed buttons, got '+
+                passed.length+' and '+failed.length+'. No answers or submission were made.',false);
+            return false;
+        }
+        const body=uiText(document.body?.innerText||'').toLowerCase();
+        let last=-1;
+        for(const title of SCBA_FRAME_INSPECTION_QUESTIONS) {
+            const index=body.indexOf(uiText(title).toLowerCase(),last+1);
+            if(index<0 || index<=last){
+                sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
+                    JSON.stringify({...queue,phase:'form_review_required'}));
+                setStatus('SCBA checklist questions do not match the live-verified '+
+                    '11-question form. No answers or submission were made.',false);
+                return false;
+            }
+            last=index;
+        }
+        if([...document.querySelectorAll('textarea')].some(visible) ||
+            enabledButton('Click to Sign') || enabledButton('Done')) {
+            sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
+                JSON.stringify({...queue,phase:'form_review_required'}));
+            setStatus('SCBA now requires additional form fields. Complete this form manually.',false);
+            return false;
+        }
+        // Store a no-retry state BEFORE clicking anything. A reload or
+        // unexpected error must never toggle controls a second time.
+        scbaAirpackFormBusy=true;
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
+            JSON.stringify({...queue,phase:'form_prefill_in_progress',
+                formTemplate:inspection.template,formInstance:inspection.instance}));
+        try {
+            for(let i=0;i<answers.length;i++){
+                // Vector hides a completed response pair after every click.
+                // Requery the live remaining controls, not stale references.
+                const remainingPass=scbaAirpackNativeResponseButtons('Passed');
+                const remainingFail=scbaAirpackNativeResponseButtons('Failed');
+                if(remainingPass.length!==answers.length-i ||
+                   remainingFail.length!==answers.length-i)
+                    throw new Error('Vector question controls changed after item '+i+
+                        '. Stop and review the existing form.');
+                const controls=answers[i]==='pass'?remainingPass:remainingFail;
+                controls[0].click();
+                await sleep(230);
+            }
+            sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
+                JSON.stringify({...queue,phase:'form_prefilled',
+                    formTemplate:inspection.template,formInstance:inspection.instance}));
+            setStatus('SCBA '+item.name+': 11 reviewed answers filled in official '+
+                'template 113271. Submitting confirmed checks and checking Vector receipt. '+
+                'If an inspection has an exception, native FAILURE DETAILS still requires review.');
+            return true;
+        } catch(error) {
+            setStatus('SCBA prefill stopped partway through: '+error.message+
+                '. Review the existing form manually; no automatic retry or submit.',false);
+            return false;
+        } finally {scbaAirpackFormBusy=false;}
+    }
+
+    // Verified against live Vector SCBA Inspection failure modal on Voyager:
+    //   .modal.fade.in > "FAILURE DETAILS", selectable SCBA item row,
+    //   "Failure Notes(*)" text area, and a SECOND Submit Inspection.
+    // Filling the note is reversible; the operator still submits the form.
+
+    // User authorizes the complete tour submission at the reviewed physical
+    // confirmation checkbox. Unlike earlier builds, do not strand an all-Pass
+    // SCBA at a filled but unsubmitted official Vector form.
+    // Vector's actual 11 native steps each have class
+    // "inspection__step-item completed" and one selected Passed/Failed
+    // response. Read those rows directly instead of flattened body.innerText
+    // which can temporarily lag the last React state update and report
+    // an erroneous mismatch immediately after the eleventh click.
+    function scbaAirpackOfficialAnswersMatch(item) {
+        const expected=scbaAirpackReadyNativeAnswers(item);
+        if(!expected || expected.length!==SCBA_FRAME_INSPECTION_QUESTIONS.length)
+            return false;
+        const nativeSteps=[...document.querySelectorAll('.inspection__step-item')]
+            .filter(el=>visible(el) &&
+                !el.closest('#'+PANEL_ID+',#'+OVERLAY_ID+','+
+                    '#'+SCBA_AIRPACK_NATIVE_BANNER_ID));
+        if(nativeSteps.length!==11)return false;
+        if([...document.querySelectorAll('textarea')].some(visible) ||
+            enabledButton('Click to Sign') || enabledButton('Done'))return false;
+        return nativeSteps.every((step,i)=>{
+            if(!step.classList?.contains('completed'))return false;
+            const text=uiText(step.innerText||step.textContent||'');
+            if(!uiIncludes(text,SCBA_FRAME_INSPECTION_QUESTIONS[i]))return false;
+            const selected=(text.match(/\bPassed\b|\bFailed\b/gi)||[])
+                .map(x=>x.toLowerCase());
+            return selected.length===1 &&
+                selected[0]===(expected[i]==='pass'?'passed':'failed');
+        });
+    }
+
+    // A prior version could put an already-answered form into a permanent
+    // form_review_required state because it checked flattened text during
+    // transient React hydration. Resume only if the exact previously
+    // started form instance still has 11 completed, matching native rows.
+    // Never re-click any answers; never resume after ANY submit attempt.
+    function scbaAirpackRecoverCompletedForm() {
+        const q=scbaAirpackReadNativeQueue();
+        if(!q || !['form_review_required','form_prefill_in_progress'].includes(q.phase) ||
+            !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
+            q.submitAttemptedAt || getRun())return false;
+        const item=q.items[q.index],ins=currentInspection();
+        if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
+            !q.formInstance || q.formInstance!==ins.instance ||
+            q.formTemplate!==ins.template ||
+            isCompletedInspectionView(SCBA_FRAME_INSPECTION_TITLE) ||
+            !scbaAirpackOfficialAnswersMatch(item))return false;
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+            ...q,phase:'form_prefilled',reviewReason:'',
+            nativeFormVerifiedAt:Date.now(),submitValidationPendingSince:null
+        }));
+        setStatus('SCBA '+item.name+': recovered the 11 already-selected native '+
+            'responses without clicking them again. Checking authorization '+
+            'and submitting once; no duplicate inspection is started.');
+        return true;
+    }
+
+    function scbaAirpackSubmitReviewedForm() {
+        const q=scbaAirpackReadNativeQueue();
+        if(!q || q.phase!=='form_prefilled' ||
+            !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
+            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(q.inspectionVersion) || getRun())return false;
+        const item=q.items[q.index],ins=currentInspection();
+        if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
+            ins.instance!==q.formInstance || q.submitAttemptedAt)return false;
+        if(isCompletedInspectionView(SCBA_FRAME_INSPECTION_TITLE))return false;
+        if(!scbaAirpackOfficialAnswersMatch(item)){
+            // The last native answer may still be hydrating. Wait for stable
+            // evidence instead of treating one early mismatch as permanent.
+            const now=Date.now();
+            const first=q.submitValidationPendingSince || now;
+            if(now-first<12000){
+                sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+                    ...q,submitValidationPendingSince:first
+                }));
+                return false;
+            }
+            sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+                ...q,phase:'form_review_required',
+                reviewReason:'Native checklist not fully verified after 12 seconds; no submit attempted.'
+            }));
+            setStatus('SCBA '+item.name+': native answer verification did not settle. '+
+                'No submission was attempted. Review the form manually.',false);
+            return false;
+        }
+        const submits=[...document.querySelectorAll('button,[role="button"]')]
+            .filter(button=>visible(button) &&
+                !button.closest('#'+PANEL_ID+',#'+OVERLAY_ID+','+
+                    '#'+SCBA_AIRPACK_NATIVE_BANNER_ID) &&
+                !button.closest('.modal.fade.in,[role="dialog"]') &&
+                uiEquals(button.innerText||button.textContent||'','Submit Inspection') &&
+                !button.disabled && button.getAttribute('aria-disabled')!=='true');
+        if(submits.length!==1){
+            setStatus('SCBA '+item.name+': unique native Submit Inspection control could '+
+                'not be verified. Nothing was submitted automatically.',false);
+            return false;
+        }
+        const now=Date.now();
+        // One-shot durable latch BEFORE the consequential click. A reload
+        // or unconfirmed response cannot submit a second inspection.
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+            ...q,phase:'native_submit_clicked',submitAttemptedAt:now,
+            submittedFormInstance:ins.instance
+        }));
+        submits[0].click();
+        setStatus('SCBA '+item.name+': native Submit Inspection clicked once after '+
+            'physical review. Waiting for Vector completion evidence; not yet counted complete.');
+        return true;
+    }
+
+    function scbaAirpackCompletedReceipt() {
+        const q=scbaAirpackReadNativeQueue();
+        if(!q || !q.autoSubmitApproved ||
+           !['native_submit_clicked','native_failure_submit_clicked'].includes(q.phase) ||
+           !q.submitAttemptedAt)return false;
+        const ins=currentInspection();
+        const item=q.items[q.index];
+        if(!item)return false;
+        // History navigation is visible on unfinished Vector forms too.
+        // Require an explicit completed-date banner, never just disappearance
+        // of Submit while the server or React route is still loading.
+        const text=uiText(document.body?.innerText||'');
+        const completionBadge=/\bComplete(?:d)? on [A-Za-z]+ \d{1,2}, \d{4}\b/i.test(text);
+        const sameForm=!!ins && ins.template===SCBA_FRAME_INSPECTION_TEMPLATE &&
+            ins.instance===q.submittedFormInstance && completionBadge &&
+            isCompletedInspectionView(SCBA_FRAME_INSPECTION_TITLE);
+        // Live Voyager regression: after the completed native 113271
+        // inspection returned to AP-04, Vector rendered an Item Log link
+        // whose accessible text was "SCBA InspectionCOMPLETE" (no space).
+        // The old row parser looked for a word-boundary before COMPLETE,
+        // so it could NEVER match that real DOM and left 1/7 hanging.
+        // Identify a positive receipt by exact FORM INSTANCE href and
+        // the exact native SCBA Inspection + COMPLETE status badge.
+        // This check runs only on the exact Standard item with verified
+        // visible identity; an arbitrary asset's completed row is rejected.
+        let nativeItemLogProof=false;
+        try {
+            if(!sameForm && !ins && apparatusVerifiedItemPage(item)){
+                const expectedLabel=uiText(SCBA_FRAME_INSPECTION_TITLE).toUpperCase()
+                    .replace(/[^A-Z0-9]/g,'');
+                nativeItemLogProof=[...document.querySelectorAll('a[href]')]
+                    .filter(link=>visible(link) &&
+                        !link.closest('#'+PANEL_ID+',#'+OVERLAY_ID+','+
+                            '#'+SCBA_AIRPACK_NATIVE_BANNER_ID))
+                    .some(link=>{
+                        const id=inspectionFromUrl(link.href);
+                        if(!id || id.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
+                           id.instance!==q.submittedFormInstance)return false;
+                        const label=uiText(link.innerText||link.textContent||'')
+                            .toUpperCase().replace(/[^A-Z0-9]/g,'');
+                        return label===expectedLabel+'COMPLETE' ||
+                            label===expectedLabel+'COMPLETED';
+                    });
+            }
+        }catch {}
+        if(!sameForm && !nativeItemLogProof)return false;
+        const completed={
+            name:item.name,href:item.href,requestedResult:item.result,
+            questionAnswers:item.questionAnswers,comment:item.comment||'',
+            officialReceiptVerified:true,
+            formTemplate:SCBA_FRAME_INSPECTION_TEMPLATE,
+            formInstance:q.submittedFormInstance,
+            proofSource:sameForm?'native_completed_form':'exact_completed_item_log_link',
+            observedAt:new Date().toISOString()
+        };
+        const recorded=[...(q.officialCompleted||[]),completed];
+        if(q.index+1>=q.items.length){
+            GM_setValue(SCBA_AIRPACK_DRAFT_KEY+'-handoff',{
+                items:recorded,finishedAt:new Date().toISOString(),
+                officialReceiptVerified:true,operatorReportedOnly:false
+            });
+            sessionStorage.removeItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY);
+            setStatus('All '+recorded.length+' reviewed SCBA inspections have native '+
+                'completion evidence. Finished without submitting duplicates.');
+            return true;
+        }
+        const next={...q,index:q.index+1,phase:'open_item',
+            officialCompleted:recorded,openedAt:null,formInstance:null,
+            submitAttemptedAt:null,submittedFormInstance:null,
+            chooserSelectionAttemptedAt:null,failureNotePreparedFor:null,
+            failureNoteAttemptedFor:null,failureFinalSubmitAt:null,
+            returnForReceiptAt:null,formTemplate:null};
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify(next));
+        location.assign(next.items[next.index].href);
+        return true;
+    }
+
+    function scbaAirpackFillNativeFailureDetails() {
+        const queue=scbaAirpackReadNativeQueue();
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(queue.inspectionVersion) ||
+            !['form_prefilled','native_form_opened','native_submit_clicked'].includes(queue.phase) ||
+            getRun())return false;
+        const item=queue.items[queue.index];
+        if(!item || !['issue','missing'].includes(item.result) ||
+            !clean(item.comment||''))return false;
+        const inspection=currentInspection();
+        if(!inspection || inspection.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
+            (queue.formInstance && inspection.instance!==queue.formInstance) ||
+            (!queue.formInstance &&
+              (!Number.isFinite(queue.openedAt) ||
+               Date.now()-queue.openedAt>30000 ||
+               Date.now()<queue.openedAt)))return false;
+        const dialogs=[...document.querySelectorAll('.modal.fade.in,[role="dialog"]')]
+            .filter(node=>visible(node) &&
+                uiIncludes(node.innerText||node.textContent||'','FAILURE DETAILS') &&
+                uiIncludes(node.innerText||node.textContent||'','SELECT FAILING ITEMS') &&
+                uiIncludes(node.innerText||node.textContent||'','Failure Notes'));
+        if(dialogs.length!==1)return false;
+        const modal=dialogs[0];
+        const inputs=[...modal.querySelectorAll('textarea,input[placeholder]')]
+            .filter(input=>visible(input) &&
+                uiEquals(clean(input.getAttribute('placeholder')||''),
+                    'Add a note for the failure'));
+        const rows=[...modal.querySelectorAll('.equipment-items__item-list')]
+            .filter(row=>visible(row) &&
+                [...row.querySelectorAll('*')].some(el=>
+                    el.children.length===0 && uiEquals(
+                        clean(el.innerText||el.textContent||''),item.name)));
+        if(inputs.length!==1 || rows.length!==1)return false;
+        const input=inputs[0],row=rows[0];
+        const note=clean(item.comment||'');
+        if(note.length<1 || note.length>1000)return false;
+        if(clean(input.value||'') && clean(input.value)!==note) {
+            // Never overwrite a newer note the inspector typed directly.
+            return false;
+        }
+        // Reopening a modal must not cause duplicate clicks or overwrite.
+        if(queue.failureNotePreparedFor===inspection.instance)return true;
+        if(queue.failureNoteAttemptedFor===inspection.instance)return false;
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+            ...queue,failureNoteAttemptedFor:inspection.instance
+        }));
+        if(!row.classList?.contains('selected')) {
+            row.click();
+            if(!row.classList?.contains('selected'))
+                throw new Error('Vector did not select the exact failing SCBA item.');
+        }
+        if(clean(input.value||'')!==note)nativeSetInput(input,note);
+        if(clean(input.value||'')!==note)
+            throw new Error('Native Vector Failure Notes did not retain the supplied comment.');
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+            ...queue,failureNoteAttemptedFor:inspection.instance,
+            failureNotePreparedFor:inspection.instance
+        }));
+        setStatus('SCBA '+item.name+': native FAILURE DETAILS item selected and '+
+            'Failure Notes entered. Checking details before final native submission. '+
+            'No successful inspection receipt has been verified.');
+        return true;
+    }
+
+
+    // Vector requires a second Submit after a Failed result and note. The
+    // first click merely opens FAILURE DETAILS. Complete that dialog only
+    // with matching equipment, matching operator note, and explicit tour
+    // authorization. Record a no-retry latch BEFORE the final click.
+    function scbaAirpackFinalizeFailure() {
+        const q=scbaAirpackReadNativeQueue();
+        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(q.inspectionVersion) ||
+           q.phase!=='native_submit_clicked' || !q.autoSubmitApproved ||
+           !q.physicalInspectionConfirmedAt || q.failureFinalSubmitAt ||
+           q.failureNotePreparedFor!==q.submittedFormInstance || getRun())return false;
+        const item=q.items[q.index],ins=currentInspection();
+        if(!item || !['issue','missing'].includes(item.result) ||
+           !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
+           ins.instance!==q.submittedFormInstance)return false;
+        const modals=[...document.querySelectorAll('.modal.fade.in,[role="dialog"]')]
+            .filter(el=>visible(el) &&
+                uiIncludes(el.innerText||el.textContent||'','FAILURE DETAILS') &&
+                uiIncludes(el.innerText||el.textContent||'','SELECT FAILING ITEMS'));
+        if(modals.length!==1)return false;
+        const modal=modals[0];
+        const input=[...modal.querySelectorAll('textarea,input[placeholder]')]
+            .filter(el=>visible(el) && uiEquals(clean(el.getAttribute('placeholder')||''),
+                'Add a note for the failure'));
+        const rows=[...modal.querySelectorAll('.equipment-items__item-list')]
+            .filter(el=>visible(el) && [...el.querySelectorAll('*')].some(child=>
+                !child.children.length && uiEquals(
+                    clean(child.innerText||child.textContent||''),item.name)));
+        if(input.length!==1 || rows.length!==1 ||
+           !rows[0].classList?.contains('selected') ||
+           clean(input[0].value)!==clean(item.comment||''))return false;
+        const submits=[...modal.querySelectorAll('button,[role="button"]')]
+            .filter(el=>visible(el) && !el.disabled &&
+                uiEquals(el.innerText||el.textContent||'','Submit Inspection'));
+        if(submits.length!==1)return false;
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+            ...q,phase:'native_failure_submit_clicked',failureFinalSubmitAt:Date.now()
+        }));
+        submits[0].click();
+        setStatus('SCBA '+item.name+': native FAILURE DETAILS final Submit clicked once. '+
+            'Waiting for official completion proof before advancing.');
+        return true;
+    }
+
+    // Report an unverified official submission once. This is an uncertain
+    // receipt, NOT a failure or permission to click Submit again.
+    function scbaAirpackReportUnverifiedReceipt() {
+        const q=scbaAirpackReadNativeQueue();
+        if(!q || !['native_submit_clicked','native_failure_submit_clicked'].includes(q.phase) ||
+           !q.submitAttemptedAt || Date.now()-q.submitAttemptedAt<30000 ||
+           q.receiptWarningSent)return false;
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
+            JSON.stringify({...q,receiptWarningSent:true}));
+        setStatus('SCBA submission was attempted once, but the official completed '+
+            'form has not been verified. Check native Vector history before retrying. '+
+            'Rebel will not submit this form a second time.',false);
+        void rebelCommandEvent('scba_receipt_unverified',{
+            success:false,errorType:'scba_receipt_unverified',
+            errorMessage:'SCBA native Submit was clicked but exact completion evidence not verified.',
+            metadata:{stage:'after_native_submit',phase:q.phase,version:VERSION}
+        });
+        return true;
+    }
+
+    function scbaAirpackReturnToItemForReceipt() {
+        const q=scbaAirpackReadNativeQueue();
+        if(!q || !q.autoSubmitApproved ||
+           !['native_submit_clicked','native_failure_submit_clicked'].includes(q.phase) ||
+           !q.submitAttemptedAt || Date.now()-q.submitAttemptedAt<5000 ||
+           q.returnForReceiptAt || getRun() || currentInspection())return false;
+        const item=q.items[q.index];
+        if(!item)return false;
+        const expected=new URL(item.href);
+        if(location.origin!==expected.origin || location.pathname===expected.pathname ||
+            !['/main/asset-manager','/main/equipment'].includes(location.pathname.replace(/\/$/,'')))
+            return false;
+        // Only after the native route has changed. Do not interrupt a still
+        // open inspection or the failure-details dialogue.
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,JSON.stringify({
+            ...q,returnForReceiptAt:Date.now()
+        }));
+        location.assign(item.href);
+        return true;
+    }
+
+    async function scbaAirpackShowNativeHandoff() {
+        const queue=scbaAirpackReadNativeQueue();
+        if(!queue || !document.body)return false;
+        const item=queue.items[queue.index];
+        // Start Inspection is a one-time native navigation per item.
+        // Returning from the completed form shows "Next", never starts twice.
+        if(!['open_item','native_form_opened','form_prefilled','native_submit_clicked',
+            'native_failure_submit_clicked','form_prefill_in_progress',
+            'form_review_required','wrong_template'].includes(queue.phase))return false;
+        const page=new URL(location.href);
+        const expected=new URL(item.href);
+        if(page.origin!==expected.origin || page.pathname!==expected.pathname) {
+            const inspection=currentInspection();
+            if(!inspection || inspection.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
+                !['native_form_opened','form_prefilled','native_submit_clicked',
+                  'native_failure_submit_clicked','form_review_required'].includes(queue.phase))
+                return false;
+            // Keep the existing in-tab progress visible on the native form.
+        }
+        if(document.getElementById(SCBA_AIRPACK_NATIVE_BANNER_ID))return true;
+        const banner=document.createElement('div');
+        banner.id=SCBA_AIRPACK_NATIVE_BANNER_ID;
+        banner.setAttribute('data-scba-phase',queue.phase);
+        banner.setAttribute('data-scba-item',item.href);
+        banner.setAttribute('data-scba-path',page.pathname);
+        banner.style.cssText='position:fixed;left:14px;bottom:16px;width:330px;'+
+            'max-width:calc(100vw - 28px);z-index:2147483645;'+
+            'background:white;border:2px solid #176b8e;border-radius:10px;'+
+            'padding:12px;color:#153e5c;font:12px/1.4 Arial,sans-serif;'+
+            'box-shadow:0 4px 18px #0003;';
+        const title=document.createElement('b');
+        title.textContent='SCBA native check '+(queue.index+1)+'/'+queue.items.length+
+            ': '+item.name;
+        const status=document.createElement('div');
+        status.style.cssText='margin-top:6px;';
+        status.textContent='Opening the original Vector checklist. Proposed '+
+            (item.result==='present_working'?'Present / Working':item.result)+
+            ' is not a submitted inspection.';
+        const stop=document.createElement('button');
+        stop.textContent='Close handoff';
+        stop.type='button';
+        stop.style.cssText='margin-top:8px;padding:5px 8px;';
+        stop.onclick=()=>{
+            sessionStorage.removeItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY);
+            banner.remove();
+        };
+        banner.append(title,status,stop);
+        document.body.append(banner);
+        if(getRun()){
+            status.textContent='A PPE inspection is already active. No SCBA form was opened.';
+            return true;
+        }
+        if(['form_prefill_in_progress','form_review_required','wrong_template'].includes(queue.phase)){
+            status.textContent=queue.phase==='wrong_template'?
+                'SCBA paused: Vector opened a different native form (template '+
+                (queue.formTemplate||'unknown')+'). Review manually, no submission was made.':
+                queue.phase==='form_prefill_in_progress'?
+                'SCBA paused during answer entry. Review the currently open native form; '+
+                'automatic retries are disabled to prevent duplicate or incorrect answers.':
+                'SCBA paused before submission. '+
+                (queue.reviewReason||'The native form could not be fully verified.')+
+                ' The helper will recheck the exact 11 completed native responses; '+
+                'it will not click any answer twice or resubmit an uncertain inspection.';
+            return true;
+        }
+        if(['native_submit_clicked','native_failure_submit_clicked'].includes(queue.phase)){
+            status.textContent='The reviewed native SCBA form was submitted once. '+
+                (queue.phase==='native_submit_clicked' && item.result!=='present_working'?
+                    'Processing Vector FAILURE DETAILS and required comment. ':
+                    'Waiting for the exact form completion receipt. ')+
+                'Do not submit again; if no receipt appears, review native Vector history.';
+            return true;
+        }
+        if(queue.phase==='native_form_opened' || queue.phase==='form_prefilled') {
+            // Do not guess which Standard SCBA template/answers to submit.
+            // The operator completes THIS item's official Vector form.
+            const isItemPage=page.pathname===expected.pathname;
+            if(!isItemPage && currentInspection()){
+                status.textContent=queue.phase==='form_prefilled'&&queue.autoSubmitApproved?
+                    'Reviewed answers entered. Rebel is validating and submitting this '+
+                    'inspection using your prior physical-check authorization.':
+                    'The original SCBA form is filled but not yet submitted. '+
+                    'Review this SCBA and confirm physical inspection to submit.';
+                if(queue.phase==='form_prefilled' && !queue.autoSubmitApproved){
+                    const continueButton=document.createElement('button');
+                    continueButton.type='button';
+                    continueButton.textContent='I physically checked this SCBA: Submit & Continue';
+                    continueButton.style.cssText='margin:8px 4px 0 0;padding:6px;'+
+                        'background:#176b8e;color:white;';
+                    continueButton.onclick=()=>{
+                        if(!confirm('I physically inspected '+item.name+
+                            ', reviewed its 11 answers, and authorize submitting '+
+                            'the native SCBA Inspection now. Continue?'))return;
+                        const fresh=scbaAirpackReadNativeQueue();
+                        if(!fresh || fresh.items[fresh.index].href!==item.href ||
+                           fresh.phase!=='form_prefilled')return;
+                        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
+                            JSON.stringify({...fresh,inspectionVersion:'3.2.78',
+                                autoSubmitApproved:true,
+                                physicalInspectionConfirmedAt:new Date().toISOString()}));
+                        continueButton.disabled=true;
+                        setStatus('Authorized. Checking reviewed answers before the '+
+                            'single native Submit Inspection click.');
+                        void scbaAirpackSubmitReviewedForm();
+                    };
+                    banner.append(continueButton);
+                }
+                return true;
+            }
+            if(!isItemPage){
+                status.textContent='Finish the official inspection for '+item.name+
+                    ', then return to this item to proceed. No result was assumed.';
+                const back=document.createElement('button');
+                back.type='button';
+                back.textContent='Return to '+item.name;
+                back.style.cssText='margin:8px 5px 0 0;padding:6px;';
+                back.onclick=()=>location.assign(item.href);
+                banner.append(back);
+                return true;
+            }
+            status.textContent='Complete and submit the official Vector SCBA inspection '+
+                'for '+item.name+'. After Vector returns to the item page, '+
+                'confirm the submission to continue to the next airpack.';
+            const next=document.createElement('button');
+            next.type='button';
+            next.textContent=queue.index+1===queue.items.length?
+                'I submitted this inspection • Finish':'I submitted this inspection • Next';
+            next.style.cssText='margin:8px 5px 0 0;padding:6px;background:#176b8e;color:white;';
+            next.onclick=()=>{
+                if(!confirm('Did you complete and submit the official Vector inspection for '+
+                    item.name+'? This handoff cannot yet verify the official receipt.'))return;
+                try {
+                    const result=scbaAirpackAdvanceNativeQueue(queue,true);
+                    if(result.done){
+                        status.textContent='All '+result.count+' SCBA assets were handed off. '+
+                            'Operator reported submitting each native inspection; official '+
+                            'Vector completion receipts have not been independently verified.';
+                        next.disabled=true;
+                    } else {
+                        status.textContent='Opening the next SCBA item ('+
+                            (result.index+1)+'/'+queue.items.length+')...';
+                    }
+                } catch(error) {
+                    status.textContent='Cannot advance SCBA checks: '+error.message;
+                }
+            };
+            banner.append(next);
+            return true;
+        }
+        let start=null;
+        for(let attempt=0;attempt<35;attempt++){
+            const pageText=[...document.querySelectorAll(
+                'h1,h2,h3,h4,[role="heading"],[class*="asset-title"],[class*="item-title"]')]
+                .filter(el=>visible(el) && !el.closest('#'+PANEL_ID+',#'+OVERLAY_ID))
+                .map(el=>clean(el.innerText||el.textContent||''));
+            const identity=pageText.some(value=>
+                uiEquals(value,'SCBA Frame:'+item.name) ||
+                uiEquals(value,'SCBA Frame: '+item.name) ||
+                uiEquals(value,item.name));
+            const candidates=[...document.querySelectorAll('button,[role="button"]')]
+                .filter(el=>visible(el) && !el.closest('#'+PANEL_ID+',#'+OVERLAY_ID) &&
+                    uiEquals(el.innerText||el.textContent||'','Start Inspection') &&
+                    !el.disabled && el.getAttribute('aria-disabled')!=='true');
+            if(identity && candidates.length===1){start=candidates[0];break;}
+            await sleep(180);
+        }
+        if(!start) {
+            status.textContent='Could not verify this asset heading and a unique Start Inspection control. '+
+                'No official SCBA inspection was started. Review this native item in Vector.';
+            return true;
+        }
+        // The Start Inspection control opens the *native* checklist picker.
+        // Never infer which template to choose or automatically submit it.
+        sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
+            JSON.stringify({...queue,phase:'native_form_opened',openedAt:Date.now(),
+                openedFrom:item.href}));
+        start.click();
+        status.textContent='Opened native SCBA Inspection for '+item.name+
+            '. The program will verify template 113271 and prepare all 11 '+
+            'Passed answers only for confirmed Present / Working equipment. '+
+            'Review before submitting. No inspection has been submitted.';
+        // Vector Standard can open the native SCBA form directly. A variant may show a chooser.
+        for(let attempt=0;attempt<18;attempt++){
+            const chooser=typeof findChooserRoot==='function' ? findChooserRoot() : null;
+            if(chooser && visible(chooser)){
+                status.textContent='Native Vector inspection options: '+
+                    clean(chooser.innerText||chooser.textContent||'').slice(0,360)+
+                    '\nNo inspection has been submitted.';
+                break;
+            }
+            await sleep(150);
+        }
+        return true;
+    }
+
+
+    // APPARATUS CHECK: read-only completion audit of the existing Standard
+    // SCBA Inspection records. Do not confuse a Rebel draft with a native
+    // Vector COMPLETED inspection or write a new inspection here.
+    const APPARATUS_CHECK_KEY = 'vector-rebel-apparatus-check-v1';
+    const APPARATUS_REPORT_KEY = 'vector-rebel-apparatus-report-v1';
+    const APPARATUS_AUDIT_SCHEMA = 1;
+    let apparatusCheckBusy = false;
+
+    function apparatusWorkWindows(asOfDate = localTodayKey(), referenceTime = new Date()) {
+        const original = captainAuditWindow(asOfDate);
+        return {
+            ...original,
+            tours: original.tours.map(tour => {
+                const days = [tour.startDate, tour.endDate];
+                const monday = days.find(key => {
+                    const day = utcDayNumber(key);
+                    return Number.isFinite(day) &&
+                        new Date(day * 86400000).getUTCDay() === 1;
+                }) || '';
+                // All requirements are evaluated at the time of the last
+                // native Item Log scan, not at the time the cached report
+                // is reopened. A stale report never turns a future blank red.
+                const now = referenceTime;
+                const today = localTodayKey(now);
+                const due = tour.startDate <= original.asOfDate &&
+                    (tour.startDate < today ||
+                     (tour.startDate === today && now.getHours() >= 7));
+                const mondayStarted = !!monday &&
+                    (monday < today || (monday === today && now.getHours() >= 7));
+                return {...tour,due,stationMonday:monday,
+                    stationDue:!!monday && monday <= original.asOfDate &&
+                        mondayStarted};
+            })
+        };
+    }
+
+    function apparatusShiftDate(timestamp, displayedDate) {
+        if (!Number.isFinite(timestamp)) return '';
+        // Vector's first Item Log cell normally includes the local time.
+        // Before 07:00 belongs to the preceding 24h duty day.
+        const hasTime = /\b\d{1,2}:\d{2}(?::\d{2})?\b/.test(displayedDate || '');
+        return localHistoryDateKey(timestamp - (hasTime ? 7*60*60*1000 : 0));
+    }
+
+    // Individual-airpack status is the single source for the group summary
+    // and the expanded per-airpack grid. A positive mark requires an exact
+    // native COMPLETED SCBA Inspection record in the relevant duty window.
+    function apparatusItemTourStatus(group, tour, item) {
+        const required = group==='station4' ? !!tour.stationMonday : true;
+        const due = group==='station4' ? !!tour.stationDue : !!tour.due;
+        if(!required)return {code:'na',date:''};
+        if(!due)return {code:'future',date:''};
+        const eligible = group==='station4'
+            ? [tour.stationMonday] : [tour.startDate,tour.endDate];
+        const completed = item?.readable && (item.dates||[])
+            .find(day=>eligible.includes(day));
+        if(completed)return {code:'done',date:completed};
+        if(item?.readable && item?.exhaustive)return {code:'missing',date:''};
+        return {code:'unknown',date:'',error:item?.error||'Item Log coverage not confirmed'};
+    }
+
+    function apparatusStatusForTour(group, tour, items) {
+        const required = group==='station4' ? !!tour.stationMonday : true;
+        const due = group==='station4' ? !!tour.stationDue : !!tour.due;
+        if(!required)return {code:'na',required:false,missing:[],unknown:[]};
+        if(!due)return {code:'future',required:true,missing:[],unknown:[]};
+        const selected = (items||[]).filter(item=>item.scope===group);
+        if(!selected.length)
+            return {code:'unknown',required:true,missing:[],unknown:['No identified SCBA assets']};
+        const missing=[],unknown=[],passed=[];
+        for(const item of selected){
+            const result=apparatusItemTourStatus(group,tour,item);
+            if(result.code==='done')passed.push(item.name);
+            else if(result.code==='missing')missing.push(item.name);
+            else unknown.push(item.name+': '+(result.error||'history not confirmed'));
+        }
+        return {code:unknown.length?'unknown':missing.length?'missing':'done',
+            required:true,missing,unknown,passed,expected:selected.length};
+    }
+
+    function apparatusReportState() {
+        const value = loadJSON(APPARATUS_REPORT_KEY,null);
+        return value && value.schemaVersion === APPARATUS_AUDIT_SCHEMA ? value : null;
+    }
+
+    function apparatusReadRun() {
+        let run=null;
+        try {run=JSON.parse(sessionStorage.getItem(APPARATUS_CHECK_KEY)||'null');}catch {}
+        if(!run || run.schemaVersion!==APPARATUS_AUDIT_SCHEMA ||
+           !['open_inventory','inventory','read_item','finish'].includes(run.phase) ||
+           !Number.isFinite(run.startedAt) ||
+           Date.now()-run.startedAt>45*60*1000) {
+            sessionStorage.removeItem(APPARATUS_CHECK_KEY);
+            return null;
+        }
+        return run;
+    }
+
+    function apparatusSaveRun(run) {
+        sessionStorage.setItem(APPARATUS_CHECK_KEY,JSON.stringify(run));
+    }
+
+    function apparatusVerifiedItemPage(item) {
+        let path='';
+        try {path=new URL(item.href,location.href).pathname;}catch {}
+        if(!/^\/app\/equipment\/Standard\/pool\/299946\/\d+\/item\/?$/i.test(path) ||
+            location.pathname.replace(/\/$/,'')!==path.replace(/\/$/,''))return false;
+        const exact = 'SCBA Frame:'+item.name;
+        return [...document.querySelectorAll(
+            'h1,h2,h3,h4,[role="heading"],[class*="item-title"],[class*="asset-title"],span,div'
+        )].some(el => {
+            if(el.closest('#'+PANEL_ID+',#'+OVERLAY_ID))return false;
+            const inner=uiText(el.innerText||el.textContent||'').replace(/\s*:\s*/,':');
+            return inner===exact && visible(el) && ![...el.children].some(child=>
+                uiText(child.innerText||child.textContent||'')
+                    .replace(/\s*:\s*/,':')===exact);
+        });
+    }
+
+    function apparatusNativeHistoryPage() {
+        const table=findItemLogHistoryTable();
+        const anchor=findHistorySectionAnchor();
+        if(!table && !anchor)return null; // not hydrated; never guess
+        const rows=table ? historyRows(table) : structuralItemLogRows(SCBA_FRAME_INSPECTION_TITLE);
+        const fingerprint=rows.map(itemLogRowText).join(' || ');
+        return {rows,fingerprint,
+            // Do not assume a paginator with ten latest records is exhaustive.
+            next:getPaginationControl('next'),
+            historyVisible:!!(table || anchor)};
+    }
+
+    async function apparatusReadVerifiedHistory(item) {
+        if(!apparatusVerifiedItemPage(item))
+            throw new Error(item.name+': Standard asset identity was not confirmed.');
+        await ensureItemLogTabActive(5000);
+        const allRows=[],seen=new Set();
+        let exhaustive=false,pages=0;
+        for(let page=0;page<30;page++) {
+            let lastFingerprint='',stable=0,snapshot=null;
+            const start=Date.now();
+            while(Date.now()-start<10000) {
+                if(!apparatusVerifiedItemPage(item))
+                    throw new Error(item.name+': Vector left the expected asset.');
+                const current=apparatusNativeHistoryPage();
+                const signature=current?.fingerprint || '<EMPTY ITEM LOG>';
+                if(current && signature===lastFingerprint)stable++;
+                else {lastFingerprint=signature;stable=1;}
+                if(current && stable>=4 && Date.now()-start>=800){snapshot=current;break;}
+                await sleep(200);
+            }
+            if(!snapshot)throw new Error(item.name+': Item Log did not settle.');
+            for(const row of snapshot.rows) {
+                if(!rowLooksLikeCompletedModeEntry(row,SCBA_FRAME_INSPECTION_TITLE))continue;
+                const audit=historyRowAudit(row,0);
+                const rawDate=audit.firstCell ||
+                    (itemLogRowText(row).match(/\d{1,2}\/\d{1,2}\/\d{4}[\d: APM]*/i)?.[0]||'');
+                const parsed=Number.isFinite(audit.parsedAt) ?
+                    audit.parsedAt : parseVectorHistoryDate(rawDate);
+                const shiftDate=apparatusShiftDate(parsed,rawDate);
+                if(!shiftDate)throw new Error(item.name+': completed SCBA record has unreadable date.');
+                const key=shiftDate+'|'+itemLogRowText(row);
+                if(seen.has(key))continue;
+                seen.add(key);allRows.push({shiftDate,
+                    text:itemLogRowText(row).slice(0,180)});
+            }
+            pages++;
+            const next=snapshot.next;
+            if(!paginationControlEnabled(next)) {
+                // A single page of exactly ten recent rows without an
+                // explicit disabled Next control might be truncated.
+                exhaustive=!!next || snapshot.rows.length<10;
+                break;
+            }
+            const previous=snapshot.fingerprint;
+            next.click(); // read-only Item Log pagination, not an inspection
+            const started=Date.now();
+            let changed=false;
+            while(Date.now()-started<10000){
+                const current=apparatusNativeHistoryPage();
+                if(current && current.fingerprint && current.fingerprint!==previous){
+                    changed=true;break;
+                }
+                await sleep(180);
+            }
+            if(!changed)throw new Error(item.name+': Item Log next page did not change.');
+        }
+        if(pages>=30)throw new Error(item.name+': Item Log exceeded 30 pages; history incomplete.');
+        return {name:item.name,scope:item.scope,href:item.href,
+            readable:true,exhaustive,
+            dates:[...new Set(allRows.map(row=>row.shiftDate))],
+            completedRows:allRows.length,pages,error:''};
+    }
+
+    function apparatusBuildReport(run) {
+        const window=apparatusWorkWindows(run.asOfDate);
+        const present=new Map((run.results || []).map(row=>[row.href,row]));
+        const items=(run.items||[]).map(item=>present.get(item.href) || {
+            name:item.name,scope:item.scope,href:item.href,
+            readable:false,exhaustive:false,dates:[],
+            error:'Item Log not scanned'
+        });
+        return {schemaVersion:APPARATUS_AUDIT_SCHEMA,
+            generatedAt:new Date().toISOString(),
+            asOfDate:run.asOfDate,
+            inventoryCapturedAt:run.inventoryCapturedAt,
+            inventoryPages:run.inventoryPages,
+            items,window};
+    }
+
+    function apparatusFinishRun(run) {
+        const report=apparatusBuildReport(run);
+        saveJSON(APPARATUS_REPORT_KEY,report);
+        sessionStorage.removeItem(APPARATUS_CHECK_KEY);
+        setStatus('Apparatus Check read-only scan complete. Showing actual Vector SCBA Item Log results.');
+        if(location.pathname==='/main/asset-manager'){
+            showApparatusCheck(report);
+        }else{
+            sessionStorage.setItem(APPARATUS_CHECK_KEY,JSON.stringify({
+                schemaVersion:APPARATUS_AUDIT_SCHEMA,
+                phase:'finish',startedAt:Date.now(),reportReady:true
+            }));
+            location.assign('https://app.vectorcheckit.us/main/asset-manager');
+        }
+    }
+
+    async function apparatusResumeRun() {
+        if(apparatusCheckBusy)return false;
+        let run=apparatusReadRun();
+        if(!run)return false;
+        if(run.phase==='finish'){
+            sessionStorage.removeItem(APPARATUS_CHECK_KEY);
+            if(run.reportReady && location.pathname==='/main/asset-manager'){
+                showApparatusCheck();
+            }
+            return true;
+        }
+        if(getRun() || getCaptainDailyCheck() || scbaAirpackReadNativeQueue() || currentInspection()){
+            setStatus('Apparatus Check paused while another PPE/SCBA workflow or inspection form is open.',false);
+            return true;
+        }
+        apparatusCheckBusy=true;
+        try{
+            if(run.phase==='open_inventory'){
+                if(location.pathname!=='/main/asset-manager'){
+                    location.assign('https://app.vectorcheckit.us/main/asset-manager');
+                    return true;
+                }
+                if(!scbaAirpackStandardTable()){
+                    const standardTabs=[...document.querySelectorAll(
+                        'button,a,[role="tab"]')]
+                        .filter(el=>visible(el) &&
+                            !el.closest('#'+PANEL_ID+',#'+OVERLAY_ID) &&
+                            uiEquals(el.innerText||el.textContent||'','Standard'));
+                    if(standardTabs.length===1)standardTabs[0].click();
+                    setStatus('Apparatus Check is opening Equipment > Standard.');
+                    return true;
+                }
+                run.phase='inventory';apparatusSaveRun(run);
+            }
+            if(run.phase==='inventory'){
+                const locations=['truck504','medic504','station4'];
+                await scbaAirpackEnsureNativeFilters(locations,message=>setStatus(message));
+                const inventory=await scbaAirpackReadInventory(message=>setStatus(message),locations);
+                run.items=inventory.items.map(item=>({
+                    name:item.name,scope:item.scope,href:item.href
+                }));
+                run.inventoryCapturedAt=inventory.capturedAt;
+                run.inventoryPages=inventory.pages;
+                run.index=0;run.results=[];run.phase='read_item';
+                apparatusSaveRun(run);
+            }
+            if(run.phase==='read_item'){
+                if(run.index>=run.items.length){apparatusFinishRun(run);return true;}
+                const item=run.items[run.index];
+                const expected=new URL(item.href,location.href);
+                if(location.pathname!==expected.pathname){
+                    run.navAttempts=run.navAttempts||{};
+                    const count=Number(run.navAttempts[item.href]||0)+1;
+                    if(count>3)throw new Error(item.name+': failed to reach Standard item after 3 attempts.');
+                    run.navAttempts[item.href]=count;
+                    apparatusSaveRun(run);
+                    setStatus('Apparatus Check: reading '+(run.index+1)+'/'+run.items.length+
+                        ' native SCBA inspection histories...');
+                    location.assign(item.href);
+                    return true;
+                }
+                let result;
+                try{result=await apparatusReadVerifiedHistory(item);}
+                catch(error){result={...item,readable:false,exhaustive:false,
+                    dates:[],error:String(error.message||error)};}
+                run.results.push(result);run.index++;
+                apparatusSaveRun(run);
+                if(run.index>=run.items.length){apparatusFinishRun(run);return true;}
+                setStatus('Apparatus Check: '+run.index+'/'+run.items.length+
+                    ' airpacks read from Vector history.');
+                location.assign(run.items[run.index].href);
+                return true;
+            }
+        }catch(error){
+            sessionStorage.removeItem(APPARATUS_CHECK_KEY);
+            setStatus('Apparatus Check stopped: '+(error?.message||String(error))+
+                '. Prior results were not replaced; no inspections were submitted.',false);
+        }finally{apparatusCheckBusy=false;}
+        return true;
+    }
+
+    function apparatusStartReadOnlyScan() {
+        if(getRun()||getCaptainDailyCheck()||scbaAirpackReadNativeQueue()||currentInspection()) {
+            setStatus('Finish or close the existing PPE/SCBA form or audit before checking apparatus.',false);
+            return;
+        }
+        if(apparatusReadRun()){
+            setStatus('An Apparatus Check read-only scan is already active.');
+            void apparatusResumeRun();return;
+        }
+        apparatusSaveRun({schemaVersion:APPARATUS_AUDIT_SCHEMA,
+            phase:'open_inventory',startedAt:Date.now(),
+            asOfDate:localTodayKey(),items:[],results:[],index:0});
+        setStatus('Starting read-only Apparatus Check from Vector Standard SCBA Item Logs...');
+        void apparatusResumeRun();
+    }
+
+    function showApparatusCheck(report) {
+        report=report || apparatusReportState();
+        if(!report){apparatusStartReadOnlyScan();return;}
+        const window=apparatusWorkWindows(report.asOfDate,new Date(report.generatedAt));
+        const {overlay,box}=makeOverlayBox('1040px');
+        const heading=document.createElement('div');
+        heading.style.cssText='font-size:20px;font-weight:700;color:#153e5c;margin-bottom:8px;';
+        heading.textContent='Apparatus Check';
+        const intro=document.createElement('p');
+        intro.style.cssText='font-size:12px;line-height:1.5;color:#5b7486;margin:0 0 12px;';
+        intro.textContent='Every identified SCBA is shown beneath its assigned location. '+
+            'Read only. Truck 504 and Medic 504 SCBA inspections are due every '+
+            'two-day C-shift tour. Station 4 SCBA Room is due only on C-shift Mondays. '+
+            'Green = completed for every currently assigned airpack; red = due and missing; '+
+            '? = native history not fully verified; blank = not yet due; dash = not scheduled. '+
+            'Only native COMPLETED inspections count, never Rebel drafts.';
+        box.append(heading,intro);
+        const meta=document.createElement('div');
+        meta.style.cssText='font-size:11px;color:#506b7d;margin-bottom:12px;';
+        meta.textContent='Last scanned: '+new Date(report.generatedAt).toLocaleString()+
+            ' | '+(report.items||[]).length+' identified SCBA airpacks'+
+            ' | current assignment snapshot, not historical location transfers.';
+        box.append(meta);
+        const periods=window.tours;
+        const scroll=document.createElement('div');
+        scroll.style.cssText='overflow:auto;border:1px solid #cad9e2;border-radius:8px;max-height:60vh;';
+        const table=document.createElement('table');
+        table.style.cssText='border-collapse:separate;border-spacing:0;min-width:100%;font:12px Arial,sans-serif;';
+        const head=document.createElement('thead');
+        const tr=document.createElement('tr');
+        const label=document.createElement('th');
+        label.textContent='SCBA LOCATION';
+        label.style.cssText='position:sticky;left:0;top:0;background:#143d59;color:white;'+
+            'padding:12px;z-index:3;text-align:left;white-space:nowrap;';
+        tr.append(label);
+        for(const tour of periods){
+            const cell=document.createElement('th');
+            const start=tour.startDate.slice(5),end=tour.endDate.slice(5);
+            cell.textContent=start+' + '+end+(tour.stationMonday?' ★':'');
+            cell.title=tour.stationMonday?'C-shift Monday: '+tour.stationMonday:'C-shift tour';
+            cell.style.cssText='min-width:94px;padding:10px 4px;text-align:center;'+
+                'color:#fff;border-left:1px solid #56738b;background:'+
+                (tour.month===window.months[0]?'#254c67':'#17658a')+';';
+            tr.append(cell);
+        }
+        head.append(tr);table.append(head);
+        const body=document.createElement('tbody');
+        const allAirpacks=Array.isArray(report.items)?report.items:[];
+        const displayGroups=[
+            ['truck504','Truck 504'],['medic504','Medic 504'],
+            ['station4','Station 4 SCBA Room']
+        ];
+        const statusSymbol={
+            done:'✓',missing:'✕',unknown:'?',future:'',na:'—'
+        };
+        const statusColors={
+            done:['#e4f5e9','#216a37'],
+            missing:['#ffe4e4','#b42318'],
+            unknown:['#fff4d5','#875700'],
+            future:['#fff','#ccc'],
+            na:['#f5f7f8','#a9b4bb']
+        };
+        const statusCell=(state,group,tour,label,isAirpack=false)=>{
+            const cell=document.createElement('td');
+            cell.textContent=statusSymbol[state.code]||'';
+            const color=statusColors[state.code]||statusColors.unknown;
+            cell.style.cssText='height:'+(isAirpack?'30':'36')+
+                'px;text-align:center;font-size:'+(isAirpack?'17':'20')+
+                'px;font-weight:bold;border-bottom:1px solid #e2e9ed;'+
+                'border-left:1px solid #e2e9ed;background:'+color[0]+
+                ';color:'+color[1]+';';
+            cell.title=label+' | '+tour.startDate+' + '+tour.endDate+
+                (group==='station4'?' | Monday '+(tour.stationMonday||'not scheduled'):'')+
+                ' | '+state.code.toUpperCase()+
+                (state.date?' | Native completed, duty date: '+state.date:'')+
+                (state.missing?.length?' | Missing: '+state.missing.join(', '):'')+
+                (state.unknown?.length?' | Unverified: '+state.unknown.join('; '):'')+
+                (state.error?' | '+state.error:'');
+            return cell;
+        };
+        for(const [group,name] of displayGroups){
+            const airpacks=allAirpacks.filter(item=>item.scope===group)
+                .sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),undefined,
+                    {numeric:true,sensitivity:'base'}));
+            const row=document.createElement('tr');
+            const title=document.createElement('th');
+            title.style.cssText='position:sticky;left:0;z-index:2;background:#dfedf4;'+
+                'padding:10px 12px;text-align:left;white-space:nowrap;'+
+                'border-top:2px solid #9ebacb;border-bottom:1px solid #bfd1dc;';
+            title.textContent=name+' ('+airpacks.length+' SCBA'+(airpacks.length===1?'':'s')+')';
+            row.append(title);
+            for(const tour of periods){
+                const state=apparatusStatusForTour(group,tour,allAirpacks);
+                row.append(statusCell(state,group,tour,name));
+            }
+            body.append(row);
+            for(const item of airpacks){
+                const subrow=document.createElement('tr');
+                subrow.setAttribute('data-apparatus-scba-item',item.name);
+                const itemTitle=document.createElement('th');
+                itemTitle.textContent='↳ '+item.name;
+                itemTitle.title=item.name+' | '+name+' | native SCBA Inspection history';
+                itemTitle.style.cssText='position:sticky;left:0;z-index:1;'+
+                    'padding:7px 12px 7px 24px;text-align:left;white-space:nowrap;'+
+                    'font-size:12px;font-weight:600;color:#2f566d;background:#f9fcfd;'+
+                    'border-bottom:1px solid #dce7ed;';
+                subrow.append(itemTitle);
+                for(const tour of periods){
+                    const state=apparatusItemTourStatus(group,tour,item);
+                    subrow.append(statusCell(state,group,tour,item.name,true));
+                }
+                body.append(subrow);
+            }
+        }
+        table.append(body);scroll.append(table);box.append(scroll);
+        const details=document.createElement('details');
+        details.style.cssText='margin-top:9px;font-size:11px;';
+        const summary=document.createElement('summary');
+        summary.textContent='Show missing/unverified airpacks by tour';
+        const lines=document.createElement('div');
+        lines.style.cssText='margin:7px 0;line-height:1.6;max-height:180px;overflow:auto;';
+        const issues=[];
+        for(const tour of periods){
+            for(const [group,name] of [
+                ['truck504','Truck 504'],['medic504','Medic 504'],
+                ['station4','Station 4 SCBA Room']
+            ]){
+                const status=apparatusStatusForTour(group,tour,report.items||[]);
+                if(!['missing','unknown'].includes(status.code))continue;
+                issues.push(tour.startDate+' + '+tour.endDate+' | '+name+': '+
+                    [...status.missing.map(v=>v+' not completed'),
+                     ...status.unknown.map(v=>v+' unverified')].join('; '));
+            }
+        }
+        lines.textContent=issues.join('\n')||'No missing or unverified due SCBA checks.';
+        lines.style.whiteSpace='pre-wrap';
+        details.append(summary,lines);box.append(details);
+        const actions=document.createElement('div');
+        actions.style.cssText='display:flex;gap:8px;margin-top:12px;';
+        const refresh=makeButton('Refresh From Vector');
+        refresh.onclick=()=>{overlay.remove();apparatusStartReadOnlyScan();};
+        const close=makeButton('Close');
+        close.onclick=()=>overlay.remove();
+        actions.append(refresh,close);box.append(actions);
+    }
+
+    function showStation4ScbaAirpackCheck() {
+        const {box,overlay}=makeOverlayBox('830px');
+        box.style.padding='0';
+        const header=document.createElement('div');
+        header.style.cssText='padding:14px 18px;background:#153e5c;color:white;' +
+            'display:flex;justify-content:space-between;align-items:center;gap:10px;';
+        const heading=document.createElement('div');
+        heading.innerHTML='<b style="font-size:18px">Station 4 SCBA Airpacks</b>'+
+            '<div style="font-size:11px;opacity:.85">Truck 504 · Medic 504 · Station 4 SCBA Supply Room</div>';
+        const close=makeButton('Close');
+        close.onclick=()=>overlay.remove();
+        header.append(heading,close);
+        const body=document.createElement('div');
+        body.style.cssText='padding:14px 18px 18px;';
+        const instructions=document.createElement('p');
+        instructions.style.cssText='font-size:12px;line-height:1.5;margin:0 0 9px;';
+        instructions.textContent='Choose locations, then review each airpack. Pass proposes all 11 '+
+            'checks as Passed. Missing proposes all 11 as Failed and shows a comment. '+
+            'Issue expands the 11 questions, initially Passed, and shows a comment. '+
+            'Review physically and authorize submission only after completing the inspections.';
+        const chooser=document.createElement('fieldset');
+        chooser.style.cssText='border:1px solid #c7d9e5;border-radius:8px;' +
+            'padding:8px 12px 10px;margin:0 0 10px;';
+        const legend=document.createElement('legend');
+        legend.textContent='Locations to check today';
+        legend.style.cssText='font-size:13px;font-weight:bold;color:#153e5c;padding:0 5px;';
+        chooser.append(legend);
+        const choices=new Map(),pending=scbaAirpackPendingSelection();
+        for(const loc of SCBA_AIRPACK_LOCATIONS){
+            const label=document.createElement('label');
+            label.style.cssText='display:flex;gap:8px;align-items:center;' +
+                'padding:5px 0;font-size:13px;cursor:pointer;';
+            const input=document.createElement('input');
+            input.type='checkbox';
+            input.value=loc.id;
+            input.checked=pending.includes(loc.id);
+            input.setAttribute('aria-label','Check '+loc.label);
+            choices.set(loc.id,input);
+            const caption=document.createElement('span');
+            caption.textContent=loc.label;
+            label.append(input,caption);chooser.append(label);
+        }
+        const selectedIds=()=>SCBA_AIRPACK_LOCATIONS
+            .filter(loc=>choices.get(loc.id)?.checked).map(loc=>loc.id);
+        const helper=document.createElement('div');
+        helper.style.cssText='margin-top:6px;font-size:11px;color:#526b7a;';
+        helper.textContent='Choose one, two, or all three. New checks start with none selected.';
+        chooser.append(helper);
+        const status=document.createElement('div');
+        status.setAttribute('role','status');
+        status.style.cssText='font-size:12px;color:#516a7a;white-space:pre-wrap;margin:7px 0;';
+        status.textContent='Ready to look for SCBA airpacks.';
+        const controls=document.createElement('div');
+        controls.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
+        const find=makeButton('Find SCBA Airpacks');
+        const startNative=makeButton('Submit Reviewed SCBA Checks');
+        startNative.disabled=true;
+        const save=makeButton('Save Local Draft');
+        save.disabled=true;
+        controls.append(find,startNative,save);
+        const coverage=document.createElement('div');
+        coverage.style.cssText='font-size:12px;font-weight:700;margin:10px 0 6px;';
+        const list=document.createElement('div');
+        list.style.cssText='max-height:48vh;overflow:auto;border:1px solid #d8e3e9;' +
+            'border-radius:7px;background:#fff;';
+        const footer=document.createElement('p');
+        footer.style.cssText='font-size:11px;line-height:1.45;color:#855623;margin:10px 0 0;';
+        footer.textContent='Pass / Fail results are proposals until the native Vector form '+
+            'is submitted and a completion receipt verified. After your physical inspection '+
+            'confirmation, Rebel submits each reviewed SCBA form once, including native '+
+            'Failure Notes for exceptions. It stops rather than retry an uncertain submission.';
+        const physicalLabel=document.createElement('label');
+        physicalLabel.style.cssText='display:flex;align-items:flex-start;gap:8px;'+
+            'padding:9px 0;font-size:12px;line-height:1.4;';
+        const physical=document.createElement('input');
+        physical.type='checkbox';
+        physical.setAttribute('aria-label','I physically inspected these SCBA airpacks');
+        const physicalText=document.createElement('span');
+        physicalText.textContent='I physically completed the SCBA checks, including '+
+            'pressure retention and release, for every airpack marked Present / Working; '+
+            'any missing or failed equipment is marked above. I authorize Rebel to '+
+            'submit the reviewed Standard SCBA inspections. No PASS is assumed without my check.';
+        physicalLabel.append(physical,physicalText);
+        let scan=null;
+        find.onclick=async()=>{
+            if(scbaAirpackBusy)return;
+            find.disabled=true;save.disabled=true;startNative.disabled=true;
+            physical.checked=false;list.replaceChildren();
+            const chosen=selectedIds();
+            status.textContent='Checking selected Standard equipment locations...';
+            try {
+                if(!chosen.length)throw new Error('Choose at least one location to check.');
+                await scbaAirpackEnsureNativeFilters(chosen,message=>{status.textContent=message;});
+                scan=await scbaAirpackReadInventory(message=>{status.textContent=message;},chosen);
+                sessionStorage.removeItem(SCBA_AIRPACK_PENDING_SELECTION_KEY);
+                const groups=SCBA_AIRPACK_LOCATIONS.filter(loc=>chosen.includes(loc.id))
+                    .map(loc=>({
+                    ...loc, items:scan.items.filter(item=>item.scope===loc.id)
+                }));
+                coverage.textContent=scan.items.length+' matching airpack(s) across '+
+                    scan.pages+' inventory pages. '+
+                    groups.map(g=>g.label+': '+g.items.length).join(' | ');
+                for(const group of groups){
+                    const title=document.createElement('div');
+                    title.textContent=group.label+' ('+group.items.length+')';
+                    title.style.cssText='font-weight:bold;padding:9px 10px;' +
+                        'background:#e7f0f5;border-bottom:1px solid #d4e1ea;';
+                    list.append(title);
+                    for(const item of group.items){
+                        const line=document.createElement('div');
+                        line.style.cssText='display:grid;grid-template-columns:minmax(0,1fr) 135px auto;' +
+                            'align-items:center;gap:7px;padding:7px 10px;' +
+                            'border-bottom:1px solid #edf2f5;font-size:12px;';
+                        const name=document.createElement('div');
+                        const strong=document.createElement('b');
+                        strong.textContent=item.name;
+                        const detail=document.createElement('div');
+                        detail.textContent=item.pool+' · '+item.status;
+                        detail.style.cssText='font-size:10px;color:#597184;';
+                        name.append(strong,detail);
+                        const select=document.createElement('select');
+                        select.setAttribute('aria-label','Physical review of '+item.name);
+                        for(const [value,label] of [
+                            ['not_checked','Not checked'],
+                            ['present_working','Pass / Present / Working'],
+                            ['issue','Fail / Issue'],
+                            ['missing','Missing']
+                        ]) {
+                            const option=document.createElement('option');
+                            option.value=value;option.textContent=label;select.append(option);
+                        }
+                        // Preselect the *proposed* normal condition. This is
+                        // not an official PASS or completed physical inspection.
+                        select.value='present_working';
+                        item.draftResult='present_working';
+                        item.comment='';
+                        item.questionAnswers=null;
+                        select.onchange=()=>{
+                            scbaAirpackBeginExceptionReview(item,select.value);
+                            physical.checked=false;
+                            showException();
+                        };
+                        const open=document.createElement('button');
+                        open.type='button';
+                        open.textContent='Open item';
+                        open.disabled=!item.href;
+                        open.style.cssText='padding:6px;border:1px solid #b4c9d5;' +
+                            'background:#fff;border-radius:5px;cursor:pointer;';
+                        open.onclick=()=>{
+                            try {
+                                GM_setValue(SCBA_AIRPACK_DRAFT_KEY,{
+                                    ...scan,savedAt:new Date().toISOString(),draftOnly:true
+                                });
+                                if(item.href)location.assign(item.href);
+                            }catch(error){status.textContent='Local draft save failed: '+error.message;}
+                        };
+
+                        // Pass: compact. Missing: simple comment only, all 11 Fail.
+                        // Issue: 11-question accordion, defaults Pass, plus comment.
+                        const exceptionPanel=document.createElement('div');
+                        exceptionPanel.style.cssText='padding:7px 12px 12px;background:#fff7ec;'+
+                            'border-bottom:1px solid #e6d3bc;';
+                        const missingMessage=document.createElement('p');
+                        missingMessage.style.cssText='font-size:12px;color:#83451f;margin:5px 0 10px;';
+                        missingMessage.textContent='Missing: all 11 SCBA checks will be marked Failed. Add a comment.';
+                        exceptionPanel.append(missingMessage);
+                        const accordion=document.createElement('details');
+                        accordion.style.cssText='padding:7px 12px 12px;background:#fff7ec;'+
+                            'border-bottom:1px solid #e6d3bc;';
+                        const summary=document.createElement('summary');
+                        summary.textContent='11 SCBA inspection questions';
+                        summary.style.cssText='font-size:12px;font-weight:bold;cursor:pointer;';
+                        const explanation=document.createElement('div');
+                        explanation.style.cssText='margin:7px 0;color:#704d27;font-size:11px;';
+                        accordion.append(summary,explanation);
+                        const questionInputs=[];
+                        for(let i=0;i<SCBA_FRAME_INSPECTION_QUESTIONS.length;i++) {
+                            const q=document.createElement('label');
+                            q.style.cssText='display:flex;align-items:center;justify-content:space-between;'+
+                                'gap:10px;padding:5px 0;font-size:11px;border-bottom:1px solid #f1e4d9;';
+                            const text=document.createElement('span');
+                            text.textContent=(i+1)+'. '+SCBA_FRAME_INSPECTION_QUESTIONS[i];
+                            const pick=document.createElement('select');
+                            pick.setAttribute('aria-label',item.name+' question '+(i+1));
+                            for(const [value,label] of [
+                                ['','Choose result'],['pass','Pass'],['fail','Fail']
+                            ]){
+                                const option=document.createElement('option');
+                                option.value=value;option.textContent=label;pick.append(option);
+                            }
+                            pick.onchange=()=>{
+                                if(!Array.isArray(item.questionAnswers))return;
+                                item.questionAnswers[i]=pick.value;
+                                physical.checked=false;
+                            };
+                            pick.style.cssText='min-width:112px;padding:4px;';
+                            q.append(text,pick);accordion.append(q);
+                            questionInputs.push(pick);
+                        }
+                        const commentLabel=document.createElement('label');
+                        commentLabel.style.cssText='display:block;margin-top:10px;'+
+                            'font-size:12px;font-weight:600;';
+                        commentLabel.textContent='Required comment for '+item.name;
+                        const comment=document.createElement('textarea');
+                        comment.setAttribute('aria-label','SCBA exception comment for '+item.name);
+                        comment.rows=2;comment.maxLength=1000;
+                        comment.placeholder='Describe what failed or what is missing.';
+                        comment.style.cssText='display:block;width:100%;box-sizing:border-box;'+
+                            'padding:7px;margin-top:4px;border:1px solid #bdab96;border-radius:5px;';
+                        comment.oninput=()=>{
+                            item.comment=comment.value;
+                            physical.checked=false;
+                        };
+                        commentLabel.append(comment);
+                        exceptionPanel.append(accordion,commentLabel);
+                        const showException=()=>{
+                            const issue=select.value==='issue';
+                            const missing=select.value==='missing';
+                            exceptionPanel.style.display=issue||missing?'block':'none';
+                            accordion.style.display=issue?'block':'none';
+                            accordion.open=issue;
+                            missingMessage.style.display=missing?'block':'none';
+                            if(!issue && !missing)return;
+                            explanation.textContent='Issue: other checks initially show proposed Pass. '+
+                                'Mark each failed check and describe the problem below.';
+                            if(issue)questionInputs.forEach((input,index)=>{
+                                input.value=item.questionAnswers?.[index]||'';
+                            });
+                            comment.placeholder=missing?
+                                'Where should this missing SCBA be?':'Describe the SCBA issue.';
+                            comment.value=item.comment||'';
+                        };
+                        line.append(name,select,open);
+                        list.append(line,exceptionPanel);
+                        showException();
+                    }
+                }
+                status.textContent='Found candidate airpacks from confirmed native filters. '+
+                    'No Vector checks were made. Inspect the listed airpacks before recording results.';
+                save.disabled=false;
+                startNative.disabled=false;
+            }catch(error){
+                scan=null;
+                coverage.textContent='';
+                status.textContent='Airpack search stopped: '+(error?.message || String(error))+
+                    '\nNo equipment check was submitted.';
+            }finally{find.disabled=false;}
+        };
+        startNative.onclick=()=>{
+            try {
+                if(!scan)throw new Error('Find SCBA airpacks first.');
+                scbaAirpackBeginNativeChecks(scan,physical.checked,physical.checked);
+            } catch(error) {
+                status.textContent='SCBA check handoff stopped: '+error.message+
+                    '\nNo official inspection was submitted.';
+            }
+        };
+        save.onclick=()=>{
+            if(!scan)return;
+            try{
+                const reviewed=scan.items.filter(item=>item.draftResult!=='not_checked').length;
+                GM_setValue(SCBA_AIRPACK_DRAFT_KEY,{
+                    ...scan,savedAt:new Date().toISOString(),draftOnly:true
+                });
+                status.textContent='Saved LOCAL proposed results for '+scan.items.length+
+                    ' airpacks ('+reviewed+' marked, not yet officially recorded). '+
+                    'Official Vector inspection status has NOT been changed. '+
+                    'Any exception comments are local only.';
+            }catch(error){status.textContent='Cannot save local draft: '+error.message;}
+        };
+        body.append(instructions,chooser,controls,physicalLabel,status,coverage,list,footer);
+        box.append(header,body);
+    }
+
+    // ============================================================
+    // USER INTERFACE / MASTER INTERFACE
+    // ============================================================
+    const PANEL_INTERFACE_KEY='vectorRebelInterfaceModeV1';
+    const MIDNIGHT_CHECK_KEY='vectorRebelMidnightReviewV1';
+    const LAST_ALERT_SEEN_KEY='vectorRebelMasterAlertSeenV1';
+    const ALERT_POLL_MS=2*60*1000;
+    let errorInbox={pending:[],count:0,truncated:false,error:'Not checked',checkedAt:''};
+    let errorInboxRequest=null;
+    let availableRelease='';
+    let releaseCheckError='';
+    let midnightTimer=null;
+    let midnightReviewRequest=null;
+
+    // The interface must not derive administrator authority from an
+    // inspector name, a local autoEnrolled flag, or editable local storage.
+    // An administrator-linked device may have originally auto-enrolled;
+    // verify the ACTIVE device credentials against the owner-only endpoint.
+    let masterServerVerified=false;
+    let masterAuthorizationRequest=null;
+    let lastMasterVerificationAt=0;
+    function isMasterOwnerInstallation(){
+        return masterServerVerified===true&&rebelCommandPaired();
+    }
+    async function verifyMasterOwnerInstallation(force=false){
+        if(masterAuthorizationRequest)return masterAuthorizationRequest;
+        if(!force&&Date.now()-lastMasterVerificationAt<5*60*1000)
+            return masterServerVerified;
+        lastMasterVerificationAt=Date.now();
+        const pair=rebelCommandPairing();
+        if(!clean(pair.deviceId)||!clean(pair.token)){
+            masterServerVerified=false;
+            return false;
+        }
+        masterAuthorizationRequest=(async()=>{
+            let valid=false;
+            try{
+                const result=await new Promise(resolve=>GM_xmlhttpRequest({
+                    method:'GET',
+                    url:REBEL_COMMAND_ENDPOINT+'?action=vr-error-inbox',
+                    headers:{Authorization:'Bearer '+pair.token,
+                        'X-Rebel-Device-ID':pair.deviceId},
+                    timeout:15000,
+                    onload:r=>resolve({status:r.status,text:r.responseText||''}),
+                    onerror:()=>resolve({status:0,text:''}),
+                    ontimeout:()=>resolve({status:0,text:''})
+                }));
+                let body={};try{body=JSON.parse(result.text||'{}');}catch{}
+                valid=result.status===200&&body.ok===true&&
+                    body.readOnly===true&&Array.isArray(body.alerts);
+            }catch{}
+            const changed=masterServerVerified!==valid;
+            masterServerVerified=valid;
+            if(changed){
+                renderPanelInterface();
+                if(valid)void refreshMasterErrorInbox();
+            }
+            return valid;
+        })().finally(()=>{masterAuthorizationRequest=null;});
+        return masterAuthorizationRequest;
+    }
+    function showMasterPairing(){
+        const {overlay,box}=makeOverlayBox('580px');
+        const title=document.createElement('h2');
+        title.textContent='Connect Master Interface';
+        title.style.cssText='font:800 20px Arial;color:#153e5c;';
+        const note=document.createElement('p');
+        note.style.cssText='font:12px/1.5 Arial;color:#526b7a;';
+        note.textContent='The Master Interface requires an administrator-linked Rebel Command device ID and private token. It cannot be enabled by changing a name or using a user installation. The credentials are verified with the administrator-only error inbox before saving them locally.';
+        const device=document.createElement('input'),token=document.createElement('input');
+        device.type='text';device.placeholder='Administrator device ID';
+        token.type='password';token.placeholder='Private administrator token';
+        for(const el of [device,token]){
+            el.style.cssText='display:block;width:100%;box-sizing:border-box;margin:8px 0;padding:10px;border:1px solid #bbccd7;border-radius:7px;font:13px Arial;';
+        }
+        const status=document.createElement('p');
+        status.setAttribute('role','status');
+        status.style.cssText='font:12px Arial;color:#516c7d;';
+        const connect=makeButton('Verify & Enable Master',{background:'#176b8e',color:'#fff'});
+        const cancel=makeButton('Cancel');
+        cancel.onclick=()=>overlay.remove();
+        connect.onclick=async()=>{
+            const id=clean(device.value),secret=clean(token.value);
+            if(!id||!secret){status.textContent='Enter both administrator credentials.';return;}
+            connect.disabled=true;status.textContent='Verifying administrator access with Rebel Command...';
+            try{
+                const result=await new Promise(resolve=>GM_xmlhttpRequest({
+                    method:'GET',
+                    url:REBEL_COMMAND_ENDPOINT+'?action=vr-error-inbox',
+                    headers:{Authorization:'Bearer '+secret,'X-Rebel-Device-ID':id},
+                    timeout:15000,
+                    onload:r=>resolve({status:r.status,text:r.responseText||''}),
+                    onerror:()=>resolve({status:0,text:''}),
+                    ontimeout:()=>resolve({status:0,text:''})
+                }));
+                let body={};try{body=JSON.parse(result.text||'{}');}catch{}
+                if(result.status!==200||body.ok!==true||
+                    body.readOnly!==true||!Array.isArray(body.alerts))
+                    throw Error('Administrator verification failed. No credentials saved.');
+                GM_setValue(REBEL_COMMAND_PAIR_KEY,{deviceId:id,token:secret,autoEnrolled:false});
+                masterServerVerified=true;
+                token.value='';
+                overlay.remove();
+                renderPanelInterface();
+                void refreshMasterErrorInbox();
+                setStatus('Master Interface verified. Use the switch to preview the User Interface.');
+            }catch(error){
+                status.textContent=clean(error?.message||'Administrator access unavailable.');
+            }finally{connect.disabled=false;}
+        };
+        box.append(title,note,device,token,status,connect,cancel);
+    }
+    function panelInterfaceMode(){
+        if(!isMasterOwnerInstallation())return 'user';
+        return persistentGetRaw(PANEL_INTERFACE_KEY)==='user'?'user':'master';
+    }
+    function setPanelInterfaceMode(mode){
+        if(!isMasterOwnerInstallation())return false;
+        if(mode!=='master'&&mode!=='user')return false;
+        persistentSetRaw(PANEL_INTERFACE_KEY,mode);
+        renderPanelInterface();
+        return true;
+    }
+    function showSharedMasterList(){
+        const {overlay,box}=makeOverlayBox('750px');
+        const heading=document.createElement('h2');
+        heading.textContent='Master List';
+        heading.style.cssText='font:800 21px Arial;color:#153e5c;margin:0 0 6px;';
+        const note=document.createElement('p');
+        note.style.cssText='font:12px/1.5 Arial;color:#526c7e;margin:0 0 10px;';
+        note.textContent='Read-only list published by the Vector Rebel administrator. Changes to names and availability are maintained by the administrator; this view never changes PPE records.';
+        const state=document.createElement('p');
+        state.setAttribute('role','status');
+        state.style.cssText='font:12px/1.5 Arial;color:#315e79;margin:8px 0;';
+        const search=document.createElement('input');
+        search.type='search';search.placeholder='Find a person';
+        search.setAttribute('aria-label','Search published master list');
+        search.style.cssText='box-sizing:border-box;width:100%;padding:10px;border:1px solid #b8cad6;border-radius:7px;font:13px Arial;';
+        const rows=document.createElement('div');
+        rows.style.cssText='max-height:48vh;overflow:auto;margin:10px 0;background:#fff;border:1px solid #dde6ec;border-radius:7px;';
+        const controls=document.createElement('div');
+        controls.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
+        const refresh=makeButton('Refresh Master List',{background:'#176b8e',color:'#fff'});
+        const close=makeButton('Close');
+        controls.append(refresh,close);close.onclick=()=>overlay.remove();
+        const render=()=>{
+            const roster=sharedRosterFromCache();
+            const sync=sharedRosterSyncState();
+            rows.innerHTML='';
+            if(!roster){
+                state.textContent='No administrator-published Master List is available on this installation. '+(sync.error||'Select Refresh Master List to check again.');
+                return;
+            }
+            const stamp=sync.lastSuccess||roster.updatedAt||'not recorded';
+            state.textContent=roster.people.length+' published people · Version '+roster.version+' · Last verified: '+stamp+(sync.status==='unavailable'?' · OFFLINE CACHED COPY':'');
+            const q=clean(search.value).toLowerCase();
+            const visible=roster.people.filter(person=>clean(person.name).toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name));
+            for(const person of visible){
+                const row=document.createElement('div');
+                row.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid #e5edf2;font:13px Arial;';
+                const name=document.createElement('span');
+                name.textContent=person.name;
+                const status=document.createElement('small');
+                status.textContent=person.active===false?'Inactive':'Active';
+                status.style.color=person.active===false?'#9b5c25':'#176b42';
+                row.append(name,status);rows.appendChild(row);
+            }
+            if(!visible.length)rows.textContent='No matching people.';
+        };
+        const doRefresh=async()=>{
+            refresh.disabled=true;state.textContent='Checking the administrator-published Master List...';
+            await refreshSharedRebelRoster(true);
+            refresh.disabled=false;render();
+        };
+        refresh.onclick=()=>{void doRefresh();};
+        search.oninput=render;
+        box.append(heading,note,state,search,rows,controls);
+        render();
+        void doRefresh();
+    }
+    function compareReleaseVersions(a,b){
+        const x=String(a||'').split('.').map(Number);
+        const y=String(b||'').split('.').map(Number);
+        if(![...x,...y].every(Number.isFinite))return 0;
+        for(let i=0;i<Math.max(x.length,y.length);i++){
+            if((x[i]||0)!==(y[i]||0))return Math.sign((x[i]||0)-(y[i]||0));
+        }
+        return 0;
+    }
+    async function checkManagedInterfaceRelease(){
+        return new Promise(resolve=>{
+            GM_xmlhttpRequest({
+                method:'GET',url:MANAGED_UPDATE_URL+'?check='+Date.now(),
+                timeout:18000,
+                onload:r=>{
+                    const m=String(r.responseText||'').match(/^\/\/\s*@version\s+(\d+\.\d+\.\d+)\s*$/m);
+                    const verified=r.status>=200&&r.status<300&&!!m;
+                    if(verified){
+                        availableRelease=compareReleaseVersions(m[1],VERSION)>0?m[1]:'';
+                        releaseCheckError='';
+                    }else releaseCheckError='Unable to verify the currently published version.';
+                    refreshInterfaceNotice();
+                    resolve(verified);
+                },
+                onerror:()=>{releaseCheckError='Update server unavailable.';refreshInterfaceNotice();resolve(false);},
+                ontimeout:()=>{releaseCheckError='Update check timed out.';refreshInterfaceNotice();resolve(false);}
+            });
+        });
+    }
+    function refreshInterfaceNotice(){
+        const el=document.getElementById('vector-ppe-interface-updates-v1');
+        if(!el)return;
+        el.innerHTML='';
+        const note=document.createElement('span');
+        const nightly=loadJSON(MIDNIGHT_CHECK_KEY,{})||{};
+        note.textContent=availableRelease?
+            'New version '+availableRelease+' available. Install with Tampermonkey.':
+            (releaseCheckError?'Midnight update check: '+releaseCheckError:
+             'Automatic midnight checks active. Tampermonkey manages script installation.');
+        if(nightly.status==='partial')
+            note.textContent+=' Daily sync incomplete ('+
+                (Array.isArray(nightly.failed)?nightly.failed.join(', '):'unknown')+
+                '). Will retry when the Vector tab becomes active.';
+        el.appendChild(note);
+        if(availableRelease){
+            const btn=makeButton('Install Update');
+            btn.style.cssText+='margin-left:7px;padding:4px 7px;';
+            btn.onclick=openManagedUpdate;
+            el.appendChild(btn);
+        }
+    }
+    async function refreshMasterErrorInbox({notify=false}={}){
+        if(!isMasterOwnerInstallation()||errorInboxRequest)return errorInboxRequest||false;
+        errorInboxRequest=(async()=>{
+            try{
+                const pair=rebelCommandPairing();
+                const res=await new Promise(resolve=>GM_xmlhttpRequest({
+                    method:'GET',
+                    url:REBEL_COMMAND_ENDPOINT+'?action=vr-error-inbox',
+                    headers:{Authorization:'Bearer '+pair.token,
+                        'X-Rebel-Device-ID':pair.deviceId},
+                    timeout:16000,
+                    onload:r=>resolve({status:r.status,body:r.responseText||''}),
+                    onerror:()=>resolve({status:0,body:''}),
+                    ontimeout:()=>resolve({status:0,body:''})
+                }));
+                const body=JSON.parse(res.body||'{}');
+                if(res.status===401||res.status===403){
+                    masterServerVerified=false;
+                    renderPanelInterface();
+                }
+                if(res.status!==200||body.ok!==true||
+                    body.readOnly!==true||!Array.isArray(body.alerts))
+                    throw Error(clean(body.error||'Master error inbox unavailable.'));
+                const alerts=body.alerts.slice(0,50);
+                errorInbox={pending:alerts,count:Number(body.count)||alerts.length,
+                    truncated:body.truncated===true,error:'',checkedAt:new Date().toISOString()};
+                const newest=alerts[0];
+                const previous=loadJSON(LAST_ALERT_SEEN_KEY,null);
+                if(newest){
+                    const newestTime=Date.parse(newest.occurredAt||'');
+                    const seenTime=Date.parse(previous?.at||'');
+                    const genuinelyNew=Number.isFinite(newestTime)&&
+                        Number.isFinite(seenTime)&&newestTime>seenTime;
+                    if(previous?.id && previous.id!==newest.id && genuinelyNew && notify &&
+                        typeof Notification==='function'&&Notification.permission==='granted'){
+                        try{
+                            new Notification('Vector Rebel: new error received',{
+                                body:clean(newest.title||'Review the Master error inbox.').slice(0,130),
+                                tag:'vector-rebel-new-errors'
+                            });
+                        }catch{ /* Badge and inbox still work if OS notifications are blocked. */ }
+                    }
+                    // Do not move the cursor backwards when an older report
+                    // becomes the first result after a newer report is resolved.
+                    if(!previous?.id||genuinelyNew)
+                        saveJSON(LAST_ALERT_SEEN_KEY,{id:newest.id,at:newest.occurredAt});
+                }
+                refreshMasterAlertBadge();
+                return true;
+            }catch(error){
+                errorInbox={...errorInbox,error:clean(error?.message||String(error))};
+                refreshMasterAlertBadge();
+                return false;
+            }finally{errorInboxRequest=null;}
+        })();
+        return errorInboxRequest;
+    }
+    async function markMasterErrorReviewed(suggestionId){
+        // Explicit owner action. Server verifies the device pairing and
+        // updates the existing feedback record to REVIEWING, never deletes it.
+        if(!isMasterOwnerInstallation()||panelInterfaceMode()!=='master')
+            return false;
+        const id=clean(suggestionId);
+        if(!/^[A-Za-z0-9._:-]+$/.test(id))return false;
+        try{
+            const pair=rebelCommandPairing();
+            const res=await new Promise(resolve=>GM_xmlhttpRequest({
+                method:'POST',
+                url:REBEL_COMMAND_ENDPOINT+'?action=vr-review-error',
+                headers:{Authorization:'Bearer '+pair.token,
+                    'X-Rebel-Device-ID':pair.deviceId,
+                    'Content-Type':'application/json'},
+                data:JSON.stringify({suggestionId:id}),
+                timeout:16000,
+                onload:r=>resolve({status:r.status,body:r.responseText||''}),
+                onerror:()=>resolve({status:0,body:''}),
+                ontimeout:()=>resolve({status:0,body:''})
+            }));
+            let body={};try{body=JSON.parse(res.body||'{}');}catch{}
+            return res.status===200&&body.ok===true&&
+                body.suggestionId===id&&body.status==='reviewing';
+        }catch{return false;}
+    }
+    function refreshMasterAlertBadge(){
+        const el=document.getElementById('vector-ppe-master-alert-badge-v1');
+        if(el){
+            const visible=isMasterOwnerInstallation()&&panelInterfaceMode()==='master';
+            el.style.display=visible?'block':'none';
+            if(visible)el.textContent=errorInbox.error?
+                'Error inbox unavailable':(errorInbox.truncated?'Latest ':'')+errorInbox.count+' pending report'+(errorInbox.count===1?'':'s');
+        }
+        updateMinimizedPanelBadge();
+    }
+    function showMasterErrorInbox(){
+        if(!isMasterOwnerInstallation()||panelInterfaceMode()!=='master'){
+            setStatus('The error inbox is available only on the master installation.',false);
+            return;
+        }
+        const {overlay,box}=makeOverlayBox('780px');
+        const heading=document.createElement('h2');
+        heading.textContent='Errors & Alerts';
+        heading.style.cssText='font:800 21px Arial;color:#153e5c;margin:0 0 8px;';
+        const summary=document.createElement('p');
+        summary.setAttribute('role','status');
+        summary.style.cssText='font:12px Arial;color:#47677b;';
+        const list=document.createElement('div');
+        list.style.cssText='max-height:50vh;overflow:auto;border:1px solid #d6e4ed;border-radius:7px;';
+        const buttons=document.createElement('div');
+        buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;';
+        const refresh=makeButton('Refresh Error Inbox',{background:'#176b8e',color:'#fff'});
+        const notify=makeButton('Enable Desktop Alerts');
+        const close=makeButton('Close');
+        buttons.append(refresh,notify,close);close.onclick=()=>overlay.remove();
+        notify.onclick=async()=>{
+            if(typeof Notification!=='function'){setStatus('Desktop notifications are not supported here.',false);return;}
+            const permission=await Notification.requestPermission();
+            notify.textContent=permission==='granted'?'Desktop Alerts Enabled':'Desktop Alerts Not Enabled';
+        };
+        const draw=()=>{
+            summary.textContent=errorInbox.error?
+                'Rebel Command error inbox unavailable: '+errorInbox.error:
+                (errorInbox.truncated?'Latest ':'')+errorInbox.count+' new error report(s) · Last checked '+(errorInbox.checkedAt||'not yet');
+            list.innerHTML='';
+            for(const alert of errorInbox.pending){
+                const item=document.createElement('div');
+                item.style.cssText='padding:9px 11px;border-bottom:1px solid #e3eaf0;font:12px/1.45 Arial;';
+                const title=document.createElement('strong');
+                title.textContent=clean(alert.title||'Vector Rebel issue').slice(0,150);
+                const meta=document.createElement('div');
+                meta.textContent=clean(alert.occurredAt||'')+' · '+
+                    clean(alert.deviceName||'Unknown reporting device')+
+                    ' · '+clean(alert.source||'Vector Rebel')+
+                    (alert.sourceVersion?' v'+clean(alert.sourceVersion):'')+
+                    ' · '+clean(alert.priority||'high');
+                meta.style.cssText='font-size:10px;color:#6a7d8b;margin:3px 0;';
+                const details=document.createElement('div');
+                details.textContent=clean(alert.description||'').slice(0,3900);
+                details.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;';
+                item.append(title,meta,details);
+                if(alert.id){
+                    const review=makeButton('Mark Reviewed');
+                    review.style.cssText+='margin-top:7px;padding:6px 9px;';
+                    const reviewStatus=document.createElement('span');
+                    reviewStatus.setAttribute('role','status');
+                    reviewStatus.style.cssText='font:11px Arial;color:#8a312b;margin-left:7px;';
+                    review.onclick=async()=>{
+                        review.disabled=true;
+                        reviewStatus.textContent='Confirming with Rebel Command...';
+                        const success=await markMasterErrorReviewed(alert.id);
+                        if(success){
+                            // No local optimistic removal: reread the exact
+                            // newly reviewed status through the server inbox.
+                            await refreshMasterErrorInbox();
+                            draw();
+                        }else{
+                            reviewStatus.textContent='Could not confirm reviewed. Report remains new.';
+                            review.disabled=false;
+                        }
+                    };
+                    item.append(review,reviewStatus);
+                }
+                list.appendChild(item);
+            }
+            if(!errorInbox.pending.length&&!errorInbox.error)
+                list.textContent='No new reports returned.';
+        };
+        refresh.onclick=async()=>{refresh.disabled=true;await refreshMasterErrorInbox();refresh.disabled=false;draw();};
+        box.append(heading,summary,list,buttons);
+        draw();void refresh.onclick();
+    }
+    function localCalendarDate(){
+        const d=new Date();
+        return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+
+            '-'+String(d.getDate()).padStart(2,'0');
+    }
+    async function runMidnightInterfaceReview(){
+        // A midnight check must not be marked complete while the update
+        // server, roster or error delivery failed. Recheck on tab return
+        // rather than suppressing retries for the rest of the calendar day.
+        if(midnightReviewRequest)return midnightReviewRequest;
+        const today=localCalendarDate();
+        const previous=loadJSON(MIDNIGHT_CHECK_KEY,{})||{};
+        if(previous.date===today&&previous.status==='checked')return false;
+        midnightReviewRequest=(async()=>{
+            saveJSON(MIDNIGHT_CHECK_KEY,{date:today,at:new Date().toISOString(),status:'checking'});
+            const jobs=[
+                ['release',checkManagedInterfaceRelease],
+                ['roster',()=>refreshSharedRebelRoster(true)],
+                ['errors',flushPendingErrorReports]
+            ];
+            if(isMasterOwnerInstallation())
+                jobs.push(['inbox',()=>refreshMasterErrorInbox({notify:true})]);
+            const results=await Promise.allSettled(jobs.map(([,run])=>run()));
+            const failed=jobs.filter((job,i)=>
+                results[i].status!=='fulfilled'||results[i].value!==true
+            ).map(([name])=>name);
+            const status=failed.length?'partial':'checked';
+            saveJSON(MIDNIGHT_CHECK_KEY,{
+                date:today,at:new Date().toISOString(),status,failed,
+                latest:availableRelease||VERSION,releaseCheckError
+            });
+            renderPanelInterface();
+            return status==='checked';
+        })().finally(()=>{midnightReviewRequest=null;});
+        return midnightReviewRequest;
+    }
+    function scheduleMidnightInterfaceReview(){
+        if(midnightTimer)clearTimeout(midnightTimer);
+        const now=new Date(),next=new Date(now);
+        next.setHours(24,0,2,0); // 00:00:02 local, following calendar day
+        midnightTimer=setTimeout(async()=>{
+            try{await runMidnightInterfaceReview();}
+            finally{scheduleMidnightInterfaceReview();}
+        },Math.max(1000,next.getTime()-now.getTime()));
+    }
+    let lastInterfaceErrorInboxPoll=0;
+    function renderPanelInterface(){
+        const panel=document.getElementById(PANEL_ID);
+        if(!panel)return;
+        const actions=panel.querySelector('[data-vector-ppe-actions]');
+        const label=panel.querySelector('[data-vector-ppe-interface-label]');
+        const switcher=panel.querySelector('[data-vector-ppe-interface-switch]');
+        if(!actions||!label||!switcher)return;
+        const master=panelInterfaceMode()==='master';
+        const authorized=isMasterOwnerInstallation();
+        label.textContent=master?'MASTER INTERFACE':'USER INTERFACE';
+        switcher.style.display=authorized?'block':'none';
+        switcher.textContent=master?'Preview User Interface':'Return to Master Interface';
+        actions.innerHTML='';
+        const make=(label,onClick,primary=false)=>{
+            const b=document.createElement('button');
+            b.type='button';b.textContent=label;
+            b.setAttribute('data-vector-rebel-action',label);
+            b.style.cssText='min-height:45px;padding:10px 9px;border-radius:8px;cursor:pointer;'+
+              'border:1px solid '+(primary?'#176b8e':'#b8c8d6')+';'+
+              'background:'+(primary?'#176b8e':'#fff')+';'+
+              'color:'+(primary?'#fff':'#153e5c')+';'+
+              'font:700 12px/1.2 Arial;box-shadow:0 1px 2px rgba(15,43,62,.08);';
+            b.onclick=onClick;actions.appendChild(b);
+        };
+        // Ordinary users need only the five requested entry points.
+        // The read-only Master List remains in Master; regular users still
+        // receive its approved names internally for Captain Sets and PPE.
+        make('Tour PPE',()=>launchMyInspectionFromAnywhere('tour'),true);
+        make('After Fire',()=>launchMyInspectionFromAnywhere('afterFire'),true);
+        make('PPE Form',showPpeCleanRepairForm);
+        make('Daily Captain Check',launchCaptainDailyCheckFromAnywhere);
+        make('Settings',()=>showSettings('profile'));
+        if(master){
+            make('Master List',showSharedMasterList);
+            make('SCBA Airpacks',showStation4ScbaAirpackCheck);
+            make('Apparatus Check',showApparatusCheck);
+            make('Manage Master List',()=>showSettings('admin'));
+            make('Errors & Alerts',showMasterErrorInbox);
+            make('Report Problem',showProblemReport);
+            make('Check for Update',()=>{void checkManagedInterfaceRelease();});
+        }
+        refreshMasterAlertBadge();
+        refreshInterfaceNotice();
     }
 
     function installPanel() {
@@ -8927,6 +15767,20 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         minimize.onclick = () => applyPanelMinimizedState(true);
         titleRow.append(titleWrap, minimize);
 
+        const modeRow=document.createElement('div');
+        modeRow.style.cssText='display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:7px;padding:8px 13px;background:#eaf3f7;border-bottom:1px solid #d3e1eb;';
+        const modeLabel=document.createElement('strong');
+        modeLabel.setAttribute('data-vector-ppe-interface-label','1');
+        modeLabel.style.cssText='font:800 11px Arial;letter-spacing:.8px;color:#173f59;';
+        const modeSwitch=document.createElement('button');
+        modeSwitch.type='button';
+        modeSwitch.setAttribute('data-vector-ppe-interface-switch','1');
+        modeSwitch.style.cssText='padding:6px 8px;border:1px solid #9cbacd;border-radius:6px;background:#fff;color:#155171;font:700 10px Arial;cursor:pointer;';
+        modeSwitch.onclick=()=>{
+            setPanelInterfaceMode(panelInterfaceMode()==='master'?'user':'master');
+        };
+        modeRow.append(modeLabel,modeSwitch);
+
         const body = document.createElement('div');
         body.style.cssText = 'padding:12px 13px 13px;background:#fff;';
 
@@ -8937,30 +15791,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             'background:#f3f7f9;border:1px solid #e0e8ed;border-radius:8px;color:#4f6878;';
 
         const actions = document.createElement('div');
+        actions.setAttribute('data-vector-ppe-actions','1');
         actions.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:7px;';
-
-        function mainAction(label, onClick, primary = true) {
-            const b = document.createElement('button');
-            b.type = 'button';
-            b.textContent = label;
-            b.style.cssText =
-                'min-height:44px;padding:10px 9px;border-radius:8px;cursor:pointer;' +
-                `border:1px solid ${primary ? '#176b8e' : '#b8c8d6'};` +
-                `background:${primary ? '#176b8e' : '#fff'};` +
-                `color:${primary ? '#fff' : '#153e5c'};` +
-                'font:700 12px/1.2 Arial,sans-serif;' +
-                'box-shadow:0 1px 2px rgba(15,43,62,.08);';
-            b.onclick = onClick;
-            return b;
-        }
-
-        actions.append(
-            mainAction('My Tour PPE', () => launchMyInspectionFromAnywhere('tour')),
-            mainAction('My After-Fire', () => launchMyInspectionFromAnywhere('afterFire')),
-            mainAction("Captain's Monthly", launchCaptainInspectionFromAnywhere),
-            mainAction('Daily Captain Check', launchCaptainDailyCheckFromAnywhere, false),
-            mainAction('Settings', () => showSettings('profile'), false)
-        );
 
         const statusBox = document.createElement('div');
         statusBox.id = 'vector-ppe-status-v2';
@@ -8969,8 +15801,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             'font-size:11px;line-height:1.4;color:#607483;border-radius:6px;';
         statusBox.textContent = 'Ready.';
 
-        body.append(info, actions, statusBox);
-        full.append(titleRow, body);
+        const alertBadge=document.createElement('div');
+        alertBadge.id='vector-ppe-master-alert-badge-v1';
+        alertBadge.style.cssText='font:700 11px Arial;color:#9b2d22;margin:9px 0 0;';
+        const releaseNotice=document.createElement('div');
+        releaseNotice.id='vector-ppe-interface-updates-v1';
+        releaseNotice.style.cssText='font:11px/1.4 Arial;color:#607483;margin:8px 0 0;';
+        body.append(info, actions, alertBadge, releaseNotice, statusBox);
+        full.append(titleRow, modeRow, body);
 
         const mini = document.createElement('button');
         mini.type = 'button';
@@ -8990,11 +15828,19 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             'box-shadow:0 5px 18px rgba(13,50,72,.28);' +
             'cursor:pointer;';
         mini.innerHTML = rebelStarbirdSvg();
+        const miniAlert=document.createElement('span');
+        miniAlert.id='vector-ppe-mini-badge-v1';
+        miniAlert.style.cssText='position:absolute;top:-5px;right:-7px;min-width:20px;height:20px;'+
+            'padding:1px 4px;box-sizing:border-box;border-radius:12px;background:#b33b32;'+
+            'color:white;display:none;align-items:center;justify-content:center;'+
+            'font:800 10px/1 Arial;box-shadow:0 0 0 2px white;pointer-events:none;';
+        mini.appendChild(miniAlert);
         mini.onclick = () => applyPanelMinimizedState(false);
 
         panel.append(full, mini);
         document.body.appendChild(panel);
         applyPanelMinimizedState(true, false);
+        renderPanelInterface();
         refreshPanelInfo();
     }
 
@@ -9002,13 +15848,128 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // INITIALIZE / RESUME
     // ============================================================
 
+    // An obsolete, separately installed migration helper can still show a
+    // "Vector Rebel Recovery" toast after the migration. The current helper
+    // already stores full backups in Tampermonkey and exposes explicit
+    // Backup & Recovery controls. Remove ONLY the obsolete toast; do not
+    // touch migration keys, signatures, roster state, or arbitrary banners.
+    function dismissObsoleteRecoveryToast() {
+        if (location.hostname !== 'app.vectorcheckit.us' || !document.body) return false;
+        const marker = 'No old-site backup has been captured yet.';
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let node, scanned = 0;
+        while ((node = walker.nextNode()) && ++scanned <= 20000) {
+            if (!String(node.nodeValue || '').includes(marker)) continue;
+            let ancestor = node.parentElement;
+            let toast = null;
+            for (let depth = 0; ancestor && depth < 8; depth++, ancestor = ancestor.parentElement) {
+                if (ancestor.id === PANEL_ID || ancestor.id === OVERLAY_ID) break;
+                const content = String(ancestor.textContent || '').trim();
+                if (content.length > 500) break;
+                if (content.includes('Vector Rebel Recovery') && content.includes(marker)) {
+                    toast = ancestor;
+                }
+            }
+            if (toast) {
+                toast.remove();
+                return true;
+            }
+        }
+        return false;
+    }
+
     getConfig();
     migrateLegacySignature();
     migrateLegacyRunHistory();
     installPanel();
+    setTimeout(()=>{void scbaAirpackShowNativeHandoff().catch(error=>
+        setStatus('SCBA native handoff stopped: '+error.message,false));},1100);
+    // Prefill the exact 11-question Standard SCBA form once it opens.
+    setInterval(()=>{
+        try{scbaAirpackCompletedReceipt();}
+        catch(error){setStatus('SCBA receipt verification stopped: '+error.message,false);}
+        try{scbaAirpackFinalizeFailure();}
+        catch(error){setStatus('SCBA failure final submit stopped: '+error.message,false);}
+        try{scbaAirpackReturnToItemForReceipt();}
+        catch(error){setStatus('SCBA receipt item navigation stopped: '+error.message,false);}
+        try{scbaAirpackReportUnverifiedReceipt();}
+        catch(error){setStatus('SCBA receipt warning stopped: '+error.message,false);}
+        try{scbaAirpackRecoverCompletedForm();}
+        catch(error){setStatus('SCBA form recovery stopped: '+error.message+
+            '. No response or submission was clicked.',false);}
+        try{scbaAirpackSubmitReviewedForm();}
+        catch(error){setStatus('SCBA submit stopped: '+error.message+
+            '. Do not resubmit before checking the official Vector result.',false);}
+        try{scbaAirpackSelectNativeTemplate();}
+        catch(error){
+            setStatus('SCBA chooser selection stopped: '+error.message,false);
+        }
+        void scbaAirpackPrefillVerifiedForm().catch(error=>
+            setStatus('SCBA form prefill stopped: '+error.message,false));
+        try {
+            scbaAirpackFillNativeFailureDetails();
+        } catch(error) {
+            setStatus('SCBA native failure note stopped: '+error.message+
+                '. Complete the existing Vector failure modal manually.',false);
+        }
+    },950);
+    // Vector can navigate inside the existing tab without a full reload.
+    // Refresh only a pending SCBA handoff banner when route or phase changes.
+    setInterval(()=>{
+        const queue=scbaAirpackReadNativeQueue();
+        if(!queue)return;
+        const banner=document.getElementById(SCBA_AIRPACK_NATIVE_BANNER_ID);
+        if(banner && (
+            banner.getAttribute('data-scba-phase')!==queue.phase ||
+            banner.getAttribute('data-scba-item')!==queue.items[queue.index].href ||
+            banner.getAttribute('data-scba-path')!==location.pathname
+        ))banner.remove();
+        if(!document.getElementById(SCBA_AIRPACK_NATIVE_BANNER_ID))
+            void scbaAirpackShowNativeHandoff().catch(error=>
+                setStatus('SCBA native handoff stopped: '+error.message,false));
+    },1700);
+    dismissObsoleteRecoveryToast();
+    setTimeout(repairCaptureVisibleItemPage,1200);
     ensureRebelCommandEnrollment(true).finally(() => {
         rebelCommandEvent('app_loaded', { success: true, description: 'Vector Rebel loaded.' });
+        void refreshSharedRebelRoster(false);
+        void flushPendingErrorReports();
+        // Only the backend owner-linked identity may unlock Master.
+        void verifyMasterOwnerInstallation();
         refreshPanelInfo();
+    });
+    setInterval(()=>{
+        void refreshSharedRebelRoster(false);
+        // A partial midnight check gets an unattended retry while the tab
+        // stays open; a successfully completed day does no extra network work.
+        void runMidnightInterfaceReview();
+        void verifyMasterOwnerInstallation();
+    },10*60*1000);
+    setInterval(()=>{void flushPendingErrorReports();},5*60*1000);
+
+    // Both panel layouts use the same installed userscript. At midnight local
+    // time, check the published version, refresh the approved roster and the
+    // master error inbox. Tampermonkey remains responsible for installing
+    // new script bytes; never hot-swap code during a PPE inspection.
+    scheduleMidnightInterfaceReview();
+    void runMidnightInterfaceReview();
+    setInterval(()=>{
+        if(isMasterOwnerInstallation()&&
+            Date.now()-lastInterfaceErrorInboxPoll>=ALERT_POLL_MS){
+            lastInterfaceErrorInboxPoll=Date.now();
+            void refreshMasterErrorInbox({notify:true});
+        }
+    },ALERT_POLL_MS);
+    document.addEventListener('visibilitychange',()=>{
+        if(document.visibilityState==='visible'){
+            void verifyMasterOwnerInstallation();
+            void runMidnightInterfaceReview();
+            if(isMasterOwnerInstallation()&&
+                Date.now()-lastInterfaceErrorInboxPoll>=ALERT_POLL_MS){
+                lastInterfaceErrorInboxPoll=Date.now();
+                void refreshMasterErrorInbox({notify:true});
+            }
+        }
     });
 
     const migrationNotice = loadJSON(MIGRATION_NOTICE_KEY, null);
@@ -9028,6 +15989,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
     }, 700);
 
+    // Read-only apparatus scan continues through native same-tab Item Log pages.
+    // Never visits Start Inspection or submits an official form.
+    setTimeout(()=>{void apparatusResumeRun();},900);
+    setInterval(()=>{void apparatusResumeRun();},2000);
     // Keep ownership alive only for the tab that already owns the active run.
     setInterval(() => {
         if (getRun()) refreshRunOwnership();
@@ -9044,6 +16009,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     const runObserverHandler = () => {
         observerLastRunAt = Date.now();
         if (!document.getElementById(PANEL_ID)) installPanel();
+        dismissObsoleteRecoveryToast();
+        repairCaptureVisibleItemPage();
         if (location.href !== lastUrl) {
             lastUrl = location.href;
             setTimeout(async () => {
