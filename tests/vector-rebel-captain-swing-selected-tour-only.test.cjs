@@ -87,8 +87,8 @@ test('Rebel Command attendance review ignores historical work/unknown for swings
   '\nreturn captainCommandAttendanceCandidates;')(
   helpers.isSwing,x=>String(x||'').toLowerCase().trim(),()=>true);
  const report={tourRoster:baseRoster,auditWindow:baseWindow,owners:[
-  {...captain,items:[{tourChecks:[{startDate:'2026-11-09',ok:false}]}]},
-  {...swing,items:[{tourChecks:[{startDate:'2026-11-09',ok:false}]}]}
+  {...captain,items:[{tourChecks:[{startDate:'2026-11-09',due:true,ok:false}]}]},
+  {...swing,items:[{tourChecks:[{startDate:'2026-11-09',due:true,ok:false}]}]}
  ]};
  const records=[
   obs(captain.name,'2026-11-09','full_leave_evidence'),

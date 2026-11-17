@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.74
+// @version      3.2.75
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -32,7 +32,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.74',
+        version: '3.2.75',
         startedAt: Date.now()
     };
 
@@ -40,7 +40,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.74';
+    const VERSION = '3.2.75';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -1209,7 +1209,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ...set,
             memberPrefixes: [...new Set((set.memberPrefixes || []).map(prefix =>
                 prefix === oldPrefixNormalized ? nextPrefix : prefix
-            ))]
+            ))],
+            assignmentWindows: Object.fromEntries(
+                Object.entries(set.assignmentWindows || {}).map(([prefix,range]) =>
+                    [prefix === oldPrefixNormalized ? nextPrefix : prefix,range])
+            )
         }));
         config.captainRosterPrefixes = [...new Set(
             (config.captainRosterPrefixes || []).map(prefix =>
@@ -1732,6 +1736,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 id: clean(raw?.id) || `set-${Date.now()}-${out.length}-${Math.random().toString(36).slice(2, 8)}`,
                 name,
                 memberPrefixes: members,
+                // Date-scoped temporary Captain Set members are not permanent
+                // historical roster members. Store precise tour-start bounds.
+                assignmentWindows: Object.fromEntries(
+                    Object.entries(raw?.assignmentWindows || {})
+                        .map(([prefix,range]) => [clean(prefix).toUpperCase(), {
+                            startDate: validDateKey(range?.startDate) || '',
+                            endDate: validDateKey(range?.endDate) || ''
+                        }])
+                        .filter(([prefix,range]) => members.includes(prefix) &&
+                            range.startDate && (!range.endDate ||
+                            range.endDate >= range.startDate))
+                ),
                 gearSearchPrefixes: Object.fromEntries(
                     Object.entries(raw?.gearSearchPrefixes || {})
                         .map(([id,term]) => [clean(id).toUpperCase(), clean(term).toUpperCase()])
@@ -5591,6 +5607,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function captainOwnerTourDuty(owner, tour, auditWindow, roster,
             historicalOff=null,scoutRecords=null) {
+        // A temporary multi-tour assignment has a defined FIRST/LAST tour,
+        // even though the member is kept in this Captain Set for easy daily
+        // selection. Never turn verified work on unrelated earlier shifts
+        // into falsely missed Captain checks. Genuine native green history
+        // is rendered independently by buildCaptainDailyReport.
+        const assignment=roster?.basePrefixes?.includes(owner?.prefix)?
+            roster.assignmentWindows?.[owner.prefix]:null;
+        if(assignment?.startDate &&
+                (tour.startDate<assignment.startDate ||
+                (assignment.endDate && tour.startDate>assignment.endDate)))
+            return {due:false,off:false,unknown:false,notAssigned:true,
+                assignmentSource:'outside_temporary_assignment'};
         // Apply the explicit per-day swing selection before ANY inferred
         // Scout duty. Working another unit in an old tour is not a reason
         // to generate missing Captain checks in this temporary crew report.
@@ -5930,7 +5958,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     ['full_leave_evidence','deployment_evidence'].includes(day.status));
                 const relevant=(owner.items||[]).some(item=>
                     (item.tourChecks||[]).some(check=>
-                        check.startDate===tour.startDate && !check.ok));
+                        check.startDate===tour.startDate && check.due && !check.ok));
                 if(!relevant)continue;
                 if(worked)continue; // Actual unit duty is required, not an excuse.
                 if(fullyOff)continue; // Report already displays source-verified OFF.
@@ -6091,6 +6119,21 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         if (Number(report.schemaVersion || 0) < 7) {
             setStatus('This stored Daily Captain report includes the retired Monthly Captain requirement. Run the Tour-only read-only audit again.', false);
             return;
+        }
+        // If the captain corrected an existing member's temporary assignment
+        // dates in Settings, rebuild the saved report from its SAME native
+        // Item Log snapshot. Do not rescan, re-submit, or alter the audit time.
+        const savedSet=(getConfig().captainSets||[])
+            .find(set=>set.id===report.setId);
+        const savedWindows=savedSet?.assignmentWindows||{};
+        if(report.tourRoster?.basePrefixes?.length && savedSet &&
+                JSON.stringify(report.tourRoster.assignmentWindows||{})!==
+                    JSON.stringify(savedWindows)){
+            const roster={...report.tourRoster,assignmentWindows:savedWindows};
+            report={...report,tourRoster:roster,
+                sourceSnapshot:{...(report.sourceSnapshot||{}),tourRoster:roster}};
+            report=captainRebuildStoredDailyReport(report);
+            saveJSON(CAPTAIN_DAILY_REPORT_KEY,report);
         }
         if(!report.swingHistoryLimited && (report.tourRoster?.swingPrefixes||[]).length){
             // Upgrade previously generated 3.2.73 reports immediately,
@@ -6323,6 +6366,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 person.style.cssText = 'position:sticky;left:0;z-index:2;min-width:155px;padding:6px 8px;' + topBorder +
                     'background:' + rowBackground + ';font-weight:800;color:#18384f;white-space:nowrap;';
                 const isTemporarySwing=captainIsTemporarySwing(owner,report.tourRoster);
+                const assignment=report.tourRoster?.assignmentWindows?.[owner.prefix];
                 const swingDates=isTemporarySwing?
                     [report.tourRoster.startDate,report.tourRoster.endDate]
                         .filter(date=>(report.tourRoster.onByDate?.[date]||[])
@@ -6330,7 +6374,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         .map(date=>date.slice(5)):[];
                 person.innerHTML = '<span>' + escapeHtml(owner.name || owner.prefix || 'Unknown') + '</span>' +
                     (owner.prefix ? ' <span style="font-size:9px;font-weight:500;color:#7a8d99">(' + escapeHtml(owner.prefix) + ')</span>' : '')+
-                    (isTemporarySwing?' <span style="font-size:9px;font-weight:800;color:#136483;background:#e9f4fa;border-radius:4px;padding:2px 4px;">SWING '+escapeHtml(swingDates.join(' + '))+' ONLY</span>':'');
+                    (isTemporarySwing?' <span style="font-size:9px;font-weight:800;color:#136483;background:#e9f4fa;border-radius:4px;padding:2px 4px;">SWING '+escapeHtml(swingDates.join(' + '))+' ONLY</span>':'')+
+                    (assignment?.startDate?' <span style="font-size:9px;font-weight:800;color:#136483;background:#e9f4fa;border-radius:4px;padding:2px 4px;">TEMP '+escapeHtml(assignment.startDate)+' to '+escapeHtml(assignment.endDate||'ongoing')+'</span>':'');
 
                 const itemCell = document.createElement('td');
                 itemCell.style.cssText = 'position:sticky;left:155px;z-index:2;min-width:210px;padding:6px 8px;' + topBorder +
@@ -6479,9 +6524,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const scope=set.id+'|'+dates.join('|');
             if(scope!==lastRosterScope){
                 lastRosterScope=scope;
-                tourEntries=new Map(set.people.map(person=>[person.prefix,{
-                    person,base:true,day1:true,day2:true
-                }]));
+                tourEntries=new Map(set.people.map(person=>{
+                    const temp=set.assignmentWindows?.[person.prefix];
+                    // Saved windows use two-day C-shift TOUR START dates.
+                    const active=!temp?.startDate ||
+                        (dates[0]>=temp.startDate &&
+                        (!temp.endDate||dates[0]<=temp.endDate));
+                    return[person.prefix,{person,base:true,
+                        assignmentWindow:temp||null,
+                        day1:active,day2:active}];
+                }));
             }
             tourKeys=dates;
             rosterList.innerHTML='';
@@ -6501,7 +6553,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const row=document.createElement('div');
                 row.style.cssText='display:grid;grid-template-columns:minmax(110px,1fr) 92px 92px 34px;gap:4px;align-items:center;padding:5px 2px;border-top:1px solid #e0ebef;font:11px Arial;';
                 const name=document.createElement('span');
-                name.textContent=entry.person.name+(entry.base?'':' · SWING');
+                const span=entry.assignmentWindow;
+                name.textContent=entry.person.name+(entry.base?'':' · SWING')+
+                    (span?.startDate?' · TEMP '+span.startDate.slice(5)+
+                        (span.endDate?' to '+span.endDate.slice(5):'+'):'');
                 name.style.cssText='min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;';
                 row.appendChild(name);
                 for(let i=0;i<2;i++){
@@ -6509,6 +6564,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     label.style.cssText='display:flex;align-items:center;justify-content:center;gap:4px;cursor:pointer;';
                     const cb=document.createElement('input');
                     cb.type='checkbox';cb.checked=i?entry.day2:entry.day1;
+                    const span=entry.assignmentWindow;
+                    const outside=entry.base&&span?.startDate&&
+                        (dates[0]<span.startDate||
+                        (span.endDate&&dates[0]>span.endDate));
+                    // An outside-window member is not an OFF person, and
+                    // cannot be checked 'Here' without editing their dates.
+                    cb.disabled=!!outside;
                     cb.setAttribute('aria-label',(i?'Day 2':'Day 1')+' '+entry.person.name+' on duty');
                     cb.onchange=()=>{
                         if(i)entry.day2=cb.checked;
@@ -6517,7 +6579,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         refreshCount();
                     };
                     const state=document.createElement('span');
-                    state.textContent=cb.checked?'Here':'Off';
+                    state.textContent=outside?'Not assigned':(cb.checked?'Here':'Off');
                     label.append(cb,state);row.appendChild(label);
                 }
                 const last=document.createElement('span');
@@ -6628,6 +6690,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     startDate:keys[0],endDate:keys[1],
                     basePrefixes:set.people.map(person=>person.prefix),
                     swingPrefixes:selected.filter(entry=>!entry.base).map(entry=>entry.person.prefix),
+                    assignmentWindows:set.assignmentWindows||{},
                     onByDate
                 }
             };
@@ -10915,8 +10978,84 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const selected = new Set((currentSet?.memberPrefixes || [])
                     .map(prefix => roster.find(p=>p.prefix===prefix)?.prefix ||
                         rosterPersonByPrefix(prefix)?.prefix || prefix));
+                const assignmentWindows={...(currentSet?.assignmentWindows||{})};
                 // Crew selection is person-based. Vector's Responsible Party
                 // filter finds every equipment ID; no gear prefix inputs.
+
+                // Keep six-month / other temporary assignment boundaries in the
+                // existing Captain Set, not a separate crew or a fake OFF record.
+                const tempBox=document.createElement('div');
+                tempBox.style.cssText='border:1px solid #c4d8e5;border-radius:7px;padding:9px;margin:9px 0;background:#f2f9fc;font:11px Arial;color:#31586f;';
+                const tempTitle=document.createElement('strong');
+                tempTitle.textContent='Temporary Captain Set assignment dates';
+                const tempDescription=document.createElement('div');
+                tempDescription.textContent='Use for people assigned to your crew for several tours (such as six months). Enter the first and last two-day C-shift TOUR START dates. Earlier/later tours stay blank unless a real Vector check was completed. Leave the last date empty for an ongoing assignment.';
+                tempDescription.style.cssText='margin:5px 0 8px;line-height:1.45;';
+                const tempPerson=document.createElement('select');
+                tempPerson.setAttribute('aria-label','Crew member with temporary assignment');
+                const tempStart=document.createElement('input');
+                tempStart.type='date';tempStart.setAttribute('aria-label','First temporary tour start');
+                const tempEnd=document.createElement('input');
+                tempEnd.type='date';tempEnd.setAttribute('aria-label','Last temporary tour start optional');
+                for(const c of [tempPerson,tempStart,tempEnd]){
+                    c.style.cssText='padding:7px;border:1px solid #afc8d7;border-radius:5px;background:white;color:#19415a;max-width:100%;';
+                }
+                const tempControls=document.createElement('div');
+                tempControls.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
+                const markTemp=makeButton('Save temporary dates',{background:'#176b8e',color:'#fff'});
+                const clearTemp=makeButton('Make permanent again');
+                const tempStatus=document.createElement('div');
+                tempStatus.style.cssText='font:10px Arial;color:#48657a;margin-top:5px;';
+                tempControls.append(tempPerson,tempStart,tempEnd,markTemp,clearTemp);
+                tempBox.append(tempTitle,tempDescription,tempControls,tempStatus);
+                editor.appendChild(tempBox);
+                const temporaryMemberOptions=()=>{
+                    const old=tempPerson.value;
+                    tempPerson.innerHTML='';
+                    const members=roster.filter(p=>selected.has(p.prefix))
+                        .sort((a,b)=>a.name.localeCompare(b.name));
+                    members.forEach(p=>{
+                        const opt=document.createElement('option');
+                        opt.value=p.prefix;opt.textContent=p.name;
+                        tempPerson.appendChild(opt);
+                    });
+                    if(members.some(p=>p.prefix===old))tempPerson.value=old;
+                    tempPerson.disabled=!members.length;
+                    const range=assignmentWindows[tempPerson.value]||{};
+                    tempStart.value=range.startDate||'';
+                    tempEnd.value=range.endDate||'';
+                    clearTemp.disabled=!range.startDate;
+                    const count=members.filter(p=>assignmentWindows[p.prefix]?.startDate).length;
+                    tempStatus.textContent=count+' of '+members.length+
+                        ' selected members have a dated temporary assignment.';
+                };
+                tempPerson.onchange=temporaryMemberOptions;
+                markTemp.onclick=()=>{
+                    const prefix=tempPerson.value;
+                    if(!selected.has(prefix)){alert('Select a crew member first.');return;}
+                    const start=validDateKey(tempStart.value);
+                    const end=tempEnd.value?validDateKey(tempEnd.value):'';
+                    if(!start||(tempEnd.value&&!end)||(end&&end<start)){
+                        alert('Choose a valid first tour date and optional last tour date after it.');return;
+                    }
+                    const firstTour=inferRegularTourWindow(new Date(start+'T12:00:00'));
+                    if(firstTour.startDate!==start){
+                        alert('The first date must be the start day of a two-day C-shift tour ('+
+                            firstTour.startDate+' for the chosen date).');return;
+                    }
+                    if(end&&inferRegularTourWindow(new Date(end+'T12:00:00')).startDate!==end){
+                        alert('The last date must also be a two-day C-shift tour start.');return;
+                    }
+                    assignmentWindows[prefix]={startDate:start,endDate:end};
+                    temporaryMemberOptions();
+                    setStatus('Temporary dates staged. Save Captain Set to apply them to the saved PPE history.');
+                };
+                clearTemp.onclick=()=>{
+                    delete assignmentWindows[tempPerson.value];
+                    temporaryMemberOptions();
+                    setStatus('Permanent membership staged. Save Captain Set to apply.');
+                };
+                temporaryMemberOptions();
 
                 function drawPeople() {
                     const q = clean(searchWrap.input.value).toLowerCase();
@@ -10945,7 +11084,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             else selected.delete(person.prefix);
                             count.textContent =
                                 `${roster.length} people available · ${filtered.length} shown · ${selected.size} selected`;
-
+                            temporaryMemberOptions();
                         };
 
                         const text = document.createElement('div');
@@ -10966,6 +11105,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         if(!existing)roster.push(added);
                         roster.sort((a,b)=>a.name.localeCompare(b.name));
                         selected.add((existing||added).prefix);
+                        temporaryMemberOptions();
                         searchWrap.input.value='';
                         addCrewName.input.value='';
                         drawPeople();
@@ -11021,6 +11161,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                                 id: editingSetId || `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                                 name,
                                 memberPrefixes: [...selected],
+                                assignmentWindows:Object.fromEntries(
+                                    Object.entries(assignmentWindows)
+                                        .filter(([prefix])=>selected.has(prefix))
+                                ),
                                 orphanedPrefixes: []
                             }
                         ];
@@ -13334,7 +13478,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.74'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.75'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -13422,7 +13566,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // form if Vector rerenders or SPA navigation races the interval.
     function scbaAirpackSelectNativeTemplate() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' ||
             queue.chooserSelectionAttemptedAt || getRun())return false;
         const item=queue.items[queue.index];
@@ -13480,7 +13624,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>180000 || Date.now()<queue.openedAt)return false;
@@ -13629,7 +13773,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const q=scbaAirpackReadNativeQueue();
         if(!q || q.phase!=='form_prefilled' ||
             !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
-            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74'].includes(q.inspectionVersion) || getRun())return false;
+            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75'].includes(q.inspectionVersion) || getRun())return false;
         const item=q.items[q.index],ins=currentInspection();
         if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
             ins.instance!==q.formInstance || q.submitAttemptedAt)return false;
@@ -13757,7 +13901,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75'].includes(queue.inspectionVersion) ||
             !['form_prefilled','native_form_opened','native_submit_clicked'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -13825,7 +13969,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // authorization. Record a no-retry latch BEFORE the final click.
     function scbaAirpackFinalizeFailure() {
         const q=scbaAirpackReadNativeQueue();
-        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74'].includes(q.inspectionVersion) ||
+        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75'].includes(q.inspectionVersion) ||
            q.phase!=='native_submit_clicked' || !q.autoSubmitApproved ||
            !q.physicalInspectionConfirmedAt || q.failureFinalSubmitAt ||
            q.failureNotePreparedFor!==q.submittedFormInstance || getRun())return false;
@@ -14000,7 +14144,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         if(!fresh || fresh.items[fresh.index].href!==item.href ||
                            fresh.phase!=='form_prefilled')return;
                         sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
-                            JSON.stringify({...fresh,inspectionVersion:'3.2.74',
+                            JSON.stringify({...fresh,inspectionVersion:'3.2.75',
                                 autoSubmitApproved:true,
                                 physicalInspectionConfirmedAt:new Date().toISOString()}));
                         continueButton.disabled=true;
