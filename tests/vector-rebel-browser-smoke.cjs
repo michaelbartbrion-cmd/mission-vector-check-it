@@ -25,7 +25,7 @@ const js=String.raw`
 (function(){
  const PANEL_ID='vector-ppe-helper-v23',PANEL_MINIMIZED_KEY='vectorPpePanelMinimized_v1';
  const PANEL_INTERFACE_KEY='vectorRebelInterfaceModeV1',REBEL_COMMAND_PAIR_KEY='vectorRebelPairingV1';
- const VERSION='3.2.76',store=new Map();
+ const VERSION='3.2.77',store=new Map();
  let owner=true;
  const rebelCommandPaired=()=>owner;
  const GM_getValue=(key,fallback)=>key===REBEL_COMMAND_PAIR_KEY?
@@ -62,8 +62,8 @@ const js=String.raw`
  const assertLabels=(got,want,msg)=>{
    if(got.join('|')!==want.join('|'))throw Error(msg+': '+got.join('|'));
  };
- const user=['Tour PPE','After Fire','PPE Form','Daily Captain Check','Settings','Master List'];
- const extra=['SCBA Airpacks','Apparatus Check','Manage Master List',
+ const user=['Tour PPE','After Fire','PPE Form','Daily Captain Check','Settings'];
+ const extra=['Master List','SCBA Airpacks','Apparatus Check','Manage Master List',
               'Errors & Alerts','Report Problem','Check for Update'];
  const result={};
  try{

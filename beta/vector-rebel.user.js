@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.76
+// @version      3.2.77
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -33,7 +33,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.76',
+        version: '3.2.77',
         startedAt: Date.now()
     };
 
@@ -41,7 +41,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.76';
+    const VERSION = '3.2.77';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -1754,6 +1754,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             out.push({
                 id: clean(raw?.id) || `set-${Date.now()}-${out.length}-${Math.random().toString(36).slice(2, 8)}`,
                 name,
+                // Older Captain Sets are C-shift sets. Never infer A/B from
+                // the saved firefighter names or this browser's account.
+                shift: ['A','B','C'].includes(clean(raw?.shift).toUpperCase())?
+                    clean(raw.shift).toUpperCase():'C',
                 memberPrefixes: members,
                 // Date-scoped temporary Captain Set members are not permanent
                 // historical roster members. Store precise tour-start bounds.
@@ -5117,13 +5121,23 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     let captainDailyBusy = false;
     let captainDailyCancelSerial = 0;
 
-    // Michael's normal 48/96 rotation is two consecutive 24-hour shifts followed
-    // by four days off. Sep 22, 2026 is a verified first-shift anchor from the
-    // current CrewSense/Scout schedule. The picker always exposes the inferred
-    // start date so a trade or special assignment can be audited explicitly.
+    // Verified staffing rule: 48/96 with ordered cycle C,C,A,A,B,B, based
+    // on its 2026-01-07 C anchor. Sep 22, 2026 is also a C-shift start.
+    // Captain Sets select their OWN regular shift; cross-shift swaps, trades,
+    // deployments and leave remain individual daily attendance exceptions.
     const CAPTAIN_TOUR_ANCHOR_DATE = '2026-09-22';
     const CAPTAIN_TOUR_CYCLE_DAYS = 6;
     const CAPTAIN_TOUR_SHIFT_DAYS = 2;
+    const CAPTAIN_SHIFT_OFFSETS = Object.freeze({C:0,A:2,B:4});
+    function captainShiftLabel(raw){
+        const shift=clean(raw).toUpperCase();
+        return Object.prototype.hasOwnProperty.call(CAPTAIN_SHIFT_OFFSETS,shift)
+            ?shift:'C';
+    }
+    function captainTourAnchorDate(shift='C'){
+        return addDateKeyDays(CAPTAIN_TOUR_ANCHOR_DATE,
+            CAPTAIN_SHIFT_OFFSETS[captainShiftLabel(shift)]);
+    }
 
     function getCaptainDailyCheck() {
         const value = loadJSON(CAPTAIN_DAILY_CHECK_KEY, null);
@@ -5321,10 +5335,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
     }
 
-    function inferRegularTourWindow(referenceDate = new Date()) {
+    function inferRegularTourWindow(referenceDate = new Date(),shift='C') {
         const todayKey = localTodayKey(referenceDate);
         const todayDay = utcDayNumber(todayKey);
-        const anchorDay = utcDayNumber(CAPTAIN_TOUR_ANCHOR_DATE);
+        const anchorDay = utcDayNumber(captainTourAnchorDate(shift));
         if (!Number.isFinite(todayDay) || !Number.isFinite(anchorDay)) {
             return { startDate: todayKey, endDate: addDateKeyDays(todayKey, 1), isActiveTour: true, source: 'fallback' };
         }
@@ -5337,7 +5351,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             startDate,
             endDate: addDateKeyDays(startDate, CAPTAIN_TOUR_SHIFT_DAYS - 1),
             isActiveTour: offset >= 0 && offset < CAPTAIN_TOUR_SHIFT_DAYS,
-            source: '48/96-anchor'
+            source: '48/96-'+captainShiftLabel(shift)+'-anchor'
         };
     }
 
@@ -5365,7 +5379,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
     }
 
-    function captainAuditWindow(asOfDateKey) {
+    function captainAuditWindow(asOfDateKey,shift='C') {
+        const selectedShift=captainShiftLabel(shift);
         const asOfDate = validDateKey(asOfDateKey) || localTodayKey();
         const currentMonth = asOfDate.slice(0, 7);
         const priorMonth = previousMonthKey(asOfDate);
@@ -5377,7 +5392,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const startDay = utcDayNumber(startDate);
         const endDay = utcDayNumber(endDate);
         const asOfDay = utcDayNumber(asOfDate);
-        const anchorDay = utcDayNumber(CAPTAIN_TOUR_ANCHOR_DATE);
+        const anchorDay = utcDayNumber(captainTourAnchorDate(selectedShift));
         const now = new Date();
         const todayKey = localTodayKey(now);
         const shiftStartReached = asOfDate < todayKey || (asOfDate === todayKey && now.getHours() >= 7);
@@ -5409,6 +5424,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             asOfDate,
             startDate,
             endDate,
+            shift:selectedShift,
             shiftStartHour: 7,
             months: [priorMonth, currentMonth],
             tours
@@ -5558,6 +5574,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         })));
         const updated=buildCaptainDailyReport({
             checkId:report.reportId,setId:report.setId,setName:report.setName,
+            shift:original.shift||report.shift||report.auditWindow?.shift||'C',
             auditAsOfDate:original.auditAsOfDate||report.auditWindow?.asOfDate,
             owners,items,results,discovery,
             tourRoster:original.tourRoster||report.tourRoster||null,
@@ -5718,7 +5735,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     function buildCaptainDailyReport(check) {
-        const window = captainAuditWindow(check.auditAsOfDate || localTodayKey());
+        const shift=['A','B','C'].includes(check.shift||check.tourRoster?.shift)?
+            (check.shift||check.tourRoster?.shift):'C';
+        const window = captainAuditWindow(check.auditAsOfDate || localTodayKey(),shift);
         const historicalOff=getCaptainHistoricalOffTours();
         const scoutRecords=Array.isArray(check.attendanceRecords)?
             check.attendanceRecords:null;
@@ -5809,6 +5828,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             generatedAt: check.displayGeneratedAt||new Date().toISOString(),
             setId: check.setId,
             setName: check.setName,
+            shift,
             ownerCount: owners.length,
             auditWindow: window,
             tourRoster:check.tourRoster||null,
@@ -5826,7 +5846,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 owners:check.owners||[],discovery:check.discovery||[],
                 items:check.fullItems||check.items||[],
                 results:check.results||[],auditAsOfDate:check.auditAsOfDate,
-                tourRoster:check.tourRoster||null,
+                shift,tourRoster:check.tourRoster||null,
                 attendanceRecords:scoutRecords
             },
             attendanceRecords:scoutRecords,
@@ -6179,7 +6199,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             report=captainRebuildStoredDailyReport(report);
             saveJSON(CAPTAIN_DAILY_REPORT_KEY,report);
         }
-        const auditWindow = report.auditWindow || captainAuditWindow(report.generatedAt?.slice(0, 10));
+        const auditWindow = report.auditWindow || captainAuditWindow(
+            report.generatedAt?.slice(0, 10),report.shift||report.tourRoster?.shift);
         const { overlay, box } = makeOverlayBox('1360px');
         const title = document.createElement('div');
         title.style.cssText = 'font-size:22px;font-weight:700;color:#153e5c;margin-bottom:4px;';
@@ -6187,7 +6208,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const sub = document.createElement('div');
         sub.style.cssText = 'font-size:12px;color:#607483;margin-bottom:13px;line-height:1.5;';
         const monthText = (auditWindow.months || []).map(displayMonthKey).join(' + ');
-        sub.innerHTML = escapeHtml(report.setName || 'Captain Set') + ' · read-only Item Log audit · ' + escapeHtml(new Date(report.generatedAt).toLocaleString()) + '<br>' +
+        sub.innerHTML = escapeHtml(report.setName || 'Captain Set') +
+            ' · '+escapeHtml(captainShiftLabel(report.shift||auditWindow.shift))+'-shift' +
+            ' · read-only Item Log audit · ' + escapeHtml(new Date(report.generatedAt).toLocaleString()) + '<br>' +
             '<b>Months:</b> ' + escapeHtml(monthText) + ' · <b>Red ✕</b> = required and missing · <b style="color:#24713b">green ✓</b> = actual completed inspection (including swings) · <b>OFF*</b> = captain-entered entire-tour absence · <b>OFF</b> = verified off/deployed both days · <b>?</b> = regular-crew attendance unknown · blank = unassigned swing tour or future.<br>' +
             'Your regular crew needs a tour check if assigned to any unit on either shift day. A temporary swing is counted here ONLY on the selected date(s) they work with you; their other tours stay blank unless a completed native check exists. OFF/deployed rules apply to regular crew.';
         box.append(title, sub);
@@ -6493,11 +6516,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         usableSets.forEach(set => {
             const option = document.createElement('option');
             option.value = set.id;
-            option.textContent = `${set.name} (${set.people.length})`;
+            option.textContent = `${set.name} · ${captainShiftLabel(set.shift)} shift (${set.people.length})`;
             select.appendChild(option);
         });
         const last = persistentGetRaw(CAPTAIN_LAST_SET_KEY) || '';
         if (usableSets.some(set => set.id === last)) select.value = last;
+        const selectedCaptainShift=()=>captainShiftLabel(
+            (usableSets.find(set=>set.id===select.value)||usableSets[0]).shift);
         box.append(selectLabel, select);
 
         const dateLabel = document.createElement('label');
@@ -6512,8 +6537,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         auditHint.style.cssText = 'font-size:10px;color:#6a7f8f;margin-bottom:13px;line-height:1.4;';
         const updateHint = () => {
             const auditDate = validDateKey(auditInput.value) || localTodayKey();
-            const w = captainAuditWindow(auditDate);
-            auditHint.textContent = `Window: ${displayMonthKey(w.months[0])} + ${displayMonthKey(w.months[1])}, through ${displayHistoryDateKey(w.asOfDate)} · ${w.tours.filter(t => t.due).length} tours due / ${w.tours.length} shown.`;
+            const w = captainAuditWindow(auditDate,selectedCaptainShift());
+            auditHint.textContent = `${w.shift}-shift 48/96 · Window: ${displayMonthKey(w.months[0])} + ${displayMonthKey(w.months[1])}, through ${displayHistoryDateKey(w.asOfDate)} · ${w.tours.filter(t => t.due).length} tours due / ${w.tours.length} shown.`;
         };
         auditInput.onchange = updateHint;
         updateHint();
@@ -6553,7 +6578,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const activeCaptainSet=()=>usableSets.find(x=>x.id===select.value)||usableSets[0];
         const currentTourKeys=()=>{
             const date=validDateKey(auditInput.value)||localTodayKey();
-            const w=inferRegularTourWindow(new Date(date+'T12:00:00'));
+            const w=inferRegularTourWindow(new Date(date+'T12:00:00'),selectedCaptainShift());
             return[w.startDate,w.endDate];
         };
         function renderCaptainTourRoster(){
@@ -6697,7 +6722,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             renderCaptainTourRoster();
             setStatus(person.name+' added as a swing for this tour only. Saved Captain Set unchanged.');
         };
-        select.onchange=renderCaptainTourRoster;
+        select.onchange=()=>{updateHint();renderCaptainTourRoster();};
         auditInput.onchange=()=>{updateHint();renderCaptainTourRoster();};
         renderCaptainTourRoster();
 
@@ -6723,7 +6748,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 ...set,
                 people:selected.map(entry=>entry.person),
                 memberPrefixes:selected.map(entry=>entry.person.prefix),
+                shift:selectedCaptainShift(),
                 tourRoster:{
+                    shift:selectedCaptainShift(),
                     startDate:keys[0],endDate:keys[1],
                     basePrefixes:set.people.map(person=>person.prefix),
                     swingPrefixes:selected.filter(entry=>!entry.base).map(entry=>entry.person.prefix),
@@ -6928,7 +6955,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const scanBeganAtMs=Date.now();
         captainDailyBusy = true;
         try {
-            const window = captainAuditWindow(validAuditDate);
+            const shift=captainShiftLabel(set.shift);
+            const window = captainAuditWindow(validAuditDate,shift);
             const config = getConfig();
             const selfPrefix = clean(config.selfPrefix).toUpperCase();
             if (!(set.people || []).length ||
@@ -6982,6 +7010,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 returnUrl: location.href,
                 setId: set.id,
                 setName: set.name,
+                shift,
                 auditAsOfDate: validAuditDate,
                 tourRoster:set.tourRoster||null,
                 auditStartDate: window.startDate,
@@ -10944,7 +10973,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     text.style.flex = '1';
                     const unresolvedCount = (set.memberPrefixes || []).length - members.length;
                     text.innerHTML =
-                        `<b>${escapeHtml(set.name)}</b><br>` +
+                        `<b>${escapeHtml(set.name)}</b> · ${escapeHtml(captainShiftLabel(set.shift))}-shift<br>` +
                         `<span style="font-size:11px;color:${unresolvedCount > 0 ? '#a55e00' : '#6b7f8c'}">` +
                         `${members.length} crew member${members.length === 1 ? '' : 's'}` +
                         (unresolvedCount > 0 ? ` · ${unresolvedCount} legacy/unresolved key(s): edit before use` : '') +
@@ -10993,6 +11022,19 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     { placeholder: 'My Crew' }
                 );
                 editor.appendChild(setName.wrap);
+                const shiftWrap=document.createElement('label');
+                shiftWrap.style.cssText='display:block;font:700 12px Arial;color:#385c72;margin:7px 0;';
+                shiftWrap.textContent='Regular shift (sets two-day tour dates)';
+                const shiftSelect=document.createElement('select');
+                shiftSelect.setAttribute('aria-label','Captain Set regular shift');
+                shiftSelect.style.cssText='display:block;margin-top:5px;width:100%;padding:9px;border:1px solid #afc8d7;border-radius:6px;';
+                for(const s of ['C','A','B']){
+                    const option=document.createElement('option');
+                    option.value=s;option.textContent=s+' shift';shiftSelect.appendChild(option);
+                }
+                shiftSelect.value=captainShiftLabel(currentSet?.shift);
+                shiftWrap.appendChild(shiftSelect);
+                editor.appendChild(shiftWrap);
 
                 const searchWrap = field('Find a person', '', { placeholder: 'Start typing a name…' });
                 editor.appendChild(searchWrap.wrap);
@@ -11033,7 +11075,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const tempTitle=document.createElement('strong');
                 tempTitle.textContent='Temporary Captain Set assignment dates';
                 const tempDescription=document.createElement('div');
-                tempDescription.textContent='Use for people assigned to your crew for several tours (such as six months). Enter the first and last two-day C-shift TOUR START dates. Earlier/later tours stay blank unless a real Vector check was completed. Leave the last date empty for an ongoing assignment.';
+                tempDescription.textContent='For people temporarily assigned to this Captain Set, enter the first and last two-day TOUR START dates on the selected regular shift. Earlier/later tours stay blank unless a real Vector check was completed. Leave the last date empty for an ongoing assignment.';
                 tempDescription.style.cssText='margin:5px 0 8px;line-height:1.45;';
                 const tempPerson=document.createElement('select');
                 tempPerson.setAttribute('aria-label','Crew member with temporary assignment');
@@ -11082,13 +11124,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     if(!start||(tempEnd.value&&!end)||(end&&end<start)){
                         alert('Choose a valid first tour date and optional last tour date after it.');return;
                     }
-                    const firstTour=inferRegularTourWindow(new Date(start+'T12:00:00'));
+                    const shift=captainShiftLabel(shiftSelect.value);
+                    const firstTour=inferRegularTourWindow(new Date(start+'T12:00:00'),shift);
                     if(firstTour.startDate!==start){
-                        alert('The first date must be the start day of a two-day C-shift tour ('+
+                        alert('The first date must be the start day of a two-day '+shift+'-shift tour ('+
                             firstTour.startDate+' for the chosen date).');return;
                     }
-                    if(end&&inferRegularTourWindow(new Date(end+'T12:00:00')).startDate!==end){
-                        alert('The last date must also be a two-day C-shift tour start.');return;
+                    if(end&&inferRegularTourWindow(new Date(end+'T12:00:00'),shift).startDate!==end){
+                        alert('The last date must also be a two-day '+shift+'-shift tour start.');return;
                     }
                     assignmentWindows[prefix]={startDate:start,endDate:end};
                     temporaryMemberOptions();
@@ -11178,6 +11221,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         const otherSets = (latest.captainSets || []).filter(s => s.id !== editingSetId);
                         const duplicate = otherSets.find(s => clean(s.name).toLowerCase() === name.toLowerCase());
                         if (duplicate) throw new Error(`A Captain Set named "${name}" already exists.`);
+                        const newShift=captainShiftLabel(shiftSelect.value);
+                        for(const [member,dates] of Object.entries(assignmentWindows)){
+                            if(!selected.has(member)||!dates?.startDate)continue;
+                            for(const date of [dates.startDate,dates.endDate].filter(Boolean)){
+                                if(inferRegularTourWindow(new Date(date+'T12:00:00'),newShift).startDate!==date)
+                                    throw new Error('Temporary assignment date '+date+
+                                        ' is not a '+newShift+'-shift tour start. Adjust temporary dates before saving the shift change.');
+                            }
+                        }
 
                         const required = new Set(otherSets.flatMap(s => s.memberPrefixes || []));
                         for (const prefix of selected) required.add(prefix);
@@ -11204,6 +11256,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             {
                                 id: editingSetId || `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                                 name,
+                                shift:captainShiftLabel(shiftSelect.value),
                                 memberPrefixes: [...selected],
                                 assignmentWindows:Object.fromEntries(
                                     Object.entries(assignmentWindows)
@@ -13546,7 +13599,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.76'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.77'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -13634,7 +13687,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // form if Vector rerenders or SPA navigation races the interval.
     function scbaAirpackSelectNativeTemplate() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' ||
             queue.chooserSelectionAttemptedAt || getRun())return false;
         const item=queue.items[queue.index];
@@ -13692,7 +13745,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>180000 || Date.now()<queue.openedAt)return false;
@@ -13841,7 +13894,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const q=scbaAirpackReadNativeQueue();
         if(!q || q.phase!=='form_prefilled' ||
             !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
-            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76'].includes(q.inspectionVersion) || getRun())return false;
+            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77'].includes(q.inspectionVersion) || getRun())return false;
         const item=q.items[q.index],ins=currentInspection();
         if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
             ins.instance!==q.formInstance || q.submitAttemptedAt)return false;
@@ -13969,7 +14022,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77'].includes(queue.inspectionVersion) ||
             !['form_prefilled','native_form_opened','native_submit_clicked'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -14037,7 +14090,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // authorization. Record a no-retry latch BEFORE the final click.
     function scbaAirpackFinalizeFailure() {
         const q=scbaAirpackReadNativeQueue();
-        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76'].includes(q.inspectionVersion) ||
+        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77'].includes(q.inspectionVersion) ||
            q.phase!=='native_submit_clicked' || !q.autoSubmitApproved ||
            !q.physicalInspectionConfirmedAt || q.failureFinalSubmitAt ||
            q.failureNotePreparedFor!==q.submittedFormInstance || getRun())return false;
@@ -14212,7 +14265,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         if(!fresh || fresh.items[fresh.index].href!==item.href ||
                            fresh.phase!=='form_prefilled')return;
                         sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
-                            JSON.stringify({...fresh,inspectionVersion:'3.2.76',
+                            JSON.stringify({...fresh,inspectionVersion:'3.2.77',
                                 autoSubmitApproved:true,
                                 physicalInspectionConfirmedAt:new Date().toISOString()}));
                         continueButton.disabled=true;
@@ -15524,14 +15577,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
               'font:700 12px/1.2 Arial;box-shadow:0 1px 2px rgba(15,43,62,.08);';
             b.onclick=onClick;actions.appendChild(b);
         };
-        // User interface always shows exactly the six approved entry points.
+        // Ordinary users need only the five requested entry points.
+        // The read-only Master List remains in Master; regular users still
+        // receive its approved names internally for Captain Sets and PPE.
         make('Tour PPE',()=>launchMyInspectionFromAnywhere('tour'),true);
         make('After Fire',()=>launchMyInspectionFromAnywhere('afterFire'),true);
         make('PPE Form',showPpeCleanRepairForm);
         make('Daily Captain Check',launchCaptainDailyCheckFromAnywhere);
         make('Settings',()=>showSettings('profile'));
-        make('Master List',showSharedMasterList);
         if(master){
+            make('Master List',showSharedMasterList);
             make('SCBA Airpacks',showStation4ScbaAirpackCheck);
             make('Apparatus Check',showApparatusCheck);
             make('Manage Master List',()=>showSettings('admin'));

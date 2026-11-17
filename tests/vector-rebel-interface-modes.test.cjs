@@ -32,15 +32,15 @@ function renderMock({master=false,owner=false}={}){
  return {actions:actions.children.map(c=>c.textContent),buttons:actions.children,
   mode:label.textContent,switch: switcher};
 }
-const USER=['Tour PPE','After Fire','PPE Form','Daily Captain Check','Settings','Master List'];
-test('User Interface presents only the six exact requested actions',()=>{
+const USER=['Tour PPE','After Fire','PPE Form','Daily Captain Check','Settings'];
+test('User Interface presents only the five requested actions',()=>{
  const v=renderMock({master:false,owner:false});
  assert.deepEqual(v.actions,USER);
  assert.equal(v.mode,'USER INTERFACE');
  assert.equal(v.switch.style.display,'none');
  for(const button of v.buttons)assert.equal(button.type,'button');
 });
-test('owner in User preview sees exact same six actions and a return toggle',()=>{
+test('owner in User preview sees exact same five actions and a return toggle',()=>{
  const v=renderMock({master:false,owner:true});
  assert.deepEqual(v.actions,USER);
  assert.equal(v.switch.style.display,'block');
@@ -49,7 +49,7 @@ test('owner in User preview sees exact same six actions and a return toggle',()=
 test('Master Interface keeps user actions and exposes additional owner tools',()=>{
  const v=renderMock({master:true,owner:true});
  assert.deepEqual(v.actions,[
-  ...USER,'SCBA Airpacks','Apparatus Check',
+  ...USER,'Master List','SCBA Airpacks','Apparatus Check',
   'Manage Master List','Errors & Alerts','Report Problem','Check for Update'
  ]);
  assert.equal(v.mode,'MASTER INTERFACE');
