@@ -65,7 +65,7 @@ test('Workbook contains real editable per-person .xlsx worksheets and source met
  assert.match(sources,/https:\/\/app.vectorcheckit.us/);
 });
 test('Control is visible and person selection uses the verified Responsible Party scan',()=>{
- assert.match(source,/mainAction\('PPE Clean \/ Repair Form', showPpeCleanRepairForm, false\)/);
+ assert.match(source,/make\('PPE Form',showPpeCleanRepairForm\)/);
  assert.match(source,/getActiveMasterRoster\(\)/);
  assert.match(source,/scanPpeByResponsibleParty\(person.name/);
  assert.ok(source.includes("const k=slot.asset.pool+':'+slot.asset.itemId"));

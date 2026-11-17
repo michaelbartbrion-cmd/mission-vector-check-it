@@ -80,7 +80,7 @@ test('Failures report through both automatic event and optional incident feedbac
  assert.match(src,/submitRebelCommandFeedback\(item\.message,/);
  assert.match(src,/sourceContext:item\.context\|\|'automatic_error'/);
  assert.match(src,/const fillLastError=makeButton\('Use Last Error'\)/);
- assert.match(src,/mainAction\('Report Problem', showProblemReport, false\)/);
+ assert.match(src,/make\('Report Problem',showProblemReport\)/);
  assert.match(src,/Number\(receipt\.acceptedSuggestions\)>0/);
  assert.match(src,/telemetrySafeErrorMessage\(reason/);
  assert.match(src,/detailedProblemReport\(reason,workflow,stage\)/);
@@ -91,7 +91,8 @@ test('Master List buttons expose local publish and recipient download without PP
  assert.match(src,/makeButton\('Get Latest Master List'/);
  assert.match(src,/action=vr-publish-roster/);
  assert.match(src,/if\(!rebelCommandPairing\(\)\?\.autoEnrolled\)rosterCard.append\(shareRoster\)/);
- assert.match(src,/setInterval\(\(\)=>\{void refreshSharedRebelRoster\(false\);\},10\*60\*1000\)/);
+ assert.match(src,/setInterval\(\(\)=>\{\s*void refreshSharedRebelRoster\(false\);/);
+ assert.match(src,/void runMidnightInterfaceReview\(\);\s*void verifyMasterOwnerInstallation\(\);\s*\},10\*60\*1000\)/);
 });
 test('admin-roster publication sends approved names only and confirms server receipt',async()=>{
  stored.localMaster={people:[

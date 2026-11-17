@@ -16,9 +16,9 @@ const locations=[
     {id:'station4',location:'Station 4 SCBA Supply Room',exact:/^Station 4 SCBA Supply Room$/i}
 ];
 test('airpack check is independently available in existing Vector Rebel panel',()=>{
-    assert.match(src,/mainAction\('SCBA Airpacks', showStation4ScbaAirpackCheck, false\)/);
-    assert.match(src,/mainAction\('My Tour PPE',/);
-    assert.match(src,/^\/\/ @version\s+3\.2\.75/m);
+    assert.match(src,/make\('SCBA Airpacks',showStation4ScbaAirpackCheck\)/);
+    assert.match(src,/make\('Tour PPE',/);
+    assert.match(src,/^\/\/ @version\s+3\.2\.76/m);
     assert.match(src,/const SCBA_AIRPACK_DRAFT_KEY = 'vector-rebel-station4-airpack-draft-v1'/);
     const check=cut('function showStation4ScbaAirpackCheck() {','function installPanel() {');
     assert.match(check,/makeOverlayBox\('830px'\)/);
