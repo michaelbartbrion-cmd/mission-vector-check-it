@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.78
+// @version      3.2.79
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -33,7 +33,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.78',
+        version: '3.2.79',
         startedAt: Date.now()
     };
 
@@ -41,7 +41,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.78';
+    const VERSION = '3.2.79';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -7773,6 +7773,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             at: new Date().toISOString()
         });
 
+        cPilotQueueNativeCompletion(run,item,evidence);
+
         run.index += 1;
         run.phase = 'asset';
         run.inspectionUrl = null;
@@ -13717,7 +13719,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.78'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.79'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -13805,7 +13807,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // form if Vector rerenders or SPA navigation races the interval.
     function scbaAirpackSelectNativeTemplate() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' ||
             queue.chooserSelectionAttemptedAt || getRun())return false;
         const item=queue.items[queue.index];
@@ -13863,7 +13865,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>180000 || Date.now()<queue.openedAt)return false;
@@ -14012,7 +14014,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const q=scbaAirpackReadNativeQueue();
         if(!q || q.phase!=='form_prefilled' ||
             !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
-            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(q.inspectionVersion) || getRun())return false;
+            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79'].includes(q.inspectionVersion) || getRun())return false;
         const item=q.items[q.index],ins=currentInspection();
         if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
             ins.instance!==q.formInstance || q.submitAttemptedAt)return false;
@@ -14140,7 +14142,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79'].includes(queue.inspectionVersion) ||
             !['form_prefilled','native_form_opened','native_submit_clicked'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -14208,7 +14210,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // authorization. Record a no-retry latch BEFORE the final click.
     function scbaAirpackFinalizeFailure() {
         const q=scbaAirpackReadNativeQueue();
-        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(q.inspectionVersion) ||
+        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79'].includes(q.inspectionVersion) ||
            q.phase!=='native_submit_clicked' || !q.autoSubmitApproved ||
            !q.physicalInspectionConfirmedAt || q.failureFinalSubmitAt ||
            q.failureNotePreparedFor!==q.submittedFormInstance || getRun())return false;
@@ -14383,7 +14385,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         if(!fresh || fresh.items[fresh.index].href!==item.href ||
                            fresh.phase!=='form_prefilled')return;
                         sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
-                            JSON.stringify({...fresh,inspectionVersion:'3.2.78',
+                            JSON.stringify({...fresh,inspectionVersion:'3.2.79',
                                 autoSubmitApproved:true,
                                 physicalInspectionConfirmedAt:new Date().toISOString()}));
                         continueButton.disabled=true;
@@ -15670,6 +15672,209 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             finally{scheduleMidnightInterfaceReview();}
         },Math.max(1000,next.getTime()-now.getTime()));
     }
+
+    // C-shift PPE pilot: read-only shared board. A GET reads Rebel Command only.
+    // It never scans Vector Item Logs or presumes a completed safety check.
+    const C_PILOT_NAMES=new Set(['michael baldree','michael brion',
+        'jerry weems','jared weston','robert brooks',
+        'matthew cashman','morgan bowland']);
+    const C_PILOT_PENDING_KEY='vectorRebelCShiftVerifiedReceiptQueueV1';
+    let cPilotSummaryTimer=null,cPilotCache=null,cPilotFetchInProgress=null;
+    let cPilotSending=false;
+    function cPilotEligible(){
+        return isMasterOwnerInstallation() ||
+            C_PILOT_NAMES.has(clean(getConfig().inspectorName).toLowerCase());
+    }
+    function cPilotPending(){
+        const x=loadJSON(C_PILOT_PENDING_KEY,[]);
+        return Array.isArray(x)?x.filter(y=>y&&y.assetId&&y.personPrefix).slice(-30):[];
+    }
+    async function cPilotBridge(method,action,data=null){
+        if(!rebelCommandPaired()&&!await ensureRebelCommandEnrollment(false))
+            throw Error('Vector Rebel is not connected to Rebel Command.');
+        const pair=rebelCommandPairing();
+        return new Promise((resolve,reject)=>GM_xmlhttpRequest({
+            method,url:REBEL_COMMAND_ENDPOINT+'?action='+encodeURIComponent(action),
+            headers:{Authorization:'Bearer '+pair.token,
+                'X-Rebel-Device-ID':pair.deviceId,
+                ...(data?{'Content-Type':'application/json'}:{})},
+            ...(data?{data:JSON.stringify(data)}:{}),
+            timeout:15000,
+            onload:r=>{
+                let payload={};
+                try{payload=JSON.parse(r.responseText||'{}');}catch{}
+                if(r.status!==200||payload.ok!==true)
+                    reject(Error(clean(payload.error||'Rebel Command HTTP '+r.status).slice(0,150)));
+                else resolve(payload);
+            },
+            onerror:()=>reject(Error('Rebel Command connection failed.')),
+            ontimeout:()=>reject(Error('Rebel Command timed out.'))
+        }));
+    }
+    async function cPilotFetch(force=false){
+        if(cPilotFetchInProgress)return cPilotFetchInProgress;
+        if(!force&&cPilotCache&&Date.now()-cPilotCache.fetchedAt<45000)
+            return cPilotCache.data;
+        cPilotFetchInProgress=(async()=>{
+            const data=await cPilotBridge('GET','vr-ppe-pilot');
+            if(data.scope!=='c-shift-ppe-pilot'||data.readOnly!==true||
+                !Array.isArray(data.people)||data.people.length!==7||
+                !data.totals||data.shift!=='C')
+                throw Error('C-shift board response was incomplete.');
+            cPilotCache={data,fetchedAt:Date.now()};
+            return data;
+        })().finally(()=>{cPilotFetchInProgress=null;});
+        return cPilotFetchInProgress;
+    }
+    async function cPilotFlushReceipts(){
+        if(cPilotSending)return false;
+        cPilotSending=true;
+        try{
+            for(const receipt of cPilotPending()){
+                const result=await cPilotBridge('POST','vr-ppe-pilot-completion',receipt);
+                if(result.scope!=='c-shift-ppe-pilot'||result.accepted!==true||
+                    result.assetId!==receipt.assetId)
+                    throw Error('Completion receipt was not acknowledged by Rebel Command.');
+                saveJSON(C_PILOT_PENDING_KEY,
+                    cPilotPending().filter(row=>row.id!==receipt.id));
+                cPilotCache=null;
+            }
+            return true;
+        }catch(error){
+            // Leave unacknowledged messages on this installation for next retry.
+            return false;
+        }finally{cPilotSending=false;}
+    }
+    function cPilotQueueNativeCompletion(run,item,evidence){
+        if(run?.modeKey!=='tour'||
+            !/^itemlog-confirmed-plus-one-/.test(String(evidence||'')))return false;
+        const ownerName=clean(item?.ownerName||run?.ownerName||'');
+        if(!C_PILOT_NAMES.has(ownerName.toLowerCase()))return false;
+        const approved=getActiveMasterRoster().find(p=>
+            clean(p.name).toLowerCase()===ownerName.toLowerCase());
+        if(!approved?.prefix)return false;
+        const sourceSnapshot=(run.discoverySnapshots||[]).find(s=>
+            clean(s.ownerName).toLowerCase()===ownerName.toLowerCase()&&
+            clean(s.prefix).toUpperCase()===approved.prefix);
+        // Include unselected PPE discovered in the same Vector Responsible
+        // Party scan. A partially selected run must not masquerade as a fully
+        // inspected inventory. SCBA follows its separate inspection process.
+        const sourceItems=sourceSnapshot?.items?.length?
+            sourceSnapshot.items:(run.items||[]).filter(x=>
+                clean(x.ownerName||run.ownerName).toLowerCase()===ownerName.toLowerCase());
+        const gear=sourceItems.filter(x=>
+                !/scba|airpack|face mask/i.test(clean(x.type||'')))
+            .map(x=>({assetId:clean(x.assetId),type:clean(x.type||'')}));
+        const valid=gear.length>0&&gear.length<=25&&
+            gear.every(x=>/^[A-Za-z0-9._-]{2,75}$/.test(x.assetId))&&
+            new Set(gear.map(x=>x.assetId.toUpperCase())).size===gear.length&&
+            gear.some(x=>x.assetId===item.assetId);
+        if(!valid)return false;
+        const receipt={
+            id:'ppepilot:'+clean(run.runId||run.checkId||'run')+':'+clean(item.assetId),
+            personName:approved.name,personPrefix:approved.prefix,
+            assetId:clean(item.assetId),items:gear,evidence:String(evidence),
+            verifiedAt:new Date().toISOString()
+        };
+        const pending=cPilotPending();
+        if(!pending.some(r=>r.id===receipt.id)){
+            pending.push(receipt);
+            saveJSON(C_PILOT_PENDING_KEY,pending.slice(-30));
+        }
+        void cPilotFlushReceipts();
+        return true;
+    }
+    function cPilotStamp(value){
+        const dt=Date.parse(value||'');
+        return Number.isFinite(dt)?new Date(dt).toLocaleString():'No verified receipts yet';
+    }
+    function cPilotSummaryText(data){
+        return 'C Shift · '+data.totals.verifiedItems+' native Item Log receipts · '+
+            data.totals.outstandingItems+' known outstanding · '+
+            (data.activeTour?'Current C tour':'Outside regular C tour')+
+            '\\nLast ledger update: '+cPilotStamp(data.lastUpdateAt);
+    }
+    async function cPilotRefreshSummary(force=false){
+        const node=document.querySelector('[data-vector-ppe-cshift-summary]');
+        if(!node||!cPilotEligible())return;
+        try{
+            const data=await cPilotFetch(force);
+            node.textContent=cPilotSummaryText(data);
+        }catch(error){
+            node.textContent='C Shift pilot unavailable: '+clean(error?.message||error);
+        }
+    }
+    function cPilotScheduleBoardPoll(){
+        if(cPilotSummaryTimer)clearTimeout(cPilotSummaryTimer);
+        if(!cPilotEligible())return;
+        const hour=new Date().getHours();
+        // This refreshes Rebel Command data only. It is NOT an unattended
+        // native Vector inspection-history scanner.
+        const minutes=hour>=7&&hour<12?2:60;
+        cPilotSummaryTimer=setTimeout(()=>{
+            void cPilotRefreshSummary(true).finally(cPilotScheduleBoardPoll);
+            void cPilotFlushReceipts();
+        },minutes*60000);
+    }
+    function showCShiftPilotBoard(battalion=false){
+        const {overlay,box}=makeOverlayBox('840px');
+        const heading=document.createElement('h2');
+        heading.textContent=battalion?'Battalion Shift Gear Check · C Shift Pilot':
+            'My C Shift · PPE Check Status';
+        heading.style.cssText='font:700 20px Arial;color:#143e5a;margin:0 0 8px;';
+        const note=document.createElement('p');
+        note.style.cssText='font:12px/1.55 Arial;color:#4c6879;margin:0 0 12px;';
+        note.textContent='C shift pilot only. Completion means a Vector Rebel session saw a new completed native Item Log row. Rebel Command cannot independently read Vector. Unknown gear inventory or unverified duty cannot count as compliant.';
+        const status=document.createElement('div');
+        status.setAttribute('role','status');
+        status.style.cssText='font:12px Arial;color:#305469;white-space:pre-wrap;';
+        const table=document.createElement('table');
+        table.style.cssText='width:100%;border-collapse:collapse;font:12px Arial;color:#163b50;';
+        const refresh=makeButton('Refresh C Shift',{background:'#176b8e',color:'#fff'});
+        const close=makeButton('Close');
+        const controls=document.createElement('div');
+        controls.style.cssText='display:flex;gap:8px;margin:12px 0;';
+        close.onclick=()=>overlay.remove();
+        refresh.onclick=()=>void load(true);
+        controls.append(refresh,close);
+        box.append(heading,note,controls,status,table);
+        async function load(force){
+            status.textContent='Reading C-shift ledger...';
+            try{
+                const data=await cPilotFetch(force);
+                status.textContent='Tour '+data.tourStart+' to '+data.tourEnd+
+                    ' · Last ledger update: '+cPilotStamp(data.lastUpdateAt)+
+                    '\\n'+data.totals.verifiedItems+' verified item receipts · '+
+                    data.totals.outstandingItems+' known outstanding · '+
+                    data.cadenceMinutes+'-minute proposed recheck interval'+
+                    '\\nNo unattended Vector rechecks are connected yet. Duty attendance is unconfirmed.';
+                table.replaceChildren();
+                const header=document.createElement('tr');
+                for(const text of ['Firefighter','Duty','Known PPE','Verified','Pending','Next item']){
+                    const th=document.createElement('th');th.textContent=text;
+                    th.style.cssText='text-align:left;padding:7px;border-bottom:2px solid #aac4d2;';
+                    header.appendChild(th);
+                }
+                table.appendChild(header);
+                for(const row of data.people){
+                    const tr=document.createElement('tr');
+                    for(const value of [row.name,'Unconfirmed',
+                        row.knownItems||'Not mapped',row.verifiedItems,
+                        row.outstandingItems,row.nextItem||'Awaiting inventory']){
+                        const td=document.createElement('td');td.textContent=String(value);
+                        td.style.cssText='padding:8px 6px;border-bottom:1px solid #dbe6ec;';
+                        tr.appendChild(td);
+                    }
+                    table.appendChild(tr);
+                }
+                void cPilotRefreshSummary(false);
+            }catch(error){
+                status.textContent='C-shift pilot unavailable: '+clean(error?.message||error);
+            }
+        }
+        void load(true);
+    }
+
     let lastInterfaceErrorInboxPoll=0;
     function renderPanelInterface(){
         const panel=document.getElementById(PANEL_ID);
@@ -15708,9 +15913,19 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             make('SCBA Airpacks',showStation4ScbaAirpackCheck);
             make('Apparatus Check',showApparatusCheck);
             make('Manage Master List',()=>showSettings('admin'));
+            make('Shift Gear Check (C pilot)',()=>showCShiftPilotBoard(true));
             make('Errors & Alerts',showMasterErrorInbox);
             make('Report Problem',showProblemReport);
             make('Check for Update',()=>{void checkManagedInterfaceRelease();});
+        }
+        const pilotPane=panel.querySelector('[data-vector-ppe-cshift-panel]');
+        if(pilotPane){
+            pilotPane.style.display=cPilotEligible()?'block':'none';
+            if(cPilotEligible()){
+                void cPilotRefreshSummary(false);
+                void cPilotFlushReceipts();
+                cPilotScheduleBoardPoll();
+            }
         }
         refreshMasterAlertBadge();
         refreshInterfaceNotice();
@@ -15807,7 +16022,21 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const releaseNotice=document.createElement('div');
         releaseNotice.id='vector-ppe-interface-updates-v1';
         releaseNotice.style.cssText='font:11px/1.4 Arial;color:#607483;margin:8px 0 0;';
-        body.append(info, actions, alertBadge, releaseNotice, statusBox);
+        const pilotPane=document.createElement('div');
+        pilotPane.setAttribute('data-vector-ppe-cshift-panel','1');
+        pilotPane.style.cssText='border:1px solid #cbdbe4;background:#eff7fb;border-radius:8px;margin-top:9px;padding:9px;';
+        const pilotBtn=document.createElement('button');
+        pilotBtn.type='button';
+        pilotBtn.setAttribute('aria-label','Show my C shift gear status');
+        pilotBtn.textContent='C Shift Gear Status · View crew';
+        pilotBtn.style.cssText='background:transparent;border:0;padding:0;cursor:pointer;font:700 12px Arial;color:#135f83;text-align:left;';
+        pilotBtn.onclick=()=>showCShiftPilotBoard(false);
+        const pilotSummary=document.createElement('div');
+        pilotSummary.setAttribute('data-vector-ppe-cshift-summary','1');
+        pilotSummary.textContent='Loading C shift shared PPE ledger...';
+        pilotSummary.style.cssText='font:10px/1.4 Arial;color:#466678;margin-top:5px;white-space:pre-line;';
+        pilotPane.append(pilotBtn,pilotSummary);
+        body.append(info, actions, pilotPane, alertBadge, releaseNotice, statusBox);
         full.append(titleRow, modeRow, body);
 
         const mini = document.createElement('button');

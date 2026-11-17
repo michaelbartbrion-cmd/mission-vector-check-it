@@ -50,7 +50,7 @@ test('Master Interface keeps user actions and exposes additional owner tools',()
  const v=renderMock({master:true,owner:true});
  assert.deepEqual(v.actions,[
   ...USER,'Master List','SCBA Airpacks','Apparatus Check',
-  'Manage Master List','Errors & Alerts','Report Problem','Check for Update'
+  'Manage Master List','Shift Gear Check (C pilot)','Errors & Alerts','Report Problem','Check for Update'
  ]);
  assert.equal(v.mode,'MASTER INTERFACE');
  assert.equal(v.switch.textContent,'Preview User Interface');
