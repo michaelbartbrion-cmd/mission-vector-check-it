@@ -2252,11 +2252,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         if (!ok) {
             const badge = document.getElementById('vector-ppe-mini-badge-v1');
             if (badge) {
+                badge.dataset.failure='1';
                 badge.textContent = '!';
-                badge.style.display = 'block';
+                badge.style.display = 'flex';
             }
             if(isReportableVectorFailure(message))
                 void reportRebelErrorToCommand(message,'ui_status','failure');
+        }else{
+            const badge=document.getElementById('vector-ppe-mini-badge-v1');
+            if(badge?.dataset.failure==='1'){
+                badge.dataset.failure='0';
+                updateMinimizedPanelBadge();
+            }
         }
     }
 
@@ -11896,6 +11903,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         mini.style.boxShadow = '0 5px 18px rgba(13,50,72,.28)';
         mini.style.background = '#ffffff';
         mini.style.color = '#153e5c';
+        const badge=mini.querySelector('#vector-ppe-mini-badge-v1');
+        if(badge){
+            const count=isMasterOwnerInstallation()&&panelInterfaceMode()==='master'?
+                Math.max(0,Number(errorInbox.count)||0):0;
+            const failure=run?.phase==='stopped'||badge.dataset.failure==='1';
+            const text=failure?'!':(count?String(Math.min(count,99))+(count>99?'+':''):'');
+            badge.textContent=text;
+            badge.style.display=text?'flex':'none';
+        }
 
         if (run?.phase === 'stopped') {
             mini.style.borderColor = '#a83b3b';
@@ -15576,6 +15592,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             'box-shadow:0 5px 18px rgba(13,50,72,.28);' +
             'cursor:pointer;';
         mini.innerHTML = rebelStarbirdSvg();
+        const miniAlert=document.createElement('span');
+        miniAlert.id='vector-ppe-mini-badge-v1';
+        miniAlert.style.cssText='position:absolute;top:-5px;right:-7px;min-width:20px;height:20px;'+
+            'padding:1px 4px;box-sizing:border-box;border-radius:12px;background:#b33b32;'+
+            'color:white;display:none;align-items:center;justify-content:center;'+
+            'font:800 10px/1 Arial;box-shadow:0 0 0 2px white;pointer-events:none;';
+        mini.appendChild(miniAlert);
         mini.onclick = () => applyPanelMinimizedState(false);
 
         panel.append(full, mini);

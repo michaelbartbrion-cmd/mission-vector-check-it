@@ -13,7 +13,9 @@ const extracted=[
  part('    function showMasterErrorInbox(){','    function localCalendarDate(){'),
  part('    function renderPanelInterface(){','    function installPanel() {'),
  part('    function installPanel() {','    function dismissObsoleteRecoveryToast() {'),
- part('    function applyPanelMinimizedState(','    function updateMinimizedPanelBadge(')
+ part('    function applyPanelMinimizedState(','    function updateMinimizedPanelBadge('),
+ part('    function updateMinimizedPanelBadge(','    function refreshPanelInfo() {'),
+ part('    function isReportableVectorFailure(message){','    function diagnosticPrivateNames(')
 ].join('\n');
 const chrome=[process.env.CHROME_PATH,'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe']
@@ -32,11 +34,14 @@ const js=String.raw`
  const clean=x=>String(x||'').trim();
  const rebelStarbirdSvg=()=>'<svg viewBox="0 0 10 10" aria-hidden="true"></svg>';
  const refreshPanelInfo=()=>{},refreshMasterAlertBadge=()=>{},refreshInterfaceNotice=()=>{};
+ const getRun=()=>null;
  const noop=()=>{},showPpeCleanRepairForm=noop,showStation4ScbaAirpackCheck=noop;
  const launchMyInspectionFromAnywhere=noop,launchCaptainDailyCheckFromAnywhere=noop;
  const showApparatusCheck=noop,showProblemReport=noop;
  const showSettings=noop,checkManagedInterfaceRelease=noop;
- const openManagedUpdate=noop,setStatus=noop;
+ const openManagedUpdate=noop;
+ const telemetrySafeErrorMessage=x=>String(x||'');
+ const reportRebelErrorToCommand=noop;
  const makeButton=text=>{const b=document.createElement('button');b.textContent=text;return b;};
  const makeOverlayBox=()=>{const overlay=document.createElement('section');
     overlay.setAttribute('data-test-overlay','true');const box=document.createElement('div');
@@ -62,12 +67,27 @@ const js=String.raw`
  const result={};
  try{
    installPanel();applyPanelMinimizedState(false,false);
+   updateMinimizedPanelBadge();
+   const miniBadge=document.getElementById('vector-ppe-mini-badge-v1');
+   if(!miniBadge||miniBadge.textContent!=='1'||miniBadge.style.display!=='flex')
+      throw Error('Master error count not visible in minimized badge');
+   result.numericAlertBadge=true;
+   setStatus('SCBA handoff stopped: unexpected form',false);
+   updateMinimizedPanelBadge();
+   if(miniBadge.textContent!=='!')throw Error('Local failure badge not visible');
+   setStatus('Recovered',true);
+   if(miniBadge.textContent!=='1')throw Error('New-error count did not return after recovery');
+   result.localFailureBadge=true;
    assertLabels(actions(),user.concat(extra),'Master initial layout');
    result.initial=document.querySelector('[data-vector-ppe-interface-label]').textContent;
    const switcher=document.querySelector('[data-vector-ppe-interface-switch]');
    switcher.click();assertLabels(actions(),user,'Owner User preview');
+   updateMinimizedPanelBadge();
+   if(miniBadge.style.display!=='none')throw Error('Master error badge shown in User preview');
    result.preview=document.querySelector('[data-vector-ppe-interface-label]').textContent;
    switcher.click();assertLabels(actions(),user.concat(extra),'Return to Master');
+   updateMinimizedPanelBadge();
+   if(miniBadge.textContent!=='1')throw Error('Master alert badge did not restore');
    const button=label=>Array.from(document.querySelectorAll(
        '[data-vector-ppe-actions] button')).find(x=>x.textContent===label);
    button('Master List').click();
