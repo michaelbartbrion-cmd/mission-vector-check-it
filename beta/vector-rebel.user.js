@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.77
+// @version      3.2.78
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -33,7 +33,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.77',
+        version: '3.2.78',
         startedAt: Date.now()
     };
 
@@ -41,7 +41,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.77';
+    const VERSION = '3.2.78';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -1607,6 +1607,51 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // administrator-only master roster to let another captain define a crew.
     // Names are just identity selections: all PPE is discovered through the
     // exact live Vector Responsible Party owner check.
+    async function readCaptainStationCrew(shift,station){
+        const selectedShift=captainShiftLabel(shift);
+        const stationNumber=Number(station);
+        if(!Number.isInteger(stationNumber)||stationNumber<1||stationNumber>7)
+            throw Error('Choose station 1 through 7.');
+        if(!rebelCommandPaired()&&!await ensureRebelCommandEnrollment(false))
+            throw Error('Connect Rebel Command in Settings before importing a station crew.');
+        const pair=rebelCommandPairing();
+        const args='?action=vr-station-crew&shift='+encodeURIComponent(selectedShift)+
+            '&station='+stationNumber;
+        const result=await new Promise(resolve=>GM_xmlhttpRequest({
+            method:'GET',url:REBEL_COMMAND_ENDPOINT+args,
+            headers:{Authorization:'Bearer '+pair.token,
+                'X-Rebel-Device-ID':pair.deviceId},
+            timeout:15000,
+            onload:r=>resolve({status:r.status,text:r.responseText||''}),
+            onerror:()=>resolve({status:0,text:''}),
+            ontimeout:()=>resolve({status:0,text:''})
+        }));
+        let data={};
+        try{data=JSON.parse(result.text||'{}');}catch{}
+        if(result.status!==200||data.ok!==true)
+            throw Error(clean(data.error||'Station crew service unavailable.').slice(0,160));
+        if(data.scope!=='vector-rebel-dated-station-crew'||
+            data.readOnly!==true||data.shift!==selectedShift||
+            data.station!==stationNumber||data.snapshotDate!=='2026-11-10'||
+            !Array.isArray(data.people)||!Array.isArray(data.unresolved)||
+            !Number.isInteger(data.sourceCount)||data.sourceCount!==
+                data.people.length+data.unresolved.length)
+            throw Error('Station crew response was inconsistent.');
+        // The approved central roster remains authoritative for selection.
+        const approved=new Map(getCaptainPersonOptions().map(p=>[p.prefix,p]));
+        const seen=new Set();
+        for(const raw of data.people){
+            const prefix=clean(raw.prefix).toUpperCase();
+            const candidate=approved.get(prefix);
+            if(!candidate||masterNameKey(candidate.name)!==masterNameKey(raw.name)||
+                seen.has(prefix))
+                throw Error('Station crew contains an unresolved Vector identity. Refresh the approved roster.');
+            seen.add(prefix);
+        }
+        return{...data,people:data.people.map(person=>approved.get(
+            clean(person.prefix).toUpperCase()))};
+    }
+
     function getCaptainPersonOptions() {
         const config=getConfig();
         const published=getMasterRosterState();
@@ -11065,6 +11110,79 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     .map(prefix => roster.find(p=>p.prefix===prefix)?.prefix ||
                         rosterPersonByPrefix(prefix)?.prefix || prefix));
                 const assignmentWindows={...(currentSet?.assignmentWindows||{})};
+                // Station crew is a dated, read-only suggestion. Only exact
+                // Vector identities or explicitly admin-reviewed aliases can
+                // be applied, and never without the captain's confirmation.
+                const importBox=document.createElement('section');
+                importBox.style.cssText='border:1px solid #9ebccc;background:#f2f8fb;border-radius:8px;padding:9px;margin:8px 0;color:#254b62;';
+                const importHeading=document.createElement('strong');
+                importHeading.textContent='Start from department assignments (Nov 10)';
+                const importDescription=document.createElement('p');
+                importDescription.textContent='Select a station to preview its dated regular crew. This does not know current leave, overtime or swaps. Review the crew before saving your Captain Set.';
+                importDescription.style.cssText='font:11px/1.45 Arial;margin:6px 0;';
+                const stationSelect=document.createElement('select');
+                stationSelect.setAttribute('aria-label','Import crew station');
+                stationSelect.style.cssText='margin-right:7px;padding:8px;border:1px solid #a4becd;border-radius:5px;color:#23435c;';
+                for(let number=1;number<=7;number++){
+                    const choice=document.createElement('option');
+                    choice.value=String(number);choice.textContent='Station '+number;
+                    stationSelect.appendChild(choice);
+                }
+                const previewCrew=makeButton('Preview Crew',{background:'#176b8e',color:'#fff'});
+                const applyCrew=makeButton('Use Matched Crew',{background:'#176b8e',color:'#fff'});
+                applyCrew.disabled=true;applyCrew.style.display='none';
+                const importStatus=document.createElement('div');
+                importStatus.setAttribute('role','status');
+                importStatus.style.cssText='white-space:pre-wrap;font:11px/1.5 Arial;margin-top:7px;';
+                const importActions=document.createElement('div');
+                importActions.style.cssText='display:flex;gap:6px;flex-wrap:wrap;align-items:center;';
+                importActions.append(stationSelect,previewCrew,applyCrew);
+                importBox.append(importHeading,importDescription,importActions,importStatus);
+                editor.appendChild(importBox);
+                let stagedImport=null;
+                const resetImport=()=>{
+                    stagedImport=null;applyCrew.disabled=true;applyCrew.style.display='none';
+                    importStatus.textContent='';
+                };
+                stationSelect.onchange=resetImport;
+                shiftSelect.addEventListener('change',resetImport);
+                previewCrew.onclick=async()=>{
+                    resetImport();
+                    previewCrew.disabled=true;
+                    importStatus.textContent='Loading dated station assignment and verifying names...';
+                    try{
+                        const result=await readCaptainStationCrew(
+                            shiftSelect.value,stationSelect.value);
+                        if(!result.people.length)
+                            throw Error('No approved Vector identity matches found for this station.');
+                        stagedImport=result;
+                        importStatus.textContent=result.people.length+' of '+
+                            result.sourceCount+' names matched the approved Vector roster: '+
+                            result.people.map(p=>p.name).join(', ')+'.'+
+                            (result.unresolved.length?'\nNEEDS REVIEW: '+
+                            result.unresolved.join(', ')+'. Add these only after resolving their official Vector names.':'')+
+                            '\nNo Captain Set changes have been saved.';
+                        applyCrew.disabled=false;applyCrew.style.display='inline-block';
+                    }catch(error){
+                        importStatus.textContent='Crew preview unavailable: '+
+                            clean(error?.message||error);
+                    }finally{previewCrew.disabled=false;}
+                };
+                applyCrew.onclick=()=>{
+                    if(!stagedImport||stagedImport.shift!==captainShiftLabel(shiftSelect.value)||
+                        stagedImport.station!==Number(stationSelect.value))return;
+                    if(!confirm('Replace this draft Captain Set selection with '+
+                        stagedImport.people.length+' matched Station '+
+                        stagedImport.station+' / '+stagedImport.shift+' members? '+
+                        'Unresolved identities stay unselected. Review personnel off, swaps and transfers before saving.'))
+                        return;
+                    selected.clear();
+                    for(const person of stagedImport.people)selected.add(person.prefix);
+                    tempMemberOptions();drawPeople();
+                    importStatus.textContent='Staged '+selected.size+
+                        ' matched crew members. Review remaining names and click Save Captain Set to keep this selection.';
+                    applyCrew.disabled=true;
+                };
                 // Crew selection is person-based. Vector's Responsible Party
                 // filter finds every equipment ID; no gear prefix inputs.
 
@@ -13599,7 +13717,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.77'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.78'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -13687,7 +13805,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // form if Vector rerenders or SPA navigation races the interval.
     function scbaAirpackSelectNativeTemplate() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' ||
             queue.chooserSelectionAttemptedAt || getRun())return false;
         const item=queue.items[queue.index];
@@ -13745,7 +13863,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>180000 || Date.now()<queue.openedAt)return false;
@@ -13894,7 +14012,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const q=scbaAirpackReadNativeQueue();
         if(!q || q.phase!=='form_prefilled' ||
             !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
-            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77'].includes(q.inspectionVersion) || getRun())return false;
+            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(q.inspectionVersion) || getRun())return false;
         const item=q.items[q.index],ins=currentInspection();
         if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
             ins.instance!==q.formInstance || q.submitAttemptedAt)return false;
@@ -14022,7 +14140,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(queue.inspectionVersion) ||
             !['form_prefilled','native_form_opened','native_submit_clicked'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -14090,7 +14208,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // authorization. Record a no-retry latch BEFORE the final click.
     function scbaAirpackFinalizeFailure() {
         const q=scbaAirpackReadNativeQueue();
-        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77'].includes(q.inspectionVersion) ||
+        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78'].includes(q.inspectionVersion) ||
            q.phase!=='native_submit_clicked' || !q.autoSubmitApproved ||
            !q.physicalInspectionConfirmedAt || q.failureFinalSubmitAt ||
            q.failureNotePreparedFor!==q.submittedFormInstance || getRun())return false;
@@ -14265,7 +14383,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         if(!fresh || fresh.items[fresh.index].href!==item.href ||
                            fresh.phase!=='form_prefilled')return;
                         sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
-                            JSON.stringify({...fresh,inspectionVersion:'3.2.77',
+                            JSON.stringify({...fresh,inspectionVersion:'3.2.78',
                                 autoSubmitApproved:true,
                                 physicalInspectionConfirmedAt:new Date().toISOString()}));
                         continueButton.disabled=true;
