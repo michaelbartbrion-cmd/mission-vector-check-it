@@ -12,6 +12,7 @@ function harness(){
    events.push(req);
    const arg=JSON.parse(req.data||'{}');
    req.onload({status:200,responseText:JSON.stringify(
+    req.url.includes('vr-ppe-pilot-recheck')?{ok:true,scope:'c-shift-ppe-pilot-recheck',assetId:arg.assetId,verified:true}:
     req.url.includes('completion')?{ok:true,accepted:true,scope:'c-shift-ppe-pilot',assetId:arg.assetId}:
     {ok:true,readOnly:true,scope:'c-shift-ppe-pilot',shift:'C',people:Array.from({length:7},(_,i)=>({name:i===0?'Michael Brion':'Other '+i,knownItems:0,verifiedItems:0,outstandingItems:0})),
      totals:{knownItems:0,verifiedItems:0,outstandingItems:0},activeTour:true,tourStart:'2026-11-21',lastUpdateAt:'',cadenceMinutes:2}
@@ -20,7 +21,7 @@ function harness(){
  const api=new Function('isMasterOwnerInstallation','getConfig','clean','loadJSON','saveJSON','getActiveMasterRoster',
  'rebelCommandPaired','ensureRebelCommandEnrollment','rebelCommandPairing','GM_xmlhttpRequest','REBEL_COMMAND_ENDPOINT',
  'document','makeOverlayBox','makeButton',segment+
- '\nreturn {queue:cPilotQueueNativeCompletion,pending:cPilotPending,flush:cPilotFlushReceipts,fetch:cPilotFetch,show:showCShiftPilotBoard};')(
+ '\nreturn {queue:cPilotQueueNativeCompletion,pending:cPilotPending,flush:cPilotFlushReceipts,fetch:cPilotFetch,show:showCShiftPilotBoard,queueReadOnly:cPilotQueueReadOnlyResults};')(
  ()=>true,()=>({inspectorName:'Michael Brion'}),
  x=>String(x||'').trim(),
  (key,fallback)=>store.has(key)?store.get(key):fallback,
@@ -72,4 +73,40 @@ test('one pilot board in User, owner shift-level Master view, five core buttons 
  assert.match(src,/data-vector-ppe-cshift-summary/);
  assert.match(src,/cPilotQueueNativeCompletion\(run,item,evidence\)/);
  assert.match(src,/This refreshes Rebel Command data only/);
+});
+
+test('read-only C-shift single-pass queues only successfully read Item Log items for RC',async()=>{
+ const h=harness();
+ const check={checkId:'cshift-123',tourStart:'2026-11-21',
+  items:[{assetId:'A-01',ownerPrefix:'PERSON-0DCD2AB48E2A5588',ownerName:'Michael Brion'},
+         {assetId:'A-02',ownerPrefix:'PERSON-0DCD2AB48E2A5588',ownerName:'Michael Brion'}],
+  results:[{assetId:'A-01',ownerPrefix:'PERSON-0DCD2AB48E2A5588',
+     status:'ok',readAt:'2026-11-21T15:55:00Z',tour:{dates:['2026-11-21']}},
+    {assetId:'A-02',ownerPrefix:'PERSON-0DCD2AB48E2A5588',
+     status:'error',error:'Unreadable',tour:{dates:[]}}]};
+ const result=await h.queueReadOnly(check);
+ assert.deepEqual({queued:result.queued,unreadable:result.unreadable}, {queued:2,unreadable:1});
+ assert.equal(result.delivered,true);
+ assert.equal(h.pending().length,0);
+ const posted=h.events.filter(e=>e.url.includes('vr-ppe-pilot-recheck'));
+ assert.equal(posted.length,2);
+ const request=JSON.parse(posted[0].data);
+ const unreadable=JSON.parse(posted[1].data);
+ assert.equal(unreadable.readResult,'unreadable');
+ assert.equal(unreadable.nativeAssetIdentityVerified,false);
+ assert.deepEqual(unreadable.completedDates,[]);
+ assert.equal(request.source,'native_read_only_item_log');
+ assert.equal(request.nativeAssetIdentityVerified,true);
+ assert.equal(request.assetId,'A-01');
+ assert.deepEqual(request.completedDates,['2026-11-21']);
+ assert.equal(request.checkedAt,'2026-11-21T15:55:00Z');
+});
+test('recheck is only available through confirmed-working Master, never through User',()=>{
+ const menu=src.slice(src.indexOf('    function showCShiftPilotBoard('),
+   src.indexOf('    let lastInterfaceErrorInboxPoll=0;'));
+ assert.match(menu,/if\(battalion&&isMasterOwnerInstallation\(\)\)/);
+ assert.match(src,/p\.attendance==='working'&&p\.nextItem&&p\.outstandingItems>0/);
+ assert.match(src,/if\(check\.pilotRecheck===true\)/);
+ assert.match(src,/cPilotQueueReadOnlyResults\(check\)/);
+ assert.match(src,/nativeAssetIdentityVerified:readable/);
 });
