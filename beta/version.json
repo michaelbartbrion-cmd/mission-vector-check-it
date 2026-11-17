@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "project": "Mission Vector Check It",
   "channel": "beta",
-  "latestVersion": "3.2.76",
+  "latestVersion": "3.2.77",
   "minimumSupportedVersion": "2.3.1",
   "status": "current",
-  "message": "Vector Rebel 3.2.76: two layouts (User Interface and owner-only Master Interface), current administrator roster viewer, midnight release/roster/error checks, and master error alerts.",
-  "releaseNotes": "User Interface contains Tour PPE, After Fire, PPE Form, Daily Captain Check, Settings, and read-only Master List. Owner-paired Master Interface can preview the exact User layout and return to the expanded Master interface (SCBA Airpacks, Apparatus Check, Manage Master List, Errors & Alerts, Report Problem, update checks). Public and self-enrolled installations remain on the User Interface; a visual mode switch does not grant backend permissions. Shared Master List uses the existing centrally published, authenticated, read-only roster endpoint, with latest-version/last-synced status and manual refresh. Midnight LOCAL time and tab-resume checks refresh roster, pending error reports, version availability and master inbox without changing or resubmitting Vector forms. The userscript detects new releases and offers an installer; Tampermonkey auto-install timing is separately managed by the browser extension and cannot be forced at exactly midnight from a website script. Errors continue to queue and send automatically to Rebel Command; master view polls a newly staged owner-only, read-only error inbox every two minutes while the browser is available, with explicit opt-in desktop notifications. Remote/unattended and offline alerts require a separate notification service. 3.2.75 temporary captain-date assignment logic and all previous SCBA queue versions remain supported.",
+  "message": "Vector Rebel 3.2.77: User Interface hides Master List; Daily Captain Checks support individually configured A/B/C shift tour calendars.",
+  "releaseNotes": "User Interface presents Tour PPE, After Fire, PPE Form, Daily Captain Check, and Settings. The read-only Master List button remains Master-only; approved names still populate Captain Sets and PPE selection internally. Captain Sets now save a regular shift choice (A, B, or C); the department 48/96 C,C,A,A,B,B schedule anchored 2026-01-07 drives each shift-specific two-day audit tour calendar. Older saved sets remain C unless individually changed. Attendance rules are unchanged: Scout-confirmed work on any unit requires a tour check; two trusted full-day leave/deployment records can mark a completed tour OFF, and incomplete source evidence remains unknown. Captains can still enter explicit manual OFF exceptions after reviewing history. Temporary dates must match the selected regular shift. Read-only mode does not submit inspection records. Official status still requires field acceptance on Vector and authenticated Scout coverage. User interface and SCBA draft queues retain earlier version compatibility.",
   "installUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js",
   "legacyUpdateUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
   "repoUrl": "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
-  "publishedAt": "2026-11-16"
+  "publishedAt": "2026-11-17"
 }
