@@ -15,6 +15,7 @@ const names=['Michael Baldree','Michael Brion','Jerry Weems','Jared Weston',
 'Robert Brooks','Matthew Cashman','Morgan Bowland'];
 const fixture={ok:true,readOnly:true,scope:'c-shift-ppe-pilot',
  shift:'C',tourStart:'2026-11-21',tourEnd:'2026-11-22',activeTour:true,
+ latestCompletedTourStart:'2026-11-15',historicalTour:false,historicalEligible:false,
  totals:{crew:7,knownItems:3,verifiedItems:1,outstandingItems:2},
  outstandingOnDuty:2,workingCrew:1,offCrew:1,unconfirmedCrew:5,
  cadenceMinutes:2,lastUpdateAt:'2026-11-21T14:00:00Z',
@@ -60,6 +61,9 @@ const cShiftMasterOwner=()=>true,
       {ok:true,scope:'c-shift-ppe-pilot-inventory',readOnly:true,personName:payload.personName,knownItems:payload.items?.length}:
       request.url.includes('vr-ppe-pilot-recheck')?
       {ok:true,scope:'c-shift-ppe-pilot-recheck',assetId:payload.assetId,verified:false}:
+      request.url.includes('tourStart=2026-11-15')?
+      {...FIXTURE,tourStart:'2026-11-15',tourEnd:'2026-11-16',activeTour:false,
+       historicalTour:true,historicalEligible:true,latestCompletedTourStart:'2026-11-15'}:
       FIXTURE;
     Promise.resolve().then(()=>request.onload({status:200,responseText:JSON.stringify(data)}));
  },
@@ -90,8 +94,8 @@ const cShiftMasterOwner=()=>true,
       throw Error('Working confirmation total missing');
   }
   const user=overlays[0],master=overlays[1];
-  if(user.querySelectorAll('select').length)throw Error('Ordinary user can edit duty');
-  if(master.querySelectorAll('select').length!==14)throw Error('Master lacks two day controls');
+  if(user.querySelectorAll('[data-cshift-duty-editor] select').length)throw Error('Ordinary user can edit duty');
+  if(master.querySelectorAll('[data-cshift-duty-editor] select').length!==14)throw Error('Master lacks two day controls');
   const b=[...master.querySelectorAll('button')].find(x=>x.textContent.includes('Confirm C Shift Duty'));
   if(!b)throw Error('Captain confirmation action missing');
   b.click();
@@ -119,6 +123,29 @@ const cShiftMasterOwner=()=>true,
   const session=JSON.parse(SESSION.get('vectorRebelCShiftDedicatedRecheckerV1')||'null');
   if(!session?.enabled||session.tourStart!=='2026-11-21')
     throw Error('Dedicated monitor not bound to one C-shift tour');
+  monitor.click(); // Stop live monitor before switching to the completed tour.
+  const picker=master.querySelector('select[aria-label="Select C shift tour"]');
+  if(!picker||![...picker.options].some(x=>x.value==='2026-11-15'))
+    throw Error('Last completed C tour November 15-16 is missing');
+  picker.value='2026-11-15';
+  picker.dispatchEvent(new Event('change',{bubbles:true}));
+  await new Promise(r=>setTimeout(r,120));
+  if(!master.textContent.includes('Historical test:')||
+     !master.textContent.includes('2026-11-15 to 2026-11-16'))
+    throw Error('Historical November 15-16 board did not load');
+  if(master.querySelectorAll('[data-cshift-duty-editor] select').length!==14)
+    throw Error('Historical duty review was not enabled');
+  const before=requests.filter(x=>x.url.includes('vr-ppe-pilot-inventory')).length;
+  map.click();
+  await new Promise(r=>setTimeout(r,120));
+  const pastPosts=requests.filter(x=>x.url.includes('vr-ppe-pilot-inventory'));
+  if(pastPosts.length!==before+1||pastPosts.at(-1).data.tourStart!=='2026-11-15')
+    throw Error('Historical scoped inventory did not target Nov 15-16');
+  const single=[...master.querySelectorAll('button')].find(x=>x.textContent.includes('Read 1 Outstanding Item'));
+  single.click();
+  await new Promise(r=>setTimeout(r,100));
+  if(window.__nativePilotCheck?.tourStart!=='2026-11-15')
+    throw Error('Historical read-only one-item recheck did not target Nov 15-16');
   document.body.dataset.cshiftSmoke='PASS';
  }catch(error){document.body.dataset.cshiftSmoke='FAIL';document.body.dataset.reason=error.message;}
  },60);
