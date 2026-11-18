@@ -67,7 +67,7 @@ const js=String.raw`
  };
  const user=['Tour PPE','After Fire','PPE Form','Daily Captain Check','Settings'];
  const extra=['Master List','SCBA Airpacks','Apparatus Check','Manage Master List',
-              'Shift Gear Check (C pilot)','Errors & Alerts','Report Problem','Check for Update'];
+              'BC Check','Errors & Alerts','Report Problem','Check for Update'];
  const result={};
  try{
    // Owner role is granted by the server-only authenticated probe; never

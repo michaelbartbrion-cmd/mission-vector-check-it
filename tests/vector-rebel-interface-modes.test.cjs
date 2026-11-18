@@ -11,7 +11,7 @@ const modeCode=part('    function renderPanelInterface(){','    function install
 const mockEl=()=>({children:[],style:{},dataset:{},textContent:'',innerHTML:'',
  setAttribute(k,v){this[k]=v;},appendChild(x){this.children.push(x);}});
 function renderMock({master=false,owner=false}={}){
- const actions=mockEl(),label=mockEl(),switcher=mockEl();
+ const actions=mockEl(),label=mockEl(),switcher=mockEl(),calls=[];
  const panel={querySelector(x){
     if(x==='[data-vector-ppe-actions]')return actions;
     if(x==='[data-vector-ppe-interface-label]')return label;
@@ -21,16 +21,17 @@ function renderMock({master=false,owner=false}={}){
  const doc={getElementById:(id)=>id==='vector-ppe-helper-v23'?panel:null,
     createElement:mockEl};
  const run=new Function('document','PANEL_ID','panelInterfaceMode',
-  'isMasterOwnerInstallation','refreshMasterAlertBadge','refreshInterfaceNotice',
-  'const showPpeCleanRepairForm=()=>{},launchCaptainDailyCheckFromAnywhere=()=>{},'+
+  'isMasterOwnerInstallation','refreshMasterAlertBadge','refreshInterfaceNotice','calls',
+  'const showPpeCleanRepairForm=()=>{},launchCaptainDailyCheckFromAnywhere=()=>calls.push(\'full\'),'+
+  'cPilotEligible=()=>true,showCShiftPilotBoard=(b,m)=>calls.push([\'quick\',b,m||\'bc\']),'+
   'showSharedMasterList=()=>{},showStation4ScbaAirpackCheck=()=>{},'+
   'showApparatusCheck=()=>{},showMasterErrorInbox=()=>{},'+
   'showProblemReport=()=>{},showSettings=()=>{},checkManagedInterfaceRelease=()=>{};\n'+
   modeCode+'\nreturn renderPanelInterface;')(
-  doc,'vector-ppe-helper-v23',()=>master?'master':'user',()=>owner,()=>{},()=>{});
+  doc,'vector-ppe-helper-v23',()=>master?'master':'user',()=>owner,()=>{},()=>{},calls);
  run();
  return {actions:actions.children.map(c=>c.textContent),buttons:actions.children,
-  mode:label.textContent,switch: switcher};
+  mode:label.textContent,switch: switcher,calls};
 }
 const USER=['Tour PPE','After Fire','PPE Form','Daily Captain Check','Settings'];
 test('User Interface presents only the five requested actions',()=>{
@@ -50,10 +51,20 @@ test('Master Interface keeps user actions and exposes additional owner tools',()
  const v=renderMock({master:true,owner:true});
  assert.deepEqual(v.actions,[
   ...USER,'Master List','SCBA Airpacks','Apparatus Check',
-  'Manage Master List','Shift Gear Check (C pilot)','Errors & Alerts','Report Problem','Check for Update'
+  'Manage Master List','BC Check','Errors & Alerts','Report Problem','Check for Update'
  ]);
  assert.equal(v.mode,'MASTER INTERFACE');
  assert.equal(v.switch.textContent,'Preview User Interface');
+});
+test('Master has a dedicated BC Check and Captain defaults to a one-person rotating check, not full audit',()=>{
+ const master=renderMock({master:true,owner:true});
+ const click=(v,label)=>v.buttons.find(x=>x.textContent===label).onclick();
+ click(master,'BC Check');
+ click(master,'Daily Captain Check');
+ assert.deepEqual(master.calls,[['quick',true,'bc'],['quick',true,'captain']]);
+ const user=renderMock({master:false,owner:false});
+ click(user,'Daily Captain Check');
+ assert.deepEqual(user.calls,['full'],'other user workflow is not silently changed');
 });
 test('Master requires backend owner verification, not local pairing or autoEnrolled flag',async()=>{
  const logic=part('    let masterServerVerified=false;','    function showMasterPairing(){')+
