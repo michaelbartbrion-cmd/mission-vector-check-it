@@ -30,6 +30,8 @@ const fixture={ok:true,readOnly:true,scope:'c-shift-ppe-pilot',
 const js=`
 (function(){
 const FIXTURE=__DATA__,requests=[],STORE=new Map(),SESSION=new Map();
+const location={origin:'https://app.vectorcheckit.us',href:'https://app.vectorcheckit.us/main/asset-manager'};
+window.__scanCount=0;
 let HIST_DUTY=null;
 const sessionStorage={getItem:k=>SESSION.has(k)?SESSION.get(k):null,
  setItem:(k,v)=>SESSION.set(k,String(v)),removeItem:k=>SESSION.delete(k)};
@@ -37,7 +39,10 @@ let cVisible=true;const TAB_ID='smoke-cshift-tab',getRun=()=>null,
  getCaptainDailyCheck=()=>null,panelInterfaceMode=()=> 'master',
  localTodayKey=()=> '2026-11-21',
  ensurePpeEquipmentPage=async()=>true,
- scanPpeCrewOwners=async()=>({items:[{ownerName:'Michael Baldree',assetId:'A-001',type:'Coat',pool:'PPE',itemId:'A1',url:'https://vector.example/gear/A-001'}]}),
+ scanPpeCrewOwners=async()=>{window.__scanCount++;
+  return{items:[{ownerName:'Michael Baldree',assetId:'A-001',type:'Coat',
+   pool:'300082',itemId:'4605913',
+   url:'https://app.vectorcheckit.us/app/equipment/PPE/pool/300082/4605913/item?source=assetManager&sourceTab=PPE'}]};},
  masterNameKey=x=>String(x||'').toLowerCase(),
  inferRegularTourWindow=()=>({isActiveTour:true,startDate:'2026-11-21'}),
  saveCaptainDailyCheck=check=>{window.__nativePilotCheck=check;},
@@ -56,6 +61,10 @@ const cShiftMasterOwner=()=>true,
  GM_xmlhttpRequest=request=>{
     const payload=JSON.parse(request.data||'{}');
     requests.push({url:request.url,data:payload});
+    if(request.url.includes('vr-ppe-pilot-inventory')){
+      const item=(payload.items||[]).find(x=>x.assetId==='A-001');
+      if(item?.assetPath)FIXTURE.people[0].nextItemPath=item.assetPath;
+    }
     if(request.url.includes('vr-ppe-pilot-duty')&&payload.tourStart==='2026-11-15')
       HIST_DUTY=payload.people;
     const data=request.url.includes('vr-captain-attendance')?
@@ -106,7 +115,7 @@ const cShiftMasterOwner=()=>true,
   const overlays=[...document.querySelectorAll('.pilot-overlay')];
   if(overlays.length!==2)throw Error('Expected two interfaces');
   if(!overlays[0].textContent.includes('My C Shift'))throw Error('User crew heading missing');
-  if(!overlays[1].textContent.includes('Battalion Shift Gear Check'))throw Error('Master heading missing');
+  if(!overlays[1].textContent.includes('BC Check · C Shift'))throw Error('Master heading missing');
   for(const overlay of overlays){
     if(overlay.querySelectorAll('table tr').length<8)throw Error('Seven crew not listed');
     for(const name of __NAMES__)if(!overlay.textContent.includes(name))
@@ -146,11 +155,15 @@ const cShiftMasterOwner=()=>true,
   await new Promise(r=>setTimeout(r,100));
   const mapped=requests.find(x=>x.url.includes('vr-ppe-pilot-inventory'));
   if(!mapped||mapped.data.personName!=='Michael Baldree'||
-      mapped.data.items.length!==1)throw Error('Scoped PPE map not delivered: '+String(window.__nativeStatus)+'; requests='+requests.map(x=>x.url).join(','));
+      mapped.data.items.length!==1||
+      mapped.data.items[0].assetPath!=='/app/equipment/PPE/pool/300082/4605913/item')throw Error('Scoped PPE map not delivered: '+String(window.__nativeStatus)+'; requests='+requests.map(x=>x.url).join(','));
   const monitor=[...master.querySelectorAll('button')].find(x=>x.textContent.includes('Monitor C Shift in This Tab'));
   if(!monitor)throw Error('Dedicated-tab monitoring button not found');
+  const scansAfterMap=window.__scanCount;
   monitor.click();
   await new Promise(r=>setTimeout(r,100));
+  if(window.__scanCount!==scansAfterMap)
+    throw Error('One-item check repeated a full inventory scan despite saved native link');
   if(!window.__nativePilotCheck?.pilotRecheck||
       window.__nativePilotCheck.items.length!==1||
       window.__nativePilotCheck.items[0].assetId!=='A-001')
@@ -158,6 +171,9 @@ const cShiftMasterOwner=()=>true,
   const session=JSON.parse(SESSION.get('vectorRebelCShiftDedicatedRecheckerV1')||'null');
   if(!session?.enabled||session.tourStart!=='2026-11-21')
     throw Error('Dedicated monitor not bound to one C-shift tour');
+  if(window.__nativePilotCheck.items[0].pool!=='300082'||
+     window.__nativePilotCheck.items[0].itemId!=='4605913')
+    throw Error('Direct native PPE target did not preserve exact pool and item identity');
   monitor.click(); // Stop live monitor before switching to the completed tour.
   const picker=master.querySelector('select[aria-label="Select C shift tour"]');
   if(!picker||![...picker.options].some(x=>x.value==='2026-11-15'))

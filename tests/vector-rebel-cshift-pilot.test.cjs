@@ -20,8 +20,8 @@ function harness(){
  };
  const api=new Function('isMasterOwnerInstallation','getConfig','clean','loadJSON','saveJSON','getActiveMasterRoster',
  'rebelCommandPaired','ensureRebelCommandEnrollment','rebelCommandPairing','GM_xmlhttpRequest','REBEL_COMMAND_ENDPOINT',
- 'document','makeOverlayBox','makeButton',segment+
- '\nreturn {queue:cPilotQueueNativeCompletion,pending:cPilotPending,flush:cPilotFlushReceipts,fetch:cPilotFetch,show:showCShiftPilotBoard,queueReadOnly:cPilotQueueReadOnlyResults};')(
+ 'document','makeOverlayBox','makeButton','location',segment+
+ '\nreturn {queue:cPilotQueueNativeCompletion,pending:cPilotPending,flush:cPilotFlushReceipts,fetch:cPilotFetch,show:showCShiftPilotBoard,queueReadOnly:cPilotQueueReadOnlyResults,nativePath:cPilotNativePath,directTarget:cPilotDirectTarget};')(
  ()=>true,()=>({inspectorName:'Michael Brion'}),
  x=>String(x||'').trim(),
  (key,fallback)=>store.has(key)?store.get(key):fallback,
@@ -29,7 +29,8 @@ function harness(){
  ()=>people,()=>true,async()=>true,()=>({token:'TOKEN',deviceId:'DEVICE'}),
  bridge,'https://example.test/bridge',
  {querySelector:()=>null},()=>({overlay:{remove(){}},box:{append(){}}}),
- ()=>({onclick:null})
+ ()=>({onclick:null}),
+ {origin:'https://app.vectorcheckit.us',href:'https://app.vectorcheckit.us/main/asset-manager'}
  );
  return{...api,store,events};
 }
@@ -66,7 +67,10 @@ test('non-confirmed fallback and other-shift users never emit a completion recei
 });
 test('one pilot board in User, owner shift-level Master view, five core buttons preserved',()=>{
  const menu=src.slice(src.indexOf('    function renderPanelInterface(){'),src.indexOf('    function installPanel() {'));
- assert.match(menu,/make\('Shift Gear Check \(C pilot\)',\(\)=>showCShiftPilotBoard\(true\)\)/);
+ assert.match(menu,/make\('BC Check',\(\)=>showCShiftPilotBoard\(true\),true\)/);
+ assert.match(menu,/make\('Daily Captain Check',\(\)=>\{/);
+ assert.match(src,/Full PPE History Audit \(all items\)/);
+ assert.match(src,/check\.pilotRecheck\?'BC Check':'Full PPE History Audit'/);
  assert.match(menu,/make\('Tour PPE'/);
  assert.match(menu,/make\('Daily Captain Check'/);
  assert.match(src,/C Shift Gear Status · View crew/);
@@ -109,4 +113,26 @@ test('recheck is only available through confirmed-working Master, never through 
  assert.match(src,/if\(check\.pilotRecheck===true\)/);
  assert.match(src,/cPilotQueueReadOnlyResults\(check\)/);
  assert.match(src,/nativeAssetIdentityVerified:readable/);
+});
+test('BC pilot uses only same-origin cached native PPE paths and preserves exact pool/item identity',()=>{
+ const h=harness();
+ const good='https://app.vectorcheckit.us/app/equipment/PPE/pool/300082/4605913/item?source=assetManager&sourceTab=PPE';
+ const path='/app/equipment/PPE/pool/300082/4605913/item';
+ assert.equal(h.nativePath(good),path);
+ assert.equal(h.nativePath('https://evil.example/app/equipment/PPE/pool/300082/4605913/item'),'');
+ assert.equal(h.nativePath('javascript:alert(1)'),'');
+ assert.equal(h.nativePath('/app/equipment/PPE/pool/../../secret'),'');
+ const direct=h.directTarget({name:'Michael Brion',prefix:'PERSON-0DCD2AB48E2A5588',
+  attendance:'working',nextItem:'BRION-4111218',nextItemPath:path});
+ assert.equal(direct.pool,'300082');assert.equal(direct.itemId,'4605913');
+ assert.equal(direct.assetId,'BRION-4111218');
+ assert.equal(direct.url,good);
+ assert.equal(h.directTarget({name:'Michael Brion',attendance:'off',nextItem:'BRION-4111218',nextItemPath:path}),null);
+ assert.equal(h.directTarget({name:'Michael Brion',attendance:'working',nextItem:'BRION-4111218',nextItemPath:'https://evil.example/steal'}),null);
+});
+test('dedicated BC monitor will not repeat a full crew equipment crawl when stored links are absent',()=>{
+ assert.match(src,/if\(dedicated&&!directReady\)\{/);
+ assert.match(src,/Automatic monitoring will not repeatedly crawl crew equipment/);
+ assert.match(src,/if\(!directReady\)\{[\s\S]*?scanPpeCrewOwners\(owners,/);
+ assert.match(src,/if\(!dedicated&&!confirm\('Run one read-only PPE Item Log check/);
 });
