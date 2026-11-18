@@ -1,14 +1,14 @@
 {
-  "schemaVersion": 1,
-  "project": "Mission Vector Check It",
-  "channel": "beta",
-  "latestVersion": "3.2.81",
-  "minimumSupportedVersion": "2.3.1",
-  "status": "current",
-  "message": "Vector Rebel 3.2.81: Historical C-shift test for November 15-16, 2026, using existing read-only Item Log verification.",
-  "releaseNotes": "C-shift Master and User crew boards can review the last completed C tour, including Sunday Nov 15 and Monday Nov 16. Master can confirm historical duty, map current scoped Responsible Party PPE to past tour for preliminary inventory, and perform manual read-only Item Log checks on one outstanding item per historically confirmed-working person. Only dates in the selected tour qualify as verified. Historical work is not automatically scanned and does not submit PPE inspections; dedicated monitoring remains current-tour-only. No Vector administrator access or CrewSense writes required.",
-  "installUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js",
-  "legacyUpdateUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
-  "repoUrl": "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
-  "publishedAt": "2026-11-17"
+    "schemaVersion":  1,
+    "project":  "Mission Vector Check It",
+    "channel":  "beta",
+    "latestVersion":  "3.2.82",
+    "minimumSupportedVersion":  "2.3.1",
+    "status":  "current",
+    "message":  "Vector Rebel 3.2.82: C-shift shift-level audit now prefills attendance from existing Rebel Scout schedule evidence.",
+    "releaseNotes":  "C-shift Master historical 2026-11-15 and 2026-11-16 tour now retrieves the existing owner-linked, read-only Rebel Scout attendance evidence and prefills working/off suggestions. Captains review the suggestions and confirm once before mapping working-crew PPE. Uncertain evidence remains Unknown and existing captain-confirmed values are preserved. This fixes the Map Working Crew PPE blocking error caused by seven Unknown attendance statuses. The confirmation button appears before the attendance table. No CrewSense write, no assumed admin Vector access, no fake inspection completion.",
+    "installUrl":  "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js",
+    "legacyUpdateUrl":  "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
+    "repoUrl":  "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
+    "publishedAt":  "2026-11-17"
 }

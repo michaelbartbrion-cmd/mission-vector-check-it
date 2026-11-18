@@ -30,6 +30,7 @@ const fixture={ok:true,readOnly:true,scope:'c-shift-ppe-pilot',
 const js=`
 (function(){
 const FIXTURE=__DATA__,requests=[],STORE=new Map(),SESSION=new Map();
+let HIST_DUTY=null;
 const sessionStorage={getItem:k=>SESSION.has(k)?SESSION.get(k):null,
  setItem:(k,v)=>SESSION.set(k,String(v)),removeItem:k=>SESSION.delete(k)};
 let cVisible=true;const TAB_ID='smoke-cshift-tab',getRun=()=>null,
@@ -55,7 +56,18 @@ const cShiftMasterOwner=()=>true,
  GM_xmlhttpRequest=request=>{
     const payload=JSON.parse(request.data||'{}');
     requests.push({url:request.url,data:payload});
-    const data=request.url.includes('vr-ppe-pilot-duty')?
+    if(request.url.includes('vr-ppe-pilot-duty')&&payload.tourStart==='2026-11-15')
+      HIST_DUTY=payload.people;
+    const data=request.url.includes('vr-captain-attendance')?
+      {ok:true,scope:'captain-attendance-evidence',readOnly:true,
+       records:(new URL(request.url).searchParams.get('dates')||'').split(',').flatMap(date=>
+        __NAMES__.map(name=>({
+          date,name,status:/Weston|Brooks/.test(name)?'full_leave_evidence':'work_evidence',
+          sourceQuality:'good_direct_capture',
+          capturedAt:'2026-11-15T22:41:00Z',
+          reason:/Weston|Brooks/.test(name)?'Full-day leave coverage':'Assigned to a unit'
+        })))}:
+      request.url.includes('vr-ppe-pilot-duty')?
       {ok:true,scope:'c-shift-ppe-pilot-duty',changed:14}:
       request.url.includes('vr-ppe-pilot-inventory')?
       {ok:true,scope:'c-shift-ppe-pilot-inventory',readOnly:true,personName:payload.personName,knownItems:payload.items?.length}:
@@ -63,7 +75,16 @@ const cShiftMasterOwner=()=>true,
       {ok:true,scope:'c-shift-ppe-pilot-recheck',assetId:payload.assetId,verified:false}:
       request.url.includes('tourStart=2026-11-15')?
       {...FIXTURE,tourStart:'2026-11-15',tourEnd:'2026-11-16',activeTour:false,
-       historicalTour:true,historicalEligible:true,latestCompletedTourStart:'2026-11-15'}:
+       historicalTour:true,historicalEligible:true,latestCompletedTourStart:'2026-11-15',
+       workingCrew:HIST_DUTY?5:0,offCrew:HIST_DUTY?2:0,unconfirmedCrew:HIST_DUTY?0:7,
+       people:FIXTURE.people.map(row=>{
+         const assigned=HIST_DUTY?.find(x=>x.prefix===row.prefix);
+         const first=assigned?.day1||'unconfirmed',second=assigned?.day2||'unconfirmed';
+         return {...row,dutyDay1:first,dutyDay2:second,
+           attendance:first==='working'||second==='working'?'working':
+             first==='off'&&second==='off'?'off':'unconfirmed',
+           nextItem:first==='working'&&row.name==='Michael Baldree'?'A-001':''};
+       })}:
       FIXTURE;
     Promise.resolve().then(()=>request.onload({status:200,responseText:JSON.stringify(data)}));
  },
@@ -95,7 +116,17 @@ const cShiftMasterOwner=()=>true,
   }
   const user=overlays[0],master=overlays[1];
   if(user.querySelectorAll('[data-cshift-duty-editor] select').length)throw Error('Ordinary user can edit duty');
-  if(master.querySelectorAll('[data-cshift-duty-editor] select').length!==14)throw Error('Master lacks two day controls');
+  const initialEditor=master.querySelector('[data-cshift-duty-editor]');
+  if(initialEditor.querySelectorAll('select').length!==14)throw Error('Master lacks two day controls');
+  if(!initialEditor.textContent.includes('Rebel Scout loaded 10 WORKING, 4 OFF, 0 UNKNOWN'))
+    throw Error('Rebel Scout attendance suggestions were not shown: '+initialEditor.querySelector('[data-cshift-scout-evidence]')?.textContent+';calls='+requests.map(x=>x.url).join('|'));
+  const initialRows=[...initialEditor.querySelectorAll('table tr')];
+  for(const row of initialRows){
+    const name=row.cells[0].textContent;
+    const expected=/Weston|Brooks/.test(name)||name==='Michael Brion'?'off':'working';
+    for(const input of row.querySelectorAll('select'))
+      if(input.value!==expected)throw Error('Scout did not prefill '+name+' as '+expected);
+  }
   const b=[...master.querySelectorAll('button')].find(x=>x.textContent.includes('Confirm C Shift Duty'));
   if(!b)throw Error('Captain confirmation action missing');
   b.click();
@@ -103,6 +134,10 @@ const cShiftMasterOwner=()=>true,
   const posted=requests.find(x=>x.url.includes('vr-ppe-pilot-duty'));
   if(!posted||posted.data.people.length!==7||posted.data.tourStart!=='2026-11-21')
     throw Error('Master duty submission was not sent');
+  if(posted.data.people.some(row=>
+      [row.day1,row.day2].some(status=>status!==
+        (/Weston|Brooks/.test(row.name)||row.name==='Michael Brion'?'off':'working'))))
+    throw Error('Captain confirmation ignored Scout-prefilled assignments');
   if(!summary.textContent.includes('native Item Log receipts'))
     throw Error('Shared summary not updated');
   const map=[...master.querySelectorAll('button')].find(x=>x.textContent.includes('Map Working Crew PPE'));
@@ -133,8 +168,23 @@ const cShiftMasterOwner=()=>true,
   if(!master.textContent.includes('Historical test:')||
      !master.textContent.includes('2026-11-15 to 2026-11-16'))
     throw Error('Historical November 15-16 board did not load');
-  if(master.querySelectorAll('[data-cshift-duty-editor] select').length!==14)
+  const historicalEditor=master.querySelector('[data-cshift-duty-editor]');
+  if(historicalEditor.querySelectorAll('select').length!==14)
     throw Error('Historical duty review was not enabled');
+  if(!historicalEditor.textContent.includes('Rebel Scout loaded 10 WORKING, 4 OFF, 0 UNKNOWN'))
+    throw Error('Historic Nov 15-16 Scout evidence was not loaded');
+  for(const row of historicalEditor.querySelectorAll('table tr')){
+    const expected=/Weston|Brooks/.test(row.cells[0].textContent)?'off':'working';
+    for(const input of row.querySelectorAll('select'))
+      if(input.value!==expected)throw Error('Historical duty suggestion mismatch');
+  }
+  const historicSave=[...historicalEditor.querySelectorAll('button')]
+    .find(x=>x.textContent.includes('Confirm C Shift Duty'));
+  if(!historicSave)throw Error('Historic confirmation button missing');
+  historicSave.click();
+  await new Promise(r=>setTimeout(r,100));
+  if(!HIST_DUTY||HIST_DUTY.length!==7||HIST_DUTY.filter(x=>x.day1==='working').length!==5)
+    throw Error('Prefilled historical Scout duty did not save after captain confirmation');
   const before=requests.filter(x=>x.url.includes('vr-ppe-pilot-inventory')).length;
   map.click();
   await new Promise(r=>setTimeout(r,120));
@@ -152,7 +202,7 @@ const cShiftMasterOwner=()=>true,
 })();
 `.replace('__FEATURE__',feature)
  .replace('__DATA__',JSON.stringify(fixture))
- .replace('__NAMES__',JSON.stringify(names));
+ .replaceAll('__NAMES__',JSON.stringify(names));
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cshift-pilot-smoke-'));
 try{
  const htmlPath=path.join(dir,'pilot.html');
