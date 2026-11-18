@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.81
+// @version      3.2.82
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -33,7 +33,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.81',
+        version: '3.2.82',
         startedAt: Date.now()
     };
 
@@ -41,7 +41,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.81';
+    const VERSION = '3.2.82';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -13742,7 +13742,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.81'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.82'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -13830,7 +13830,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // form if Vector rerenders or SPA navigation races the interval.
     function scbaAirpackSelectNativeTemplate() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' ||
             queue.chooserSelectionAttemptedAt || getRun())return false;
         const item=queue.items[queue.index];
@@ -13888,7 +13888,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>180000 || Date.now()<queue.openedAt)return false;
@@ -14037,7 +14037,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const q=scbaAirpackReadNativeQueue();
         if(!q || q.phase!=='form_prefilled' ||
             !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
-            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81'].includes(q.inspectionVersion) || getRun())return false;
+            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82'].includes(q.inspectionVersion) || getRun())return false;
         const item=q.items[q.index],ins=currentInspection();
         if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
             ins.instance!==q.formInstance || q.submitAttemptedAt)return false;
@@ -14165,7 +14165,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82'].includes(queue.inspectionVersion) ||
             !['form_prefilled','native_form_opened','native_submit_clicked'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -14233,7 +14233,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // authorization. Record a no-retry latch BEFORE the final click.
     function scbaAirpackFinalizeFailure() {
         const q=scbaAirpackReadNativeQueue();
-        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81'].includes(q.inspectionVersion) ||
+        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82'].includes(q.inspectionVersion) ||
            q.phase!=='native_submit_clicked' || !q.autoSubmitApproved ||
            !q.physicalInspectionConfirmedAt || q.failureFinalSubmitAt ||
            q.failureNotePreparedFor!==q.submittedFormInstance || getRun())return false;
@@ -14408,7 +14408,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         if(!fresh || fresh.items[fresh.index].href!==item.href ||
                            fresh.phase!=='form_prefilled')return;
                         sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
-                            JSON.stringify({...fresh,inspectionVersion:'3.2.81',
+                            JSON.stringify({...fresh,inspectionVersion:'3.2.82',
                                 autoSubmitApproved:true,
                                 physicalInspectionConfirmedAt:new Date().toISOString()}));
                         continueButton.disabled=true;
@@ -15771,7 +15771,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const pair=rebelCommandPairing();
         return new Promise((resolve,reject)=>GM_xmlhttpRequest({
             method,url:REBEL_COMMAND_ENDPOINT+'?action='+encodeURIComponent(action)+
-                (query?.tourStart?'&tourStart='+encodeURIComponent(query.tourStart):''),
+                (query?.tourStart?'&tourStart='+encodeURIComponent(query.tourStart):'')+
+                (query?.dates?'&dates='+encodeURIComponent(query.dates):'')+
+                (query?.people?'&people='+encodeURIComponent(query.people):''),
             headers:{Authorization:'Bearer '+pair.token,
                 'X-Rebel-Device-ID':pair.deviceId,
                 ...(data?{'Content-Type':'application/json'}:{})},
@@ -15808,6 +15810,50 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             return data;
         })().finally(()=>{cPilotFetchInProgress=null;});
         return cPilotFetchInProgress;
+    }
+    // Reuse the existing owner-linked, read-only Rebel Scout attendance
+    // evidence service. Suggestions are NOT a captain confirmation:
+    // the captain reviews them before any duty record is saved to RC.
+    async function cPilotScoutSuggestions(board){
+        if(!isMasterOwnerInstallation())
+            return{ok:false,error:'Scout attendance preview requires the owner-linked Master Interface.'};
+        const dates=[board.tourStart,board.tourEnd];
+        const people=board.people.map(row=>clean(row.name));
+        if(dates.some(x=>!/^\d{4}-\d{2}-\d{2}$/.test(x))||
+            people.length!==7||new Set(people.map(masterNameKey)).size!==7)
+            return{ok:false,error:'The approved C-shift roster or tour dates are incomplete.'};
+        try{
+            const response=await cPilotBridge('GET','vr-captain-attendance',null,
+                {dates:dates.join(','),people:JSON.stringify(people)});
+            if(response.scope!=='captain-attendance-evidence'||
+                response.readOnly!==true||!Array.isArray(response.records)||
+                response.records.length!==14)
+                throw Error('Scout returned an incomplete attendance evidence set.');
+            const validDates=new Set(dates),validNames=new Set(people.map(masterNameKey));
+            const results=new Map();
+            for(const rec of response.records){
+                const personKey=masterNameKey(rec.name);
+                if(!validDates.has(rec.date)||!validNames.has(personKey)||
+                    !['work_evidence','full_leave_evidence',
+                      'deployment_evidence','partial_or_uncertain','unknown'].includes(rec.status))
+                    throw Error('Scout attendance response did not match the approved crew.');
+                const key=personKey+'|'+rec.date;
+                if(results.has(key))throw Error('Duplicate Scout attendance evidence record.');
+                const trusted=rec.sourceQuality==='good_direct_capture';
+                const suggested=!trusted?'unknown':
+                    rec.status==='work_evidence'?'working':
+                    ['full_leave_evidence','deployment_evidence'].includes(rec.status)?'off':
+                    'unknown';
+                results.set(key,{suggested,trusted,
+                    sourceStatus:rec.status,
+                    capturedAt:clean(rec.capturedAt||''),
+                    reason:clean(rec.reason||'').slice(0,240)});
+            }
+            if(results.size!==14)throw Error('Scout attendance evidence omitted C-shift people or days.');
+            return{ok:true,results};
+        }catch(error){
+            return{ok:false,error:clean(error?.message||error).slice(0,180)};
+        }
     }
     async function cPilotFlushReceipts(){
         if(cPilotSending)return false;
@@ -15979,8 +16025,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             if(!board.activeTour&&!board.historicalEligible)
                 throw Error('Choose an active or completed C-shift tour before mapping PPE.');
             const working=board.people.filter(p=>p.attendance==='working');
-            if(!working.length)
-                throw Error('Confirm who is working in the C-shift Master view before mapping PPE.');
+            if(!working.length){
+                document.querySelector('[data-cshift-duty-editor]')?.scrollIntoView?.({block:'nearest'});
+                throw Error('Rebel Scout has suggested the scheduled crew below. Review the green selections and press Confirm C Shift Duty first, then Map Working Crew PPE. No attendance was saved yet.');
+            }
             if(!confirm('Read the Vector Responsible Party PPE list for '+
                 working.length+' confirmed-working C-shift firefighter(s)? This is read-only and creates no inspection.'))return false;
             const known=getActiveMasterRoster();
@@ -16168,10 +16216,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         dutyEditor.setAttribute('data-cshift-duty-editor','1');
         dutyEditor.style.cssText='margin-top:12px;padding:8px;background:#f3f7fa;border:1px solid #b9d0dd;border-radius:6px;';
         box.append(heading,note,controls,status,table,dutyEditor);
+        let loadSequence=0;
         async function load(force){
+            const sequence=++loadSequence;
             status.textContent='Reading C-shift ledger...';
             try{
                 const data=await cPilotFetch(force,selectedTourStart);
+                if(sequence!==loadSequence)return;
                 if(!tourPicker.options.length){
                     const latest=data.latestCompletedTourStart||
                         (data.historicalTour?data.tourStart:'');
@@ -16231,12 +16282,31 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const canEdit=battalion&&isMasterOwnerInstallation()&&
                     (data.activeTour||data.historicalEligible);
                 if(canEdit){
+                    const scout=await cPilotScoutSuggestions(data);
+                    if(sequence!==loadSequence)return;
                     const title=document.createElement('strong');
                     title.textContent='Captain tour attendance confirmation';
                     title.style.cssText='font:700 13px Arial;color:#184562;display:block;margin-bottom:6px;';
                     const description=document.createElement('p');
-                    description.textContent='Confirm who actually worked on each selected tour day. Unknown stays pending review. Historical information is entered manually and is not claimed to be an automatically verified staffing record. This updates Rebel Command only.';
+                    description.textContent='Rebel Scout suggests the duty selections below from existing schedule records. Review any swaps, leave, or overtime, then confirm. Nothing is saved until you confirm. This never changes CrewSense.';
                     description.style.cssText='font:11px/1.5 Arial;color:#526f80;';
+                    const scoutNotice=document.createElement('div');
+                    scoutNotice.setAttribute('data-cshift-scout-evidence','1');
+                    scoutNotice.style.cssText='font:11px/1.4 Arial;background:#e9f4fa;border:1px solid #9ac5da;padding:7px;border-radius:5px;margin:6px 0;color:#18465e;';
+                    if(scout.ok){
+                        const rows=[...scout.results.values()];
+                        const work=rows.filter(x=>x.suggested==='working').length;
+                        const off=rows.filter(x=>x.suggested==='off').length;
+                        const lastCapture=rows.map(x=>x.capturedAt).filter(Boolean).sort().at(-1);
+                        scoutNotice.textContent='Rebel Scout loaded '+work+' WORKING, '+
+                            off+' OFF, '+(14-work-off)+' UNKNOWN day/person selections from the existing schedule. '+
+                            'Latest capture: '+cPilotStamp(lastCapture)+
+                            '. These are suggested assignments, not proof that every planned shift was actually worked. Review before confirming.';
+                    }else{
+                        scoutNotice.textContent='Rebel Scout evidence unavailable: '+scout.error+
+                            '. Attendance stays Unknown until you review it.';
+                        scoutNotice.style.background='#fff5e6';
+                    }
                     const editorTable=document.createElement('table');
                     editorTable.style.cssText='width:100%;font:12px Arial;';
                     const values=[];
@@ -16261,8 +16331,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                                 option.value=code;option.textContent=text;
                                 select.appendChild(option);
                             }
-                            select.value=['working','off'].includes(current)?current:'unknown';
-                            select.style.cssText='padding:5px;margin:2px;border:1px solid #bdcdd8;';
+                            const evidence=scout.ok?
+                                scout.results.get(masterNameKey(row.name)+'|'+day):null;
+                            const saved=['working','off'].includes(current);
+                            const suggested=evidence?.suggested||'unknown';
+                            select.value=saved?current:suggested;
+                            select.style.cssText='padding:5px;margin:2px;border:1px solid #bdcdd8;'+
+                                (!saved&&suggested!=='unknown'?'background:#def7e8;':'');
+                            select.title=saved?'Captain-confirmed duty':
+                                evidence?(evidence.reason+' | Scout capture: '+
+                                  cPilotStamp(evidence.capturedAt)):'No Scout evidence available';
                             label.appendChild(select);td.appendChild(label);line.appendChild(td);
                             selects.push(select);
                         }
@@ -16289,7 +16367,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             save.disabled=false;
                         }
                     };
-                    dutyEditor.append(title,description,editorTable,save,message);
+                    save.style.margin='8px 0';
+                    dutyEditor.append(title,description,scoutNotice,save,editorTable,message);
                 }else{
                     const explanation=document.createElement('div');
                     explanation.style.cssText='font:11px Arial;color:#566f7d;';
@@ -16300,7 +16379,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 }
                 void cPilotRefreshSummary(false);
             }catch(error){
-                status.textContent='C-shift pilot unavailable: '+clean(error?.message||error);
+                if(sequence===loadSequence)
+                    status.textContent='C-shift pilot unavailable: '+clean(error?.message||error);
             }
         }
         void load(true);
