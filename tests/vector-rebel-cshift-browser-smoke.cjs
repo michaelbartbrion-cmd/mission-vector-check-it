@@ -68,7 +68,7 @@ const cShiftMasterOwner=()=>true,
           reason:/Weston|Brooks/.test(name)?'Full-day leave coverage':'Assigned to a unit'
         })))}:
       request.url.includes('vr-ppe-pilot-duty')?
-      {ok:true,scope:'c-shift-ppe-pilot-duty',changed:14}:
+      {ok:true,scope:'c-shift-ppe-pilot-duty',changed:14,crew:7}:
       request.url.includes('vr-ppe-pilot-inventory')?
       {ok:true,scope:'c-shift-ppe-pilot-inventory',readOnly:true,personName:payload.personName,knownItems:payload.items?.length}:
       request.url.includes('vr-ppe-pilot-recheck')?
@@ -178,16 +178,20 @@ const cShiftMasterOwner=()=>true,
     for(const input of row.querySelectorAll('select'))
       if(input.value!==expected)throw Error('Historical duty suggestion mismatch');
   }
-  const historicSave=[...historicalEditor.querySelectorAll('button')]
-    .find(x=>x.textContent.includes('Confirm C Shift Duty'));
-  if(!historicSave)throw Error('Historic confirmation button missing');
-  historicSave.click();
-  await new Promise(r=>setTimeout(r,100));
-  if(!HIST_DUTY||HIST_DUTY.length!==7||HIST_DUTY.filter(x=>x.day1==='working').length!==5)
-    throw Error('Prefilled historical Scout duty did not save after captain confirmation');
+  if(HIST_DUTY)throw Error('Historical attendance was saved without captain confirmation');
   const before=requests.filter(x=>x.url.includes('vr-ppe-pilot-inventory')).length;
+  // The user clicked Map first. Valid Scout evidence should offer one
+  // explicit captain confirmation and continue to PPE discovery in that action.
   map.click();
-  await new Promise(r=>setTimeout(r,120));
+  await new Promise(r=>setTimeout(r,220));
+  if(!HIST_DUTY||HIST_DUTY.length!==7||
+     HIST_DUTY.filter(x=>x.day1==='working'&&x.day2==='working').length!==5||
+     HIST_DUTY.filter(x=>x.day1==='off'&&x.day2==='off').length!==2)
+    throw Error('One-click historical mapping did not confirm Scout-suggested attendance');
+  const historicDutyReq=requests.findIndex(x=>x.url.includes('vr-ppe-pilot-duty')&&x.data.tourStart==='2026-11-15');
+  const historicInventoryReq=requests.findIndex(x=>x.url.includes('vr-ppe-pilot-inventory')&&x.data.tourStart==='2026-11-15');
+  if(!(historicDutyReq>=0&&historicInventoryReq>historicDutyReq))
+    throw Error('Historical mapping did not confirm duty before reading PPE');
   const pastPosts=requests.filter(x=>x.url.includes('vr-ppe-pilot-inventory'));
   if(pastPosts.length!==before+1||pastPosts.at(-1).data.tourStart!=='2026-11-15')
     throw Error('Historical scoped inventory did not target Nov 15-16');
