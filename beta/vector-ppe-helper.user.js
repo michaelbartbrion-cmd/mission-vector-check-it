@@ -16380,9 +16380,54 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const dt=Date.parse(value||'');
         return Number.isFinite(dt)?new Date(dt).toLocaleString():'No verified receipts yet';
     }
+    // Display only the six routine structural PPE categories in the
+    // existing server ledger. Historic source rows can still contain
+    // supplemental PPE from older releases; never delete that evidence.
+    // This read-only presentation fix does NOT change what the server's
+    // native background rechecker can target.
+    function cPilotRoutineType(type){
+        return /^(?:bunker coat|bunker pant|hood|structural gloves|structural boot|structural helmet)$/i
+            .test(clean(type));
+    }
+    function cPilotRoutineBoard(data){
+        const people=(data.people||[]).map(row=>{
+            const source=Array.isArray(row.gear)?row.gear:[];
+            const complete=Array.isArray(row.gear)&&
+                source.length===Number(row.knownItems||0);
+            if(!complete)return{...row,displayCoverageUnknown:true};
+            const gear=source.filter(item=>cPilotRoutineType(item.assetType));
+            const verified=gear.filter(item=>item.status==='verified'&&
+                !!item.nativeCompletionDate);
+            return{...row,gear,knownItems:gear.length,
+                verifiedItems:verified.length,
+                outstandingItems:gear.length-verified.length,
+                lastNativeInspectionDate:verified.map(item=>
+                    item.nativeCompletionDate).sort().at(-1)||'',
+                displayExtraExcluded:source.length-gear.length,
+                displayCoverageUnknown:false};
+        });
+        const totals={...data.totals,knownItems:0,verifiedItems:0,
+            outstandingItems:0};
+        let exclusions=0,coverageUnknown=false;
+        for(const p of people){
+            if(p.displayCoverageUnknown){coverageUnknown=true;continue;}
+            totals.knownItems+=p.knownItems;
+            totals.verifiedItems+=p.verifiedItems;
+            totals.outstandingItems+=p.outstandingItems;
+            exclusions+=p.displayExtraExcluded;
+        }
+        const outstandingOnDuty=people.filter(p=>p.attendance==='working'&&
+            !p.displayCoverageUnknown).reduce((s,p)=>s+p.outstandingItems,0);
+        return{...data,people,totals,outstandingOnDuty,
+            displayExtraExcluded:exclusions,displayCoverageUnknown:coverageUnknown};
+    }
     function cPilotSummaryText(data){
-        return 'C Shift · '+data.totals.verifiedItems+' native Item Log receipts · '+
-            data.outstandingOnDuty+' known outstanding on duty · '+
+        const visible=cPilotRoutineBoard(data);
+        return 'C Shift · '+
+            (visible.displayCoverageUnknown?'Unknown':visible.totals.verifiedItems)+
+            ' routine native Item Log receipts · '+
+            (visible.displayCoverageUnknown?'Unknown':visible.outstandingOnDuty)+
+            ' routine outstanding on duty · '+
             (data.historicalTour?'Reviewing completed C tour':
                 data.activeTour?'Current C tour':'C tour not in progress')+
             '\\nLast ledger update: '+cPilotStamp(data.lastUpdateAt);
@@ -16790,6 +16835,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             try{
                 const data=await cPilotFetch(force,selectedTourStart);
                 if(sequence!==loadSequence)return;
+                const visible=cPilotRoutineBoard(data);
                 if(!tourPicker.options.length){
                     const latest=data.latestCompletedTourStart||
                         (data.historicalTour?data.tourStart:'');
@@ -16829,14 +16875,35 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 status.textContent='C shift '+data.tourStart+' + '+data.tourEnd+
                     '  ·  '+data.workingCrew+' working / '+data.offCrew+' off'+
                     (data.unconfirmedCrew?' / '+data.unconfirmedCrew+' unconfirmed':'')+
-                    '\\n'+data.totals.verifiedItems+' native Item Log verified · '+
-                    data.outstandingOnDuty+' awaiting verification (not necessarily missed)'+
+                    '\\n'+
+                    (visible.displayCoverageUnknown?'Unknown':visible.totals.verifiedItems)+
+                    ' routine native Item Log verified · '+
+                    (visible.displayCoverageUnknown?'Unknown':visible.outstandingOnDuty)+
+                    ' routine checks awaiting verification'+
                     '\\nLast verified: '+cPilotStamp(data.lastPpeVerificationAt)+
                     '  ·  Background reader: '+readerState+
                     (data.activeTour&&!bg?.enabled?
                         ' (requires a dedicated, signed-in Vector tab)':'');
                 if(data.historicalTour)
                     status.textContent+='\\nHistorical PPE ownership was reconstructed from current assignments; verify past assignments before relying on the totals.';
+                if(visible.displayCoverageUnknown)
+                    status.textContent+='\\nOne or more server inventory lists are incomplete; count unknown.';
+                status.textContent+='\\nSCBA face mask history is shown in the separate 2-Month PPE History, not this background pilot.';
+                const previousNotice=advancedTools.querySelector('[data-cshift-excluded]');
+                if(previousNotice)previousNotice.remove();
+                if(battalion&&isMasterOwnerInstallation()&&
+                    visible.displayExtraExcluded){
+                    const notice=document.createElement('div');
+                    notice.setAttribute('data-cshift-excluded','');
+                    notice.style.cssText='font:11px/1.5 Arial;color:#76521b;'+
+                        'background:#fff4db;border-radius:5px;padding:7px;'+
+                        'width:100%;';
+                    notice.textContent=visible.displayExtraExcluded+
+                        ' stored supplemental PPE entries excluded from this '+
+                        'routine Tour PPE display. Rebel Command retains those '+
+                        'entries; backend rotation filtering is not yet deployed.';
+                    advancedTools.prepend(notice);
+                }
                 const directLinks=data.people.reduce((sum,row)=>sum+Number(row.mappedPaths||0),0);
                 if(directLinks<data.totals.knownItems)
                     status.textContent+='\\nNative direct item links: '+directLinks+' / '+data.totals.knownItems+' mapped.';
@@ -16876,8 +16943,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 // BC's high-level status is for firefighters actually working
                 // during this selected tour; unconfirmed/off counts remain in
                 // the summary above, not misleading extra equipment rows.
-                const visiblePeople=captainView||!battalion ? data.people :
-                    data.people.filter(row=>row.attendance==='working');
+                const visiblePeople=captainView||!battalion ? visible.people :
+                    visible.people.filter(row=>row.attendance==='working');
                 if(!visiblePeople.length&&!captainView&&battalion){
                     appendRow(['No confirmed working firefighters',
                         'REVIEW STAFFING','Not mapped',
@@ -16890,8 +16957,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         row.attendance==='off'?'OFF (both days)':'Unconfirmed';
                     if(!captainView){
                         appendRow([row.name,duty,
+                            row.displayCoverageUnknown?'Unknown coverage':
                             row.knownItems?row.verifiedItems+' / '+row.knownItems:'Not mapped',
-                            {text:row.knownItems?row.outstandingItems:'Unknown',
+                            {text:row.displayCoverageUnknown?'Unknown':
+                                row.knownItems?row.outstandingItems:'Unknown',
                                 title:'Awaiting verification does not mean an inspection was missed.',
                                 kind:row.outstandingItems?'pending':''},
                             row.lastNativeInspectionDate||'Not confirmed'],idx);

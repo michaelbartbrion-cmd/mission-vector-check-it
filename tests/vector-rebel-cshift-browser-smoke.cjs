@@ -16,8 +16,8 @@ const names=['Michael Baldree','Michael Brion','Jerry Weems','Jared Weston',
 const fixture={ok:true,readOnly:true,scope:'c-shift-ppe-pilot',
  shift:'C',tourStart:'2026-11-21',tourEnd:'2026-11-22',activeTour:true,
  latestCompletedTourStart:'2026-11-15',historicalTour:false,historicalEligible:false,
- totals:{crew:7,knownItems:3,verifiedItems:1,outstandingItems:2},
- outstandingOnDuty:2,workingCrew:1,offCrew:1,unconfirmedCrew:5,
+ totals:{crew:7,knownItems:4,verifiedItems:1,outstandingItems:3},
+ outstandingOnDuty:3,workingCrew:1,offCrew:1,unconfirmedCrew:5,
  cadenceMinutes:2,lastUpdateAt:'2026-11-21T14:00:00Z',
  lastPpeVerificationAt:'2026-11-21T14:00:00Z',
  lastStaffingUpdateAt:'2026-11-21T14:01:00Z',
@@ -25,16 +25,17 @@ const fixture={ok:true,readOnly:true,scope:'c-shift-ppe-pilot',
   attendance:i===0?'working':i===1?'off':'unconfirmed',
   dutyDay1:i===0?'working':i===1?'off':'unconfirmed',
   dutyDay2:i===0?'working':i===1?'off':'unconfirmed',
-  knownItems:i===0?3:0,verifiedItems:i===0?1:0,
-  outstandingItems:i===0?2:0,nextItem:i===0?'A-001':'',
+  knownItems:i===0?4:0,verifiedItems:i===0?1:0,
+  outstandingItems:i===0?3:0,nextItem:i===0?'A-001':'',
   gear:i===0?[
-   {assetId:'A-001',assetType:'Coat',status:'verified',
+   {assetId:'A-001',assetType:'Bunker Coat',status:'verified',
     nativeCompletionDate:'2026-11-21',lastVerifiedAt:'2026-11-21T14:00:00Z'},
-   {assetId:'B-002',assetType:'Pants',status:'not_yet_verified',
+   {assetId:'B-002',assetType:'Bunker Pant',status:'not_yet_verified',
     lastReadResult:'read_ok',lastReadAt:'2026-11-21T14:00:00Z'},
-   {assetId:'C-003',assetType:'Helmet',status:'not_yet_verified',
-    lastReadResult:'unreadable',lastAttemptAt:'2026-11-21T14:01:00Z'}
-  ]:i===1?[{assetId:'OFF-04',assetType:'Boots',status:'not_yet_verified'}]:[]}))};
+   {assetId:'C-003',assetType:'Structural Helmet',status:'not_yet_verified',
+    lastReadResult:'unreadable',lastAttemptAt:'2026-11-21T14:01:00Z'},
+   {assetId:'EXTRA-01',assetType:'Wildland Helmet',status:'not_yet_verified'}
+  ]:i===1?[{assetId:'OFF-04',assetType:'Structural Boot',status:'not_yet_verified'}]:[]}))};
 const js=`
 (function(){
 const FIXTURE=__DATA__,requests=[],STORE=new Map(),SESSION=new Map();
@@ -248,6 +249,8 @@ const cShiftMasterOwner=()=>true,
   const captain=[...document.querySelectorAll('.pilot-overlay')].at(-1);
   if(!captain.textContent.includes('Daily Captain Check'))
     throw Error('Captain-specific full gear screen missing');
+  if(captain.textContent.includes('EXTRA-01'))
+    throw Error('Previously stored supplemental gear leaked into Captain routine view');
   const itemRows=[...captain.querySelector('table').querySelectorAll('tr')];
   if(itemRows.length!==10)
     throw Error('Captain gear grid did not include each known item and all seven firefighters: '+itemRows.length);
@@ -259,6 +262,10 @@ const cShiftMasterOwner=()=>true,
      !captain.textContent.includes('? UNREADABLE'))
     throw Error('Captain full PPE grid has missing statuses or source data');
   const bcFinal=[...master.querySelector('table').querySelectorAll('tr')];
+  if(!bcFinal.some(row=>row.textContent.includes('1 / 3')))
+    throw Error('BC counts still include supplemental PPE');
+  if(!master.querySelector('[data-cshift-excluded]')?.textContent.includes('1 stored supplemental PPE'))
+    throw Error('Master diagnostics do not show legacy extra-record count');
   if(bcFinal.length!==6)
     throw Error('BC summary should show only the five confirmed working firefighters: '+bcFinal.length);
   if(bcFinal.some(row=>/Weston|Brooks/.test(row.textContent)))

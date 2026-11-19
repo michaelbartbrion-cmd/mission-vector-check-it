@@ -22,7 +22,7 @@ function harness(){
  const api=new Function('isMasterOwnerInstallation','getConfig','clean','loadJSON','saveJSON','getActiveMasterRoster',
  'rebelCommandPaired','ensureRebelCommandEnrollment','rebelCommandPairing','GM_xmlhttpRequest','REBEL_COMMAND_ENDPOINT',
  'document','makeOverlayBox','makeButton','location','inferRegularTourWindow',segment+
- '\nreturn {queue:cPilotQueueNativeCompletion,queueInventory:cPilotQueueScopedInventory,pending:cPilotPending,flush:cPilotFlushReceipts,fetch:cPilotFetch,show:showCShiftPilotBoard,queueReadOnly:cPilotQueueReadOnlyResults,nativePath:cPilotNativePath,directTarget:cPilotDirectTarget};')(
+ '\nreturn {queue:cPilotQueueNativeCompletion,queueInventory:cPilotQueueScopedInventory,pending:cPilotPending,flush:cPilotFlushReceipts,fetch:cPilotFetch,show:showCShiftPilotBoard,queueReadOnly:cPilotQueueReadOnlyResults,nativePath:cPilotNativePath,directTarget:cPilotDirectTarget,display:cPilotRoutineBoard,summary:cPilotSummaryText};')(
  ()=>true,()=>({inspectorName:'Michael Brion'}),
  x=>String(x||'').trim(),
  (key,fallback)=>store.has(key)?store.get(key):fallback,
@@ -36,6 +36,44 @@ function harness(){
  );
  return{...api,store,events};
 }
+test('older supplemental PPE records are excluded from current Captain/BC presentation without changing underlying ledger',()=>{
+ const h=harness();
+ const gear=[
+  {assetId:'C',assetType:'Bunker Coat',status:'verified',
+    nativeCompletionDate:'2026-11-21',lastVerifiedAt:'2026-11-21T14:00:00Z'},
+  {assetId:'P',assetType:'Bunker Pant',status:'not_yet_verified'},
+  {assetId:'WH',assetType:'Wildland Helmet',status:'not_yet_verified'},
+  {assetId:'DC',assetType:'Dual Certification Coat...',status:'not_yet_verified'},
+  {assetId:'PFD',assetType:'Water Rescue PPE, PFD...',status:'not_yet_verified'}
+ ];
+ const src={totals:{crew:1,knownItems:5,verifiedItems:1,outstandingItems:4},
+  outstandingOnDuty:4,activeTour:true,lastUpdateAt:'2026-11-21',
+  people:[{name:'Michael Brion',attendance:'working',gear,
+    knownItems:5,verifiedItems:1,outstandingItems:4}]};
+ const before=JSON.stringify(src);
+ const display=h.display(src);
+ assert.deepEqual(display.people[0].gear.map(x=>x.assetId),['C','P']);
+ assert.deepEqual([display.totals.knownItems,display.totals.verifiedItems,
+    display.totals.outstandingItems,display.outstandingOnDuty],
+   [2,1,1,1]);
+ assert.equal(display.displayExtraExcluded,3);
+ assert.equal(display.people[0].lastNativeInspectionDate,'2026-11-21');
+ assert.equal(JSON.stringify(src),before,'display filtering never edits source ledger');
+ assert.ok(h.summary(src).includes('1 routine native Item Log receipts'));
+ assert.ok(!h.summary(src).includes('4 routine outstanding'));
+});
+test('missing source gear array cannot manufacture an all-clear routine count',()=>{
+ const h=harness();
+ const src={totals:{crew:1,knownItems:3,verifiedItems:1,outstandingItems:2},
+  people:[{name:'Michael Brion',attendance:'working',
+    knownItems:3,verifiedItems:1,outstandingItems:2}]};
+ const display=h.display(src);
+ assert.equal(display.displayCoverageUnknown,true);
+ assert.equal(display.people[0].displayCoverageUnknown,true);
+ assert.equal(display.totals.verifiedItems,0);
+ assert.ok(h.summary(src).includes('Unknown routine native Item Log receipts'),
+  'an incomplete server array cannot be reported as zero verified checks');
+});
 test('native Item Log confirmation enqueues known PPE, sends one C-shift receipt and clears after server acknowledgement',async()=>{
  const h=harness();
  const run={runId:'ppe-42',modeKey:'tour',ownerName:'Michael Brion',
