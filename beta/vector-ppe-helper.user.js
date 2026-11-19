@@ -16390,7 +16390,20 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         controls.append(tourPicker,close);
         if(battalion&&isMasterOwnerInstallation()){
             const mapGear=makeButton('Map Working Crew PPE',{background:'#ecf2f4',color:'#174963'});
-            mapGear.onclick=()=>void cPilotMapWorkingGear(selectedTourStart);
+            mapGear.onclick=async()=>{
+                if(mapGear.disabled)return;
+                mapGear.disabled=true;
+                try{
+                    await cPilotMapWorkingGear(selectedTourStart);
+                    // Mapping can also confirm captain-reviewed tour duty.
+                    // Update the same BC/Captain board immediately instead
+                    // of leaving an obsolete OFF/UNKNOWN roster until Refresh.
+                    if(overlay.isConnected){
+                        cPilotCache=null;
+                        await load(true);
+                    }
+                }finally{mapGear.disabled=false;}
+            };
             advancedTools.appendChild(mapGear);
             const recheck=makeButton('Check outstanding',
                 {background:'#176b8e',color:'#fff'});
@@ -16554,7 +16567,21 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     });
                     table.appendChild(tr);
                 };
-                for(const [idx,row] of data.people.entries()){
+                // The Captain inventory shows every selected crew member and
+                // every known piece, including OFF and unresolved people.
+                // BC's high-level status is for firefighters actually working
+                // during this selected tour; unconfirmed/off counts remain in
+                // the summary above, not misleading extra equipment rows.
+                const visiblePeople=captainView||!battalion ? data.people :
+                    data.people.filter(row=>row.attendance==='working');
+                if(!visiblePeople.length&&!captainView&&battalion){
+                    appendRow(['No confirmed working firefighters',
+                        'REVIEW STAFFING','Not mapped',
+                        {text:'Unknown',kind:'pending',
+                         title:'Captain must confirm staffing before BC PPE review.'},
+                        'No native inspection evidence'],0);
+                }
+                for(const [idx,row] of visiblePeople.entries()){
                     const duty=row.attendance==='working'?'WORKING':
                         row.attendance==='off'?'OFF (both days)':'Unconfirmed';
                     if(!captainView){
