@@ -149,3 +149,14 @@ test('actual Captain report keeps valid native green receipts but marks unresolv
   assert.equal(result.owners[1].allReadable,false);
   assert.match(result.owners[1].discoveryError,/unverified/);
 });
+
+test('historical Captain grid retains an explicit visible person row for owners with zero verified gear',()=>{
+  const renderer=section('function showCaptainDailyReport(',
+    'function showCaptainDailySetPicker() {');
+  assert.match(renderer,/if \(!ownerItems\.length\) \{/);
+  assert.match(renderer,/person\.textContent=owner\.name\|\|owner\.prefix\|\|'Unknown'/);
+  assert.match(renderer,/PPE INVENTORY UNVERIFIED/);
+  assert.match(renderer,/NO VERIFIED EQUIPMENT LIST\. INSPECTION HISTORY UNKNOWN/);
+  assert.match(renderer,/placeholder\.append\(person,item,monthsUnknown\)/);
+  assert.match(renderer,/tbody\.appendChild\(placeholder\)/);
+});

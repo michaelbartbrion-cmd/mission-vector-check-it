@@ -6461,6 +6461,28 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const tbody = document.createElement('tbody');
         (report.owners || []).forEach((owner, ownerIndex) => {
             const ownerItems = owner.items || [];
+            if (!ownerItems.length) {
+                // Preserve the entire Captain Set in the visible grid, even
+                // when Vector could not uniquely confirm one person's PPE.
+                // No native green pass or red missed check may be inferred.
+                const placeholder=document.createElement('tr');
+                const person=document.createElement('td');
+                person.textContent=owner.name||owner.prefix||'Unknown';
+                person.style.cssText='position:sticky;left:0;z-index:2;padding:8px;'+
+                    'background:#fff6df;color:#815800;font-weight:800;border-top:3px solid #6f8ea1;';
+                const item=document.createElement('td');
+                item.textContent='PPE INVENTORY UNVERIFIED';
+                item.title=owner.discoveryError||'No mapped native PPE items';
+                item.style.cssText='position:sticky;left:155px;z-index:2;padding:8px;'+
+                    'background:#fff6df;color:#815800;font-weight:800;border-top:3px solid #6f8ea1;';
+                const monthsUnknown=document.createElement('td');
+                monthsUnknown.colSpan=Math.max(1,months.length);
+                monthsUnknown.textContent='? NO VERIFIED EQUIPMENT LIST. INSPECTION HISTORY UNKNOWN.';
+                monthsUnknown.style.cssText='background:#fff6df;color:#815800;'+
+                    'font-weight:700;padding:8px;border-top:3px solid #6f8ea1;';
+                placeholder.append(person,item,monthsUnknown);
+                tbody.appendChild(placeholder);
+            }
             ownerItems.forEach((item, itemIndex) => {
                 const itemHasMissing = (item.tourChecks || []).some(check => check.due &&
                     (item.status!=='ok' || !check.ok));
