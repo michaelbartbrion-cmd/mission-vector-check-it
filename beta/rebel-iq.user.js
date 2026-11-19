@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel IQ - T504
 // @namespace    mission-vector-check-it-rebel-fleet
-// @version      0.1.21
+// @version      0.1.22
 // @description  T504 Daily Tour, weekly, rope drafts, and inspector-confirmed Assets review.
 // @match        https://fmfd.operativeiqfrontline.com/*
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-iq.user.js
@@ -16,10 +16,10 @@
 (() => {
   'use strict';
   if (window.__rebelIqT504) return;
-  window.__rebelIqT504 = { version: '0.1.21' };
+  window.__rebelIqT504 = { version: '0.1.22' };
   // Minimal RC diagnostics: only stage, redacted error, URL path, version.
   // Never transmit form answers, notes, asset readings, or login credentials.
-  const IQ_VERSION = '0.1.21';
+  const IQ_VERSION = '0.1.22';
   const IQ_ENROLL_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryEnroll';
   const IQ_REPORT_ENDPOINT = 'https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
   const IQ_DEVICE_KEY = 'rebelIqDeviceV1';
@@ -1714,11 +1714,10 @@
     if (!t504Visible()) return;
     const task = TASKS[pending.kind];
     if (formId()) {
-      if (!clean(document.body.innerText).includes(task.name)) {
-        notify('Wrong questionnaire open. No answers changed.', true);
-      captureIqError('Unexpected questionnaire route', pending.kind + ':wrong-form');
-        return;
-      }
+      // Angular changes the URL before the questionnaire title and controls
+      // render. Do not raise a false wrong-form incident on that transient
+      // shell: waitForIqForm validates the exact title, every question and
+      // the unique Save In Process control before any draft modification.
       busy = true;
       try {
         notify('Waiting for the complete T504 questionnaire to load...');
