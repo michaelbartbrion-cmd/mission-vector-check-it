@@ -214,6 +214,32 @@ test('read-only C-shift single-pass queues only successfully read Item Log items
  assert.deepEqual(request.completedDates,['2026-11-21']);
  assert.equal(request.checkedAt,'2026-11-21T15:55:00Z');
 });
+test('read-only mask Item Log creates scbaTour receipt only after native identity verification',async()=>{
+ const h=harness();
+ const owner='PERSON-0DCD2AB48E2A5588';
+ const check={checkId:'mask-native-123',tourStart:'2026-11-21',
+  items:[{assetId:'MASK-01',ownerPrefix:owner,ownerName:'Michael Brion',
+    pool:'299947',inspectionModeKey:'scbaTour',template:'119122'},
+   {assetId:'MASK-02',ownerPrefix:owner,ownerName:'Michael Brion',
+    pool:'299947',inspectionModeKey:'scbaTour',template:'119122'}],
+  results:[{assetId:'MASK-01',ownerPrefix:owner,status:'ok',
+    readAt:'2026-11-21T15:55:00Z',tour:{dates:['2026-11-21']}},
+   {assetId:'MASK-02',ownerPrefix:owner,status:'error',
+    error:'SCBA form still loading',tour:{dates:[]}}]};
+ const result=await h.queueReadOnly(check);
+ assert.equal(result.queued,2);
+ assert.equal(result.unreadable,1);
+ assert.equal(result.delivered,true);
+ const posts=h.events.filter(x=>x.url.includes('vr-ppe-pilot-recheck'))
+  .map(x=>JSON.parse(x.data));
+ assert.equal(posts.length,2);
+ assert.deepEqual(posts.map(x=>x.inspectionMode),['scbaTour','scbaTour']);
+ assert.equal(posts[0].nativeAssetIdentityVerified,true);
+ assert.deepEqual(posts[0].completedDates,['2026-11-21']);
+ assert.equal(posts[1].nativeAssetIdentityVerified,false);
+ assert.deepEqual(posts[1].completedDates,[]);
+ assert.equal(h.pending().length,0);
+});
 test('recheck is only available through confirmed-working Master, never through User',()=>{
  const menu=src.slice(src.indexOf('    function showCShiftPilotBoard('),
    src.indexOf('    let lastInterfaceErrorInboxPoll=0;'));
