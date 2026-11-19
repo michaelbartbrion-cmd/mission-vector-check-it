@@ -2,7 +2,7 @@
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {spawnSync}=require('node:child_process'),assert=require('node:assert/strict');
 const src=fs.readFileSync(path.join(__dirname,'../beta/vector-rebel.user.js'),'utf8');
-const start=src.indexOf('    function captainTwoMonthItemPattern(item,window){');
+const start=src.indexOf('    function showCaptainDailyReport(');
 const end=src.indexOf('    function showCaptainDailySetPicker()',start);
 assert.ok(start>0&&end>start,'two-month native history renderer in source');
 const feature=src.slice(start,end);
@@ -69,16 +69,21 @@ try{
  const rows=[...root.querySelectorAll('tbody tr')];
  if(rows.length!==3)throw Error('Not every firefighter/PPE piece visible: '+rows.length);
  const header=root.querySelector('thead').textContent;
- if(!header.includes('2026-10')||!header.includes('2026-11')||
-    !header.includes('TWO-MONTH PATTERN'))
-    throw Error('Month date headings or trend column missing');
- if(!root.textContent.includes('REPEATED MISSING CHECKS')||
-    !root.textContent.includes('Firefighter A / Coat (COAT-A): 2'))
-    throw Error('Repeated item/person pattern not called out');
- if(!rows[0].querySelector('[data-captain-ppe-pattern="REPEATED MISSING"]'))
-    throw Error('Verified repeated missing PPE pattern not visible');
- if(!rows[1].querySelector('[data-captain-ppe-pattern="STATUS UNKNOWN"]'))
-    throw Error('Unreadable item should show UNKNOWN rather than missing');
+ if(!header.includes('2026-10')||!header.includes('2026-11'))
+    throw Error('Two-month tour date headings missing');
+ if(header.includes('TWO-MONTH PATTERN')||
+    root.textContent.includes('REPEATED MISSING')||
+    root.querySelector('[data-captain-ppe-pattern]'))
+    throw Error('Historical PPE viewer still contains unsolicited interpretations');
+ if(!rows[0].textContent.includes('COAT-A')||
+    !rows[1].textContent.includes('BOOTS-A')||
+    !rows[2].textContent.includes('COAT-B'))
+    throw Error('Some individual native PPE items are not shown');
+ const completed=[...rows[0].querySelectorAll('td:nth-child(3) div[title]')];
+ if(!completed.some(x=>x.textContent==='✓')||
+    !completed.some(x=>x.textContent==='✕'))
+    throw Error('First month does not show native verified and absent check dates');
+
  const marks=rows[1].querySelectorAll('td:nth-child(3) div[title],td:nth-child(4) div[title]');
  if([...marks].some(x=>x.textContent==='✕'))
     throw Error('Unreadable history was falsely displayed as a missing inspection');
@@ -87,6 +92,7 @@ try{
  document.body.dataset.twoMonthSmoke='PASS';
 }catch(e){document.body.dataset.twoMonthSmoke='FAIL';document.body.dataset.reason=e.message;}
 })();`.replace('__FEATURE__',feature).replace('__REPORT__',JSON.stringify(report));
+require('node:vm').compileFunction(js,[]);
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'captain-two-month-smoke-'));
 try{
  const filename=path.join(dir,'history.html');
@@ -99,6 +105,10 @@ try{
  if(res.error)throw res.error;
  const status=res.stdout.match(/data-two-month-smoke="([^"]+)"/)?.[1]||'UNKNOWN';
  const reason=res.stdout.match(/data-reason="([^"]+)"/)?.[1]||'';
+ if(status==='UNKNOWN'){
+  console.log('BROWSER_STDERR_TAIL='+String(res.stderr).slice(-1500));
+  console.log('BROWSER_STDOUT_TAIL='+String(res.stdout).slice(-1100));
+ }
  console.log('CAPTAIN_TWO_MONTH_BROWSER_SMOKE='+status+(reason?' REASON='+reason:''));
  assert.equal(status,'PASS',String(res.stderr).slice(-350)+reason);
 }finally{fs.rmSync(dir,{recursive:true,force:true})}

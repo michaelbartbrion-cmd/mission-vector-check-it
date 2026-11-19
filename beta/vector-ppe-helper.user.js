@@ -6216,42 +6216,6 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
     }
 
-    // One row for each firefighter and each exact PPE piece across the two
-    // calendar months in the stored native Item Log audit. Repeated missing
-    // requirements are a pattern only after the history was READ successfully.
-    // An unreadable item, unconfirmed duty, or off tour is NEVER a miss.
-    function captainTwoMonthItemPattern(item,window){
-        // A tour still underway has no historical "missed" outcome yet.
-        // Only tours fully finished before the audit-through date contribute
-        // to the two-month pattern. Current tour stays in the live check.
-        const allowed=new Set((window?.tours||[])
-            .filter(t=>!!t.endDate&&t.endDate<window?.asOfDate)
-            .map(t=>t.startDate));
-        const checks=(item?.tourChecks||[]).filter(c=>allowed.has(c.startDate));
-        const readable=item?.status==='ok';
-        const required=checks.filter(c=>c.due===true);
-        const verified=required.filter(c=>readable&&c.ok===true&&!!c.date).length;
-        // Source-confirmed work is required before calling a missing native
-        // check a repeated failure. A base-roster assumption can be useful
-        // for scheduling work, but is not proof the person was on duty.
-        const confirmedWork=c=>['scout_any_unit','swing_selected_tour',
-            'captain_selected_tour'].includes(c.assignmentSource);
-        const missing=readable?required.filter(c=>c.ok!==true&&confirmedWork(c)).length:0;
-        const dutyUnverified=readable?required.filter(c=>c.ok!==true&&!confirmedWork(c)).length:0;
-        const unreadable=readable?0:required.length;
-        const attendanceUnknown=checks.filter(c=>c.unknown===true&&!c.due).length;
-        const off=checks.filter(c=>c.off===true&&!c.due).length;
-        const unassigned=checks.filter(c=>c.notAssigned===true&&!c.due).length;
-        const uncertain=unreadable+attendanceUnknown+dutyUnverified;
-        const repeated=missing>=2;
-        const label=repeated?'REPEATED MISSING':
-            missing===1?'1 MISSING':
-            uncertain?'STATUS UNKNOWN':
-            required.length?'NO CONFIRMED MISSES':'NO DUE TOURS';
-        return{verified,missing,unreadable,dutyUnverified,attendanceUnknown,off,
-            unassigned,required:required.length,uncertain,repeated,label};
-    }
-
     function showCaptainDailyReport(report = getCaptainDailyReport()) {
         if (!report) {
             setStatus('No Daily Captain Check report is stored yet.');
@@ -6319,45 +6283,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
 
         const months = Array.isArray(auditWindow.months) ? auditWindow.months.slice(0, 2) : [];
-        const allItems = (report.owners || []).flatMap(owner => (owner.items || []).map(item => ({ owner, item })));
-        const missingTours = allItems.reduce((sum, row) =>
-            sum + captainTwoMonthItemPattern(row.item,auditWindow).missing, 0);
-        const unknownTourOwners=new Set((report.owners||[]).flatMap(owner=>
-            (owner.items||[]).flatMap(item=>(item.tourChecks||[])
-                .filter(check=>check.unknown===true)
-                .map(check=>owner.prefix+'|'+check.startDate))));
-        const unreadable = allItems.filter(row=>row.item.status!=='ok' &&
-            (row.item.tourChecks||[]).some(check=>check.due)).length;
-        const repeatedGaps=allItems.filter(row=>
-            captainTwoMonthItemPattern(row.item,auditWindow).repeated);
-        const hasUnresolvedOwners=(report.owners||[]).some(owner=>
-            !!owner.discoveryError||(owner.unknownAssets||[]).length>0);
-        const hasProblems = missingTours > 0 || unreadable > 0 ||
-            unknownTourOwners.size>0 || hasUnresolvedOwners;
-
-        const summaryBar = document.createElement('div');
-        summaryBar.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px;padding:9px 10px;border-radius:8px;border:1px solid ' +
-            (hasProblems ? '#e1a3a3' : '#a9cfad') + ';background:' + (hasProblems ? '#fff3f3' : '#eef8ef') + ';font-size:11px;color:#304b5a;';
-        summaryBar.innerHTML = '<b>' + (hasProblems ? 'NEEDS REVIEW' : 'ALL DUE TOUR CHECKS COMPLETE') + '</b>' +
-            '<span>Confirmed missing item/tour checks: <b style="color:' + (missingTours ? '#b42318' : '#24713b') + '">' + missingTours + '</b></span>' +
-            '<span>Unreadable: <b style="color:' + (unreadable ? '#b42318' : '#24713b') + '">' + unreadable + '</b></span>'+
-            '<span>Unverified tour attendance: <b style="color:#80570c">' +
-                unknownTourOwners.size + '</b></span>';
-        box.appendChild(summaryBar);
-        const patternNotice=document.createElement('div');
-        patternNotice.setAttribute('data-captain-two-month-patterns','');
-        patternNotice.style.cssText='padding:8px 10px;margin:0 0 9px;border-radius:7px;'+
-            'font:700 11px/1.5 Arial;color:'+
-            (repeatedGaps.length?'#902b20':'#315970')+';background:'+
-            (repeatedGaps.length?'#fff0e6':'#eaf4f8')+';';
-        patternNotice.textContent=repeatedGaps.length?
-            'REPEATED MISSING CHECKS (2+ confirmed due tours): '+
-            repeatedGaps.map(row=>row.owner.name+' / '+
-                row.item.type+' ('+row.item.assetId+'): '+
-                captainTwoMonthItemPattern(row.item,auditWindow).missing).join('; '):
-            '2-month pattern: no repeated confirmed missing PPE item checks. '+
-            'This does not clear unknown, unreadable, or unassigned records.';
-        box.appendChild(patternNotice);
+        // Show the original native result for each person, asset and tour.
+        // Do not calculate compliance scores, trends or recommendations.
         const attendanceCard=document.createElement('section');
         attendanceCard.style.cssText='margin:7px 0;padding:8px 10px;border:1px solid #c7d8e1;border-radius:7px;background:#f3f8fa;color:#385d70;font:11px/1.4 Arial;';
         attendanceCard.textContent='Rebel Command attendance: loading read-only Scout evidence…';
@@ -6481,7 +6408,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const tableWrap = document.createElement('div');
         tableWrap.style.cssText = 'max-height:68vh;overflow:auto;border:1px solid #c9d7df;border-radius:10px;background:#fff;';
         const table = document.createElement('table');
-        table.style.cssText = 'width:100%;min-width:' + (520 + months.length * (14 + monthTourColumns * 38)) + 'px;border-collapse:separate;border-spacing:0;font-size:11px;color:#223f50;';
+        table.style.cssText = 'width:100%;min-width:' + (365 + months.length * (14 + monthTourColumns * 38)) + 'px;border-collapse:separate;border-spacing:0;font-size:11px;color:#223f50;';
         const thead = document.createElement('thead');
         const headRow = document.createElement('tr');
         const makeHead = (text, extra) => {
@@ -6516,7 +6443,6 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             th.append(monthTitle, guide);
             headRow.appendChild(th);
         });
-        headRow.appendChild(makeHead('TWO-MONTH PATTERN','min-width:155px;'));
         thead.appendChild(headRow);
         table.appendChild(thead);
 
@@ -6538,7 +6464,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 item.style.cssText='position:sticky;left:155px;z-index:2;padding:8px;'+
                     'background:#fff6df;color:#815800;font-weight:800;border-top:3px solid #6f8ea1;';
                 const monthsUnknown=document.createElement('td');
-                monthsUnknown.colSpan=Math.max(1,months.length+1);
+                monthsUnknown.colSpan=Math.max(1,months.length);
                 monthsUnknown.textContent='? NO VERIFIED EQUIPMENT LIST. INSPECTION HISTORY UNKNOWN.';
                 monthsUnknown.style.cssText='background:#fff6df;color:#815800;'+
                     'font-weight:700;padding:8px;border-top:3px solid #6f8ea1;';
@@ -6546,10 +6472,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 tbody.appendChild(placeholder);
             }
             ownerItems.forEach((item, itemIndex) => {
-                const pattern=captainTwoMonthItemPattern(item,auditWindow);
-                const itemHasMissing=pattern.missing>0;
                 const baseBackground = ownerIndex % 2 ? '#f8fbfc' : '#ffffff';
-                const rowBackground = itemHasMissing ? '#fff1f1' : baseBackground;
+                const rowBackground = baseBackground;
                 const topBorder = itemIndex === 0 ? 'border-top:3px solid #6f8ea1;' : 'border-top:1px solid #dce5ea;';
                 const tr = document.createElement('tr');
 
@@ -6570,7 +6494,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
                 const itemCell = document.createElement('td');
                 itemCell.style.cssText = 'position:sticky;left:155px;z-index:2;min-width:210px;padding:6px 8px;' + topBorder +
-                    'background:' + rowBackground + ';box-shadow:' + (itemHasMissing ? 'inset 4px 0 0 #c83b3b,1px 0 0 #dce5ea' : '1px 0 0 #dce5ea') + ';white-space:nowrap;';
+                    'background:' + rowBackground + ';box-shadow:1px 0 0 #dce5ea;white-space:nowrap;';
                 itemCell.innerHTML = '<b>' + escapeHtml(item.type || 'PPE') + '</b>' +
                     '<span style="font-size:9px;color:#6b7f8b;margin-left:6px">Asset ' + escapeHtml(item.assetId || 'unknown') + '</span>' +
                     (item.status !== 'ok' && (item.tourChecks||[]).some(check=>check.due)?
@@ -6582,23 +6506,6 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     if (monthIndex) cell.style.borderLeft = '2px solid #e1e8ec';
                     tr.appendChild(cell);
                 });
-                const patternCell=document.createElement('td');
-                patternCell.setAttribute('data-captain-ppe-pattern',pattern.label);
-                patternCell.style.cssText='min-width:155px;padding:6px 9px;'+topBorder+
-                    'font:700 10px/1.5 Arial;white-space:normal;color:'+
-                    (pattern.repeated?'#a42619':pattern.missing?'#925023':
-                     pattern.uncertain?'#80570c':'#176b32')+';background:'+
-                    (pattern.repeated?'#fff0e6':pattern.uncertain?'#fff7df':rowBackground)+';';
-                patternCell.textContent=pattern.label+' | '+
-                    pattern.verified+'/'+pattern.required+' verified'+
-                    (pattern.missing?' | '+pattern.missing+' missing':'')+
-                    (pattern.uncertain?' | '+pattern.uncertain+' unknown':'');
-                patternCell.title=pattern.off+' OFF tour(s), '+
-                    pattern.unassigned+' not assigned, '+
-                    pattern.attendanceUnknown+' unconfirmed attendance, '+
-                    pattern.unreadable+' due checks with unreadable Item Log. '+
-                    'These do not count as missed checks.';
-                tr.appendChild(patternCell);
                 tbody.appendChild(tr);
             });
         });
