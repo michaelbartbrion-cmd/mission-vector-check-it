@@ -20,7 +20,7 @@ test('two-month report retains every firefighter, asset and tour date without in
 });
 
 test('actual native results, unknown history, OFF and open tours remain source-labeled',()=>{
- assert.match(report,/sourceUnreadable=item\.status!=='ok'&&due/);
+ assert.match(report,/item\.tourHistoryExhaustive!==true/);
  assert.match(report,/const pendingTour=due&&!tourFinished/);
  assert.match(report,/const missing=due&&!ok&&!sourceUnreadable&&!dutyUnverified&&tourFinished/);
  assert.match(report,/sourceUnreadable\?'\?':pendingTour\?'…':dutyUnverified\?'\?':due\?'✕'/);

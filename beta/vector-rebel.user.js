@@ -5500,22 +5500,80 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return dates;
     }
 
+    // Read all native Item Log pages before treating an absent inspection
+    // date as a verified absence. A ten-row page without a visible paginator
+    // is NOT proof that older PPE checks do not exist.
+    function captainNativeHistoryPage(item,modeTitle){
+        if(!isAssetPageFor(item)||!assetPageContainsExpectedId(item))return null;
+        const source=itemLogCompletedRowSource(item,modeTitle);
+        if(!source)return null;
+        const table=findItemLogHistoryTable();
+        const rawRows=table?historyRows(table):structuralItemLogRows(modeTitle);
+        return{source,rawRowCount:rawRows.length,
+            fingerprint:diagnosticTextHash(JSON.stringify(
+                rawRows.map(itemLogRowText))),
+            next:getPaginationControl('next')};
+    }
+
     async function readModeCompletionHistory(item, modeKey) {
-        const mode = getMode(modeKey);
-        if (!mode) throw new Error(`${modeKey}: inspection mode is unavailable.`);
-        const settled = await waitForItemLogSnapshotSettled(item, mode.title, 9000, 3);
-        if (!settled) throw new Error(`${item.assetId}: ${mode.short} Item Log did not become readable and stable.`);
-        const source = itemLogCompletedRowSource(item, mode.title);
-        if (!source) throw new Error(`${item.assetId}: ${mode.short} Item Log history could not be read.`);
-        const dates = historyEntriesFromSource(source);
-        return {
-            title: mode.title,
-            short: mode.short,
-            parserPath: source.parserPath,
-            dates,
-            latestDate: dates[0] || '',
-            completedRowCount: source.rows.length
-        };
+        const mode=getMode(modeKey);
+        if(!mode)throw new Error(`${modeKey}: inspection mode is unavailable.`);
+        const allDates=new Set(),seenPages=new Set(),parserPaths=new Set();
+        let completedRows=0,pages=0,exhaustive=false;
+        // Bounded even when Vector's paginator repeats or never completes.
+        for(let pageIndex=0;pageIndex<30;pageIndex++){
+            const settled=await waitForItemLogSnapshotSettled(item,mode.title,9000,3);
+            if(!settled)throw new Error(`${item.assetId}: ${mode.short} Item Log did not settle.`);
+            const snapshot=captainNativeHistoryPage(item,mode.title);
+            if(!snapshot)throw new Error(`${item.assetId}: ${mode.short} Item Log could not be read.`);
+            if(seenPages.has(snapshot.fingerprint))
+                throw new Error(`${item.assetId}: native Item Log page repeated; two-month history incomplete.`);
+            seenPages.add(snapshot.fingerprint);
+            parserPaths.add(snapshot.source.parserPath);
+            // A completed row without a readable date cannot establish
+            // coverage: never turn that omission into a red missing check.
+            for(const row of snapshot.source.rows){
+                const text=itemLogRowText(row);
+                const audit=historyRowAudit(row,0);
+                const parsedAt=Number.isFinite(audit.parsedAt)?
+                    audit.parsedAt:parseVectorHistoryDate(text);
+                if(!localHistoryDateKey(parsedAt))
+                    throw new Error(`${item.assetId}: completed ${mode.short} Item Log date unreadable.`);
+            }
+            for(const date of historyEntriesFromSource(snapshot.source))allDates.add(date);
+            completedRows+=snapshot.source.rows.length;
+            pages++;
+            const next=snapshot.next;
+            if(!paginationControlEnabled(next)){
+                // Structural fallback can return only matching rows outside
+                // the native table; it cannot establish full history coverage
+                // without an explicitly disabled final-page control.
+                const completeNativeTable=/^semantic-container/.test(
+                    snapshot.source.parserPath||'');
+                exhaustive=!!next || (completeNativeTable&&
+                    snapshot.rawRowCount<10);
+                break;
+            }
+            const prior=snapshot.fingerprint;
+            next.click(); // Read-only native Item Log page transition.
+            const started=Date.now();
+            let changed=false;
+            while(Date.now()-started<10000){
+                if(!isAssetPageFor(item)||!assetPageContainsExpectedId(item))
+                    throw new Error(`${item.assetId}: native history left the expected PPE asset.`);
+                const updated=captainNativeHistoryPage(item,mode.title);
+                if(updated&&updated.fingerprint!==prior){changed=true;break;}
+                await sleep(180);
+            }
+            if(!changed)throw new Error(`${item.assetId}: native Item Log next page did not change.`);
+        }
+        if(pages>=30)
+            throw new Error(`${item.assetId}: native Item Log exceeded 30 pages; coverage incomplete.`);
+        const dates=[...allDates].sort().reverse();
+        return{title:mode.title,short:mode.short,
+            parserPath:[...parserPaths].join(','),
+            dates,latestDate:dates[0]||'',
+            completedRowCount:completedRows,pages,exhaustive};
     }
 
     async function readCaptainComplianceHistory(item) {
@@ -5777,7 +5835,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return (report?.owners||[]).flatMap(owner=>(owner.items||[]).map(item=>({
             ownerName:owner.name,ownerPrefix:owner.prefix,
             assetId:item.assetId,type:item.type,status:item.status||'error',
-            tour:{dates:[...(item.tourDates||[])],latestDate:item.latestTourDate||''},
+            tour:{dates:[...(item.tourDates||[])],latestDate:item.latestTourDate||'',
+                exhaustive:item.tourHistoryExhaustive===true},
             error:item.error||''
         })));
     }
@@ -5798,6 +5857,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const result = byAsset.get(item.assetId);
                 const tourDates = Array.isArray(result?.tour?.dates) ? result.tour.dates : [];
                 const readable = result?.status === 'ok';
+                // Older cached reports did not inspect Item Log pagination.
+                // A completed native entry remains valid, but absent dates
+                // on a non-exhaustive history are UNKNOWN, never a red miss.
+                const historyExhaustive=readable&&result?.tour?.exhaustive===true;
                 const tourChecks = window.tours.map(tourWindow => {
                     const duty=captainOwnerTourDuty(owner,tourWindow,window,check.tourRoster,
                         historicalOff,scoutRecords);
@@ -5832,6 +5895,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     inspectionModeKey: item.inspectionModeKey || 'tour',
                     status: result?.status || 'missing',
                     latestTourDate: result?.tour?.latestDate || '',
+                    tourHistoryExhaustive:historyExhaustive,
+                    tourHistoryPages:result?.tour?.pages||0,
                     tourDates,
                     tourChecks,
                     tourCheckOk: toursOk,
@@ -6333,7 +6398,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const tour = itemTourMap.get(headerTour.startDate) || headerTour;
                 const due = tour.due === true;
                 const off = tour.off === true;
-                const sourceUnreadable=item.status!=='ok'&&due;
+                const sourceUnreadable=due&&!tour.ok&&
+                    (item.status!=='ok'||item.tourHistoryExhaustive!==true);
                 const dutyUnverified=due&&![ 'scout_any_unit','swing_selected_tour',
                     'captain_selected_tour'].includes(tour.assignmentSource||'');
                 const tourFinished=headerTour.endDate<auditWindow.asOfDate;
@@ -6367,7 +6433,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     '';
                 mark.title='Tour '+headerTour.startDate+' + '+headerTour.endDate+': '+
                     (offDetail||(sourceUnreadable?
-                        'Native PPE inspection history is unreadable. This is UNKNOWN, not a missed check.':
+                        'Native PPE inspection history is unreadable or pagination coverage is incomplete. The missing date is UNKNOWN, not a confirmed missed check.':
                         pendingTour?'Current tour remains OPEN; inspection may still be completed.':
                         dutyUnverified?'Working assignment for this historic tour has not been source-confirmed. An unreadable or missing check may NOT be called a missed inspection.':
                         unknown?'Scout could not verify a unit assignment or both full days OFF/deployed; review required.':
@@ -6497,8 +6563,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     'background:' + rowBackground + ';box-shadow:1px 0 0 #dce5ea;white-space:nowrap;';
                 itemCell.innerHTML = '<b>' + escapeHtml(item.type || 'PPE') + '</b>' +
                     '<span style="font-size:9px;color:#6b7f8b;margin-left:6px">Asset ' + escapeHtml(item.assetId || 'unknown') + '</span>' +
-                    (item.status !== 'ok' && (item.tourChecks||[]).some(check=>check.due)?
-                        '<span style="font-size:9px;color:#b42318;font-weight:800;margin-left:7px">HISTORY?</span>' : '');
+                    ((item.status !== 'ok'||item.tourHistoryExhaustive!==true) &&
+                     (item.tourChecks||[]).some(check=>check.due&&!check.ok)?
+                        '<span style="font-size:9px;color:#80570c;font-weight:800;margin-left:7px">HISTORY?</span>' : '');
 
                 tr.append(person, itemCell);
                 months.forEach((month, monthIndex) => {
@@ -6951,7 +7018,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const dates=[...new Set([...(previous.tour?.dates||[]),
             ...(current.tour?.dates||[])])].filter(validDateKey).sort().reverse();
         return {...current,tour:{...current.tour,dates,
-            latestDate:dates[0]||''}};
+            latestDate:dates[0]||'',
+            exhaustive:current.tour?.exhaustive===true}};
     }
 
     function consumeQueuedCaptainDailyAfterVerifiedRun(run, now = Date.now()) {
@@ -16761,8 +16829,21 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         make('After Fire',()=>launchMyInspectionFromAnywhere('afterFire'),true);
         make('PPE Form',showPpeCleanRepairForm);
         make('Daily Captain Check',()=>{
-            if(master&&authorized&&cPilotEligible())showCShiftPilotBoard(true,'captain');
-            else void launchCaptainDailyCheckFromAnywhere();
+            if(master&&authorized&&cPilotEligible()){
+                showCShiftPilotBoard(true,'captain');
+                return;
+            }
+            // Other Captains should not wait through a full item-by-item
+            // native history scan every time they open their Daily Check.
+            // Show the latest local, source-stamped detailed two-month report;
+            // its Run Again action explicitly starts a fresh read-only audit.
+            const history=getCaptainDailyReport();
+            if(history&&Number(history.schemaVersion)>=7&&
+               Array.isArray(history.owners)&&history.owners.length){
+                showCaptainDailyReport(history);
+                return;
+            }
+            void launchCaptainDailyCheckFromAnywhere();
         });
         make('Settings',()=>showSettings('profile'));
         if(master){

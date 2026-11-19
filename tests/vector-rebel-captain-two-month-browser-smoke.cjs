@@ -24,15 +24,18 @@ const report={schemaVersion:8,reportId:'TEST',generatedAt:'2026-11-19T15:00:00Z'
  setName:'Captain C Test',shift:'C',setId:'C',swingHistoryLimited:true,
  owners:[{name:'Firefighter A',prefix:'PERSON-A',
   items:[
-   {assetId:'COAT-A',type:'Coat',status:'ok',tourChecks:[
+   {assetId:'COAT-A',type:'Coat',status:'ok',tourHistoryExhaustive:true,tourChecks:[
     check('2026-10-01',{ok:true,date:'2026-10-01'}),
     check('2026-10-07'),check('2026-10-13'),check('2026-11-19')]},
    {assetId:'BOOTS-A',type:'Boots',status:'error',tourChecks:[
     check('2026-10-01'),check('2026-10-07'),check('2026-10-13'),
+    check('2026-11-19')]},
+   {assetId:'GLOVES-A',type:'Gloves',status:'ok',tourHistoryExhaustive:false,tourChecks:[
+    check('2026-10-01'),check('2026-10-07'),check('2026-10-13'),
     check('2026-11-19')]}
   ]},
   {name:'Firefighter B',prefix:'PERSON-B',
-   items:[{assetId:'COAT-B',type:'Coat',status:'ok',tourChecks:[
+   items:[{assetId:'COAT-B',type:'Coat',status:'ok',tourHistoryExhaustive:true,tourChecks:[
     check('2026-10-01',{due:false,off:true}),
     check('2026-10-07',{due:false,unknown:true}),
     check('2026-10-13',{ok:true,date:'2026-10-13'}),
@@ -67,7 +70,7 @@ try{
  showCaptainDailyReport(REPORT);
  const root=document.querySelector('.history-overlay');
  const rows=[...root.querySelectorAll('tbody tr')];
- if(rows.length!==3)throw Error('Not every firefighter/PPE piece visible: '+rows.length);
+ if(rows.length!==4)throw Error('Not every firefighter/PPE piece visible: '+rows.length);
  const header=root.querySelector('thead').textContent;
  if(!header.includes('2026-10')||!header.includes('2026-11'))
     throw Error('Two-month tour date headings missing');
@@ -77,7 +80,8 @@ try{
     throw Error('Historical PPE viewer still contains unsolicited interpretations');
  if(!rows[0].textContent.includes('COAT-A')||
     !rows[1].textContent.includes('BOOTS-A')||
-    !rows[2].textContent.includes('COAT-B'))
+    !rows[2].textContent.includes('GLOVES-A')||
+    !rows[3].textContent.includes('COAT-B'))
     throw Error('Some individual native PPE items are not shown');
  const completed=[...rows[0].querySelectorAll('td:nth-child(3) div[title]')];
  if(!completed.some(x=>x.textContent==='✓')||
@@ -87,6 +91,10 @@ try{
  const marks=rows[1].querySelectorAll('td:nth-child(3) div[title],td:nth-child(4) div[title]');
  if([...marks].some(x=>x.textContent==='✕'))
     throw Error('Unreadable history was falsely displayed as a missing inspection');
+ const partial=[...rows[2].querySelectorAll('td:nth-child(3) div[title]')];
+ if(!partial.some(x=>x.textContent==='?')||
+    partial.some(x=>x.textContent==='✕'))
+    throw Error('Ten-row truncated native history must show unknown, not a false missed check');
  if(!root.textContent.includes('…'))
     throw Error('Ongoing tour was not distinguished from historic misses');
  document.body.dataset.twoMonthSmoke='PASS';
