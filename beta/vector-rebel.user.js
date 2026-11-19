@@ -16727,7 +16727,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         close.onclick=()=>overlay.remove();
         refresh.onclick=()=>void load(true);
         const advanced=document.createElement('details');
-        advanced.style.cssText='margin:7px 0 0;padding:6px 0;color:#597282;font:11px Arial;';
+        advanced.style.cssText='margin:7px 0 0;padding:6px 0;color:#597282;font:11px Arial;'+
+            (battalion&&isMasterOwnerInstallation()?'':'display:none;');
         const advancedTitle=document.createElement('summary');
         advancedTitle.textContent='Setup / troubleshooting';
         advancedTitle.style.cssText='cursor:pointer;color:#597282;font:11px Arial;';
@@ -16890,17 +16891,29 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     !data.outstandingOnDuty?'ARMED (no outstanding working gear)':
                     'ARMED (next native read pending)';
                 status.textContent='C shift '+data.tourStart+' + '+data.tourEnd+
-                    '  ·  '+data.workingCrew+' working / '+data.offCrew+' off'+
+                    ' · '+data.workingCrew+' working / '+data.offCrew+' off'+
                     (data.unconfirmedCrew?' / '+data.unconfirmedCrew+' unconfirmed':'')+
-                    '\\n'+
+                    '\\nRoutine PPE: '+
                     (visible.displayCoverageUnknown?'Unknown':visible.totals.verifiedItems)+
-                    ' routine native Item Log verified · '+
+                    ' verified · '+
                     (visible.displayCoverageUnknown?'Unknown':visible.outstandingOnDuty)+
-                    ' routine checks awaiting verification'+
-                    '\\nLast verified: '+cPilotStamp(data.lastPpeVerificationAt)+
-                    '  ·  Background reader: '+readerState+
-                    (data.activeTour&&!bg?.enabled?
-                        ' (requires a dedicated, signed-in Vector tab)':'');
+                    ' awaiting verification'+
+                    '\\nLast native record: '+cPilotStamp(data.lastPpeVerificationAt);
+                const oldReader=advancedTools.querySelector('[data-cshift-reader-status]');
+                if(oldReader)oldReader.remove();
+                if(battalion&&isMasterOwnerInstallation()){
+                    const diagnostics=document.createElement('div');
+                    diagnostics.setAttribute('data-cshift-reader-status','');
+                    diagnostics.style.cssText='font:11px/1.5 Arial;'+
+                        'padding:7px;background:#eef5f9;border-radius:5px;'+
+                        'width:100%;';
+                    diagnostics.textContent='Background reader: '+readerState+
+                        ' · Native Item Log last verified: '+
+                        cPilotStamp(data.lastPpeVerificationAt)+
+                        ' · RC stored routine items: '+visible.totals.knownItems+
+                        ' · RC raw known items: '+data.totals.knownItems;
+                    advancedTools.prepend(diagnostics);
+                }
                 if(data.historicalTour)
                     status.textContent+='\\nHistorical PPE ownership was reconstructed from current assignments; verify past assignments before relying on the totals.';
                 if(visible.displayCoverageUnknown)
@@ -16922,8 +16935,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     advancedTools.prepend(notice);
                 }
                 const directLinks=data.people.reduce((sum,row)=>sum+Number(row.mappedPaths||0),0);
-                if(directLinks<data.totals.knownItems)
-                    status.textContent+='\\nNative direct item links: '+directLinks+' / '+data.totals.knownItems+' mapped.';
+                if(battalion&&isMasterOwnerInstallation()&&
+                   directLinks<data.totals.knownItems){
+                    const diagnostics=advancedTools.querySelector('[data-cshift-reader-status]');
+                    if(diagnostics)diagnostics.textContent+=
+                        ' · Native direct item links: '+directLinks+' / '+
+                        data.totals.knownItems+' (all stored pools)';
+                }
                 table.replaceChildren();
                 const captainView=viewMode==='captain'&&battalion;
                 table.style.cssText='width:100%;border-collapse:separate;border-spacing:0;'+

@@ -135,6 +135,13 @@ const cShiftMasterOwner=()=>true,
       throw Error('Working/off duty counts missing');
   }
   const user=overlays[0],master=overlays[1];
+  if(user.textContent.includes('Background reader:')||
+      user.textContent.includes('Native direct item links:'))
+    throw Error('Ordinary C-shift user was shown collector diagnostics');
+  if(!master.querySelector('[data-cshift-reader-status]')?.textContent.includes('Background reader:'))
+    throw Error('Master owner lost detailed collector status');
+  if(master.querySelector('[data-cshift-reader-status]')?.parentElement?.parentElement?.open)
+    throw Error('Owner troubleshooting is expanded by default');
   const history=[...master.querySelectorAll('button')]
     .find(x=>x.textContent==='2-Month PPE History');
   if(!history||!history.title.includes('Snapshot only'))
