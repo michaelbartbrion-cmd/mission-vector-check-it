@@ -6696,6 +6696,23 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 'font-weight:800;border-top:3px solid #668ca6;white-space:nowrap;';
             const workLabel=document.createElement('td');
             workLabel.textContent='WORK STATUS  •  Day 1 / Day 2';
+            const normalCount=ownerItems.filter(item=>
+                item.inspectionModeKey!=='scbaTour').length;
+            const maskCount=ownerItems.filter(item=>
+                item.inspectionModeKey==='scbaTour').length;
+            // Show an inventory COUNT discrepancy, never an inferred failed
+            // inspection or missing physical equipment. Most firefighters
+            // with all 11 expected records see only the compact work row.
+            if(normalCount!==10||maskCount!==1){
+                const sourceCount=document.createElement('small');
+                sourceCount.setAttribute('data-captain-required-inventory','');
+                sourceCount.textContent='  ·  Mapped: '+normalCount+'/10 Tour PPE'+
+                    ', '+maskCount+'/1 SCBA mask';
+                sourceCount.style.cssText='color:#855600;font-weight:700;';
+                sourceCount.title='Mapped native Tour assets only. A missing '+
+                    'record is not proof the physical equipment is missing.';
+                workLabel.appendChild(sourceCount);
+            }
             workLabel.style.cssText='position:sticky;left:155px;z-index:3;'+
                 'padding:7px 8px;background:#e8f1f6;color:#335b73;'+
                 'font-weight:700;border-top:3px solid #668ca6;white-space:nowrap;';

@@ -94,6 +94,9 @@ try{
  const statusRows=[...root.querySelectorAll('[data-captain-work-row]')];
  if(rows.length!==4||statusRows.length!==2)
     throw Error('Every firefighter requires individual work status and every PPE row');
+ const mapping=[...root.querySelectorAll('[data-captain-required-inventory]')];
+ if(mapping.length!==2||!mapping.every(x=>x.textContent.includes('SCBA mask')))
+    throw Error('Incomplete mapping count was hidden from the working crew history');
  if(!statusRows[0].textContent.includes('W / W')||
     !statusRows[1].textContent.includes('SW / ·'))
     throw Error('Daily work status not displayed independently by tour');
