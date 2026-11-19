@@ -173,7 +173,7 @@ test('Live dual-cert coat/pant and wildland helmet stay visible but never block 
 test('Main checks do not rely on PPE prefixes or perform a full census',()=>{
  const preview=extract('async function buildPreview(modeKey, ownerInput) {',
   'async function launchMyInspectionFromAnywhere(modeKey) {');
- const crew=extract('async function scanPpeCrewOwners(owners, progress = null) {',
+ const crew=extract('async function scanPpeCrewOwners(owners, progress = null, options = {}) {',
   'async function scanPpeOwnerInventory(progress = null) {');
  assert.match(preview,/scanPpeByResponsibleParty\(owners\[0\]\.name/);
  assert.match(crew,/scanPpeByResponsibleParty\(owner\.name/);
