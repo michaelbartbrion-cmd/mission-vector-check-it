@@ -49,11 +49,12 @@ const location={origin:'https://app.vectorcheckit.us',href:'https://app.vectorch
 const SCBA_FACE_MASK_POOL='299947',getMode=()=>({templates:{'299947':'119122'}});
 window.__scanCount=0;
 let HIST_DUTY=null;
+let CAPTAIN_REPORT={schemaVersion:8,generatedAt:'2026-11-18T15:00:00Z'};
 const sessionStorage={getItem:k=>SESSION.has(k)?SESSION.get(k):null,
  setItem:(k,v)=>SESSION.set(k,String(v)),removeItem:k=>SESSION.delete(k)};
 let cVisible=true;const TAB_ID='smoke-cshift-tab',getRun=()=>null,
  getCaptainDailyCheck=()=>null,
- getCaptainDailyReport=()=>({schemaVersion:8,generatedAt:'2026-11-18T15:00:00Z'}),
+ getCaptainDailyReport=()=>CAPTAIN_REPORT,
  showCaptainDailyReport=report=>{window.__historyOpened=report.generatedAt;},
  panelInterfaceMode=()=> 'master',
  localTodayKey=()=> '2026-11-21',
@@ -308,6 +309,35 @@ const cShiftMasterOwner=()=>true,
     throw Error('BC summary displayed off-duty firefighters');
   if([...master.querySelectorAll('button')].filter(b=>b.parentElement?.parentElement===master.querySelector('section')).length>4)
     throw Error('Too many primary buttons in battalion view');
+  // The shared C-pilot has the seven regular crew; a one-day guest from
+  // the officer's saved native Captain report is shown only on their
+  // assigned day, without counting native checks on the next day.
+  CAPTAIN_REPORT={
+    schemaVersion:8,generatedAt:'2026-11-21T18:00:00Z',
+    tourRoster:{startDate:'2026-11-21',endDate:'2026-11-22',
+      basePrefixes:['PERSON-0'],swingPrefixes:['GUEST-01'],
+      onByDate:{'2026-11-21':['PERSON-0','GUEST-01'],
+                '2026-11-22':['PERSON-0']}},
+    owners:[{name:'Visiting Firefighter',prefix:'GUEST-01',
+      items:[
+      {assetId:'G-COAT',type:'Bunker Coat',inspectionModeKey:'tour',
+       status:'ok',tourChecks:[{startDate:'2026-11-21',ok:true,date:'2026-11-21'}]},
+      {assetId:'G-PANTS',type:'Bunker Pant',inspectionModeKey:'tour',
+       status:'ok',tourChecks:[{startDate:'2026-11-21',ok:true,date:'2026-11-22'}]},
+      {assetId:'G-MASK',type:'SCBA Face Mask',inspectionModeKey:'scbaTour',
+       status:'ok',tourChecks:[{startDate:'2026-11-21',ok:true,date:'2026-11-21'}]}
+      ]}]};
+  showCShiftPilotBoard(true);
+  await new Promise(r=>setTimeout(r,125));
+  const guestBc=[...document.querySelectorAll('.pilot-overlay')].at(-1);
+  const guestRow=[...guestBc.querySelectorAll('table tr')].find(x=>
+      x.textContent.includes('Visiting Firefighter'));
+  if(!guestRow||!guestRow.textContent.includes('WORKING 2026-11-21')||
+      !guestRow.textContent.includes('1 / 2')||
+      !guestRow.textContent.includes('Mask 1 / 1')||
+      guestRow.textContent.includes('2026-11-22'))
+    throw Error('BC other-shift visitor not displayed with exact one-day native check');
+  CAPTAIN_REPORT={schemaVersion:8,generatedAt:'2026-11-18T15:00:00Z'};
   // No captain-confirmed workers is not "all clear" or seven misleading
   // BC equipment rows. The empty state must explicitly request staffing.
   for(const row of FIXTURE.people){

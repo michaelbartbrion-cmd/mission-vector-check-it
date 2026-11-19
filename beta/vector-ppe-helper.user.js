@@ -16481,6 +16481,54 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return{...data,people,totals,outstandingOnDuty,
             displayExtraExcluded:exclusions,displayCoverageUnknown:coverageUnknown};
     }
+    function cPilotLocalGuestRows(data,report=getCaptainDailyReport()){
+        // RC's current C-shift pilot knows the seven regular members.
+        // A previously selected out-of-shift guest is an exception from
+        // the Captain's own native two-month audit, not a new C-shift
+        // roster member and not a server-side PPE completion.
+        const roster=report?.tourRoster;
+        if(!roster||roster.startDate!==data?.tourStart||
+            roster.endDate!==data?.tourEnd)return[];
+        const known=new Set((data.people||[])
+            .map(p=>masterNameKey(p.name)));
+        const base=new Set(roster.basePrefixes||[]);
+        const guestSet=new Set((roster.swingPrefixes||[])
+            .filter(prefix=>!base.has(prefix)));
+        const validDates=[data.tourStart,data.tourEnd];
+        const result=[];
+        for(const owner of report.owners||[]){
+            if(!guestSet.has(owner.prefix)||known.has(masterNameKey(owner.name)))
+                continue;
+            const worked=validDates.filter(date=>
+                (roster.onByDate?.[date]||[]).includes(owner.prefix));
+            if(!worked.length)continue;
+            const records=(owner.items||[]).map(item=>{
+                const row=(item.tourChecks||[]).find(check=>
+                    check.startDate===data.tourStart);
+                const verified=item.status==='ok'&&row?.ok===true&&
+                    worked.includes(row.date);
+                return{item,verified,verifiedDate:verified?row.date:''};
+            });
+            const structural=records.filter(x=>
+                x.item.inspectionModeKey!=='scbaTour');
+            const masks=records.filter(x=>
+                x.item.inspectionModeKey==='scbaTour');
+            const verified=structural.filter(x=>x.verified);
+            const verifiedMasks=masks.filter(x=>x.verified);
+            result.push({name:owner.name,prefix:owner.prefix,
+                attendance:'working',temporaryGuest:true,guestDates:worked,
+                knownItems:structural.length,verifiedItems:verified.length,
+                outstandingItems:structural.length-verified.length,
+                maskKnownItems:masks.length,
+                maskVerifiedItems:verifiedMasks.length,
+                maskOutstandingItems:masks.length-verifiedMasks.length,
+                displayCoverageUnknown:false,
+                lastNativeInspectionDate:[...verified,...verifiedMasks]
+                    .map(x=>x.verifiedDate).sort().at(-1)||'',
+                guestSource:'Captain selected assignment · saved native Item Log'});
+        }
+        return result;
+    }
     function cPilotSummaryText(data){
         const visible=cPilotRoutineBoard(data);
         return 'C Shift · '+
@@ -17041,8 +17089,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 // BC's high-level status is for firefighters actually working
                 // during this selected tour; unconfirmed/off counts remain in
                 // the summary above, not misleading extra equipment rows.
+                const guests=!captainView&&battalion?
+                    cPilotLocalGuestRows(data):[];
                 const visiblePeople=captainView||!battalion ? visible.people :
-                    visible.people.filter(row=>row.attendance==='working');
+                    [...visible.people.filter(row=>
+                        row.attendance==='working'),...guests];
+                if(guests.length)
+                    status.textContent+='\\n'+guests.length+
+                        ' other-shift member(s) shown for their selected day(s) '+
+                        'from this Captain\'s saved native audit.';
                 if(!visiblePeople.length&&!captainView&&battalion){
                     appendRow(['No confirmed working firefighters',
                         'REVIEW STAFFING','Not mapped',
@@ -17051,7 +17106,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         'No native inspection evidence'],0);
                 }
                 for(const [idx,row] of visiblePeople.entries()){
-                    const duty=row.attendance==='working'?'WORKING':
+                    const duty=row.temporaryGuest?
+                        'WORKING '+row.guestDates.join(', '):
+                        row.attendance==='working'?'WORKING':
                         row.attendance==='off'?'OFF (both days)':'Unconfirmed';
                     if(!captainView){
                         appendRow([row.name,duty,
@@ -17063,7 +17120,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                                 row.knownItems?row.outstandingItems:'Unknown',
                                 title:'Awaiting verification does not mean an inspection was missed.',
                                 kind:row.outstandingItems?'pending':''},
-                            row.lastNativeInspectionDate||'Not confirmed'],idx);
+                            {text:row.lastNativeInspectionDate||'Not confirmed',
+                                title:row.temporaryGuest?row.guestSource:
+                                    'Native Item Log source'}],idx);
                         continue;
                     }
                     const structural=Array.isArray(row.gear)?row.gear:[];
