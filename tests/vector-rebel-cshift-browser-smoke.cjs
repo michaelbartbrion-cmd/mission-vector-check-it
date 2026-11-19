@@ -16,7 +16,8 @@ const names=['Michael Baldree','Michael Brion','Jerry Weems','Jared Weston',
 const fixture={ok:true,readOnly:true,scope:'c-shift-ppe-pilot',
  shift:'C',tourStart:'2026-11-21',tourEnd:'2026-11-22',activeTour:true,
  latestCompletedTourStart:'2026-11-15',historicalTour:false,historicalEligible:false,
- totals:{crew:7,knownItems:4,verifiedItems:1,outstandingItems:3},
+ totals:{crew:7,knownItems:4,verifiedItems:1,outstandingItems:3,
+   maskKnownItems:1,maskVerifiedItems:1,maskOutstandingItems:0},
  outstandingOnDuty:3,workingCrew:1,offCrew:1,unconfirmedCrew:5,
  cadenceMinutes:2,lastUpdateAt:'2026-11-21T14:00:00Z',
  lastPpeVerificationAt:'2026-11-21T14:00:00Z',
@@ -27,6 +28,11 @@ const fixture={ok:true,readOnly:true,scope:'c-shift-ppe-pilot',
   dutyDay2:i===0?'working':i===1?'off':'unconfirmed',
   knownItems:i===0?4:0,verifiedItems:i===0?1:0,
   outstandingItems:i===0?3:0,nextItem:i===0?'A-001':'',
+  maskKnownItems:i===0?1:0,maskVerifiedItems:i===0?1:0,
+  maskOutstandingItems:0,
+  maskGear:i===0?[{assetId:'MASK-001',assetType:'SCBA Face Mask',
+    inspectionMode:'scbaTour',status:'verified',
+    nativeCompletionDate:'2026-11-21'}]:[],
   gear:i===0?[
    {assetId:'A-001',assetType:'Bunker Coat',status:'verified',
     nativeCompletionDate:'2026-11-21',lastVerifiedAt:'2026-11-21T14:00:00Z'},
@@ -40,6 +46,7 @@ const js=`
 (function(){
 const FIXTURE=__DATA__,requests=[],STORE=new Map(),SESSION=new Map();
 const location={origin:'https://app.vectorcheckit.us',href:'https://app.vectorcheckit.us/main/asset-manager'};
+const SCBA_FACE_MASK_POOL='299947',getMode=()=>({templates:{'299947':'119122'}});
 window.__scanCount=0;
 let HIST_DUTY=null;
 const sessionStorage={getItem:k=>SESSION.has(k)?SESSION.get(k):null,
@@ -208,7 +215,26 @@ const cShiftMasterOwner=()=>true,
   if(window.__nativePilotCheck.items[0].pool!=='300045'||
      window.__nativePilotCheck.items[0].itemId!=='4605913')
     throw Error('Direct native PPE target did not preserve exact pool and item identity');
+  monitor.click(); // Stop structural PPE read before testing the mask path.
+  // Same background reader must be able to select the separate native
+  // seven-question mask template from the server's rotation, not reuse
+  // the structural PPE questionnaire.
+  FIXTURE.people[0].nextRequiredItem='MASK-001';
+  FIXTURE.people[0].nextRequiredMode='scbaTour';
+  FIXTURE.people[0].nextRequiredPath='/app/equipment/PPE/pool/299947/4605914/item';
+  monitor.click();
+  await new Promise(r=>setTimeout(r,110));
+  const maskTarget=window.__nativePilotCheck?.items?.[0];
+  if(!maskTarget||maskTarget.assetId!=='MASK-001'||
+     maskTarget.pool!=='299947'||maskTarget.template!=='119122'||
+     maskTarget.inspectionModeKey!=='scbaTour')
+    throw Error('Background reader did not route SCBA mask to exact native Tour form');
+  if(window.__scanCount!==scansAfterMap)
+    throw Error('Mask native target unnecessarily rescanned the whole crew');
   monitor.click(); // Stop live monitor before switching to the completed tour.
+  delete FIXTURE.people[0].nextRequiredItem;
+  delete FIXTURE.people[0].nextRequiredMode;
+  delete FIXTURE.people[0].nextRequiredPath;
   const picker=master.querySelector('select[aria-label="Select C shift tour"]');
   if(!picker||![...picker.options].some(x=>x.value==='2026-11-15'))
     throw Error('Last completed C tour November 15-16 is missing');
@@ -259,8 +285,11 @@ const cShiftMasterOwner=()=>true,
   if(captain.textContent.includes('EXTRA-01'))
     throw Error('Previously stored supplemental gear leaked into Captain routine view');
   const itemRows=[...captain.querySelector('table').querySelectorAll('tr')];
-  if(itemRows.length!==10)
-    throw Error('Captain gear grid did not include each known item and all seven firefighters: '+itemRows.length);
+  if(itemRows.length!==12)
+    throw Error('Captain gear grid did not include each required item and all seven firefighters: '+itemRows.length);
+  if(!captain.textContent.includes('MASK-001')||
+      !captain.textContent.includes('SCBA Face Mask'))
+    throw Error('Captain routine report lost separately verified SCBA face mask');
   if(!captain.textContent.includes('A-001')||
      !captain.textContent.includes('B-002')||
      !captain.textContent.includes('C-003')||

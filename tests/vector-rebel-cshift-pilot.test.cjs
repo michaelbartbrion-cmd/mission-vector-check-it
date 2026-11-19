@@ -21,7 +21,8 @@ function harness(){
  };
  const api=new Function('isMasterOwnerInstallation','getConfig','clean','loadJSON','saveJSON','getActiveMasterRoster',
  'rebelCommandPaired','ensureRebelCommandEnrollment','rebelCommandPairing','GM_xmlhttpRequest','REBEL_COMMAND_ENDPOINT',
- 'document','makeOverlayBox','makeButton','location','inferRegularTourWindow',segment+
+ 'document','makeOverlayBox','makeButton','location','inferRegularTourWindow',
+ 'getMode','SCBA_FACE_MASK_POOL',segment+
  '\nreturn {queue:cPilotQueueNativeCompletion,queueInventory:cPilotQueueScopedInventory,pending:cPilotPending,flush:cPilotFlushReceipts,fetch:cPilotFetch,show:showCShiftPilotBoard,queueReadOnly:cPilotQueueReadOnlyResults,nativePath:cPilotNativePath,directTarget:cPilotDirectTarget,display:cPilotRoutineBoard,summary:cPilotSummaryText};')(
  ()=>true,()=>({inspectorName:'Michael Brion'}),
  x=>String(x||'').trim(),
@@ -32,7 +33,8 @@ function harness(){
  {querySelector:()=>null},()=>({overlay:{remove(){}},box:{append(){}}}),
  ()=>({onclick:null}),
  {origin:'https://app.vectorcheckit.us',href:'https://app.vectorcheckit.us/main/asset-manager'},
- ()=>({isActiveTour:true,startDate:'2026-11-21'})
+ ()=>({isActiveTour:true,startDate:'2026-11-21'}),
+ mode=>({templates:{'299947':'119122'}}),'299947'
  );
  return{...api,store,events};
 }
@@ -61,6 +63,21 @@ test('older supplemental PPE records are excluded from current Captain/BC presen
  assert.equal(JSON.stringify(src),before,'display filtering never edits source ledger');
  assert.ok(h.summary(src).includes('1 routine native Item Log receipts'));
  assert.ok(!h.summary(src).includes('4 routine outstanding'));
+});
+test('server-scoped six-pool PPE remains visible even if Vector item label is unusual',()=>{
+ const h=harness();
+ const src={totals:{crew:1,knownItems:2,verifiedItems:1,outstandingItems:1},
+  people:[{name:'Michael Brion',attendance:'working',
+   knownItems:2,verifiedItems:1,outstandingItems:1,
+   gear:[{assetId:'ODD-COAT',assetType:'Coat Bunker Size 44',
+      routineTour:true,status:'verified',nativeCompletionDate:'2026-11-21'},
+     {assetId:'EXTRA',assetType:'Wildland Helmet',
+      status:'not_yet_verified'}]}]};
+ const view=h.display(src);
+ assert.deepEqual(view.people[0].gear.map(x=>x.assetId),['ODD-COAT']);
+ assert.deepEqual([view.totals.knownItems,view.totals.verifiedItems,
+   view.totals.outstandingItems],[1,1,0]);
+ assert.equal(view.displayExtraExcluded,1);
 });
 test('missing source gear array cannot manufacture an all-clear routine count',()=>{
  const h=harness();
@@ -100,7 +117,7 @@ test('native Item Log confirmation enqueues known PPE, sends one C-shift receipt
  assert.equal(sent.evidence,'itemlog-confirmed-plus-one-0-to-1-key-abc123');
  assert.ok(!('failureNote' in sent));
 });
-test('background C-shift inventory only transmits routine Tour PPE, never assigned supplemental gear or SCBA mask',async()=>{
+test('background C-shift inventory transmits routine Tour PPE plus separate-mask mode, never supplemental gear',async()=>{
  const h=harness(),base='https://app.vectorcheckit.us/app/equipment/PPE/pool/';
  const items=[
   {assetId:'COAT-1',type:'Bunker Coat',pool:'300045',url:base+'300045/11/item'},
@@ -118,12 +135,35 @@ test('background C-shift inventory only transmits routine Tour PPE, never assign
  const posts=h.events.filter(e=>e.url.includes('vr-ppe-pilot-inventory'));
  assert.equal(posts.length,1,'one scoped inventory POST only');
  const sent=JSON.parse(posts[0].data);
- assert.deepEqual(sent.items.map(x=>x.assetId),['COAT-1','PANTS-1']);
+ assert.deepEqual(sent.items.map(x=>x.assetId),['COAT-1','PANTS-1','MASK-1']);
+ assert.deepEqual(sent.items.map(x=>x.inspectionMode),['tour','tour','scbaTour']);
  assert.deepEqual(sent.items.map(x=>x.assetPath),[
   '/app/equipment/PPE/pool/300045/11/item',
-  '/app/equipment/PPE/pool/300036/12/item'
+  '/app/equipment/PPE/pool/300036/12/item',
+  '/app/equipment/PPE/pool/299947/13/item'
  ]);
  assert.equal(h.pending().length,0,'acknowledged inventory is removed');
+});
+test('SCBA face mask native completion enqueues only the seven-question mask form and mode',async()=>{
+ const h=harness();
+ const path='https://app.vectorcheckit.us/app/equipment/PPE/pool/299947/18/item';
+ const mask={assetId:'MASK-1',type:'SCBA Face Mask',pool:'299947',
+  inspectionModeKey:'scbaTour',template:'119122',
+  ownerName:'Michael Brion',url:path};
+ const run={runId:'mask-17',modeKey:'scbaTour',ownerName:'Michael Brion',
+  items:[mask],discoverySnapshots:[{ownerName:'Michael Brion',
+   prefix:'PERSON-0DCD2AB48E2A5588',items:[mask]}]};
+ assert.equal(h.queue(run,mask,'itemlog-confirmed-plus-one-0-to-1-key-abca'),true);
+ await new Promise(resolve=>setImmediate(resolve));
+ await h.flush();
+ const receipt=JSON.parse(h.events[0].data);
+ assert.equal(receipt.inspectionMode,'scbaTour');
+ assert.deepEqual(receipt.items.map(x=>x.inspectionMode),['scbaTour']);
+ assert.deepEqual(receipt.items.map(x=>x.assetId),['MASK-1']);
+ assert.equal(receipt.items[0].assetPath,'/app/equipment/PPE/pool/299947/18/item');
+ assert.equal(h.queue(run,{...mask,template:'WRONG'},
+   'itemlog-confirmed-plus-one-0-to-1-key-abca'),false);
+ assert.equal(h.pending().length,0);
 });
 test('non-confirmed fallback and other-shift users never emit a completion receipt',()=>{
  const h=harness();
@@ -178,10 +218,29 @@ test('recheck is only available through confirmed-working Master, never through 
  const menu=src.slice(src.indexOf('    function showCShiftPilotBoard('),
    src.indexOf('    let lastInterfaceErrorInboxPoll=0;'));
  assert.match(menu,/if\(battalion&&isMasterOwnerInstallation\(\)\)/);
- assert.match(src,/p\.attendance==='working'&&p\.nextItem&&p\.outstandingItems>0/);
+ assert.match(src,/p\.nextRequiredItem&&p\.nextRequiredMode/);
+ assert.match(src,/p\.nextItem&&p\.outstandingItems>0/);
  assert.match(src,/if\(check\.pilotRecheck===true\)/);
  assert.match(src,/cPilotQueueReadOnlyResults\(check\)/);
  assert.match(src,/nativeAssetIdentityVerified:readable/);
+});
+test('modern server rotates the separate SCBA mask form without guessing or submitting inspection',()=>{
+ const h=harness();
+ const required={name:'Michael Brion',prefix:'PERSON-0DCD2AB48E2A5588',
+   attendance:'working',nextRequiredItem:'MASK-1',
+   nextRequiredMode:'scbaTour',
+   nextRequiredPath:'/app/equipment/PPE/pool/299947/4605913/item'};
+ const target=h.directTarget(required);
+ assert.equal(target.inspectionModeKey,'scbaTour');
+ assert.equal(target.template,'119122');
+ assert.equal(target.type,'SCBA Face Mask');
+ assert.equal(target.assetId,'MASK-1');
+ assert.equal(h.directTarget({...required,nextRequiredMode:'tour'}),null);
+ assert.equal(h.directTarget({...required,nextRequiredPath:'/app/equipment/PPE/pool/300006/4605913/item'}),null);
+ const regular=h.directTarget({...required,nextRequiredItem:'COAT-1',
+   nextRequiredMode:'tour',nextRequiredPath:'/app/equipment/PPE/pool/300045/4605913/item'});
+ assert.equal(regular.inspectionModeKey,'tour');
+ assert.equal(regular.assetId,'COAT-1');
 });
 test('BC pilot uses only same-origin cached native PPE paths and preserves exact pool/item identity',()=>{
  const h=harness();

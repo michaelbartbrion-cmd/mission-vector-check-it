@@ -16105,8 +16105,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             // Attendance must already be captain-confirmed; Scout suggestions
             // alone do not authorize a working/on-duty declaration.
             const unmapped=data.people.filter(p=>
-                p.attendance==='working'&&p.knownItems===0);
-            if(unmapped.length){
+                p.attendance==='working'&&
+                Number(p.knownItems||0)+Number(p.maskKnownItems||0)===0);
+            // A mask can be present in Vector even when the old RC ledger
+            // contains only structural PPE. Try one bounded inventory read
+            // per selected tour, not another continuously crawling worker.
+            const maskNeedsFirstMap=data.people.some(p=>
+                p.attendance==='working'&&Number(p.maskKnownItems||0)===0)&&
+                state.lastMaskMapTour!==data.tourStart;
+            if(unmapped.length||maskNeedsFirstMap){
                 const last=Number(state.lastAutoMapAt||0);
                 if(state.lastAutoMapTour===data.tourStart&&
                    Date.now()-last<30*60000){
@@ -16117,12 +16124,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 }
                 const attemptedAt=Date.now();
                 cPilotAutoSave({...current,lastAutoMapTour:data.tourStart,
+                    lastMaskMapTour:maskNeedsFirstMap?data.tourStart:
+                        state.lastMaskMapTour,
                     lastAutoMapAt:attemptedAt,
                     nextAt:attemptedAt+cPilotNextLocalBoundaryMs()});
                 const mapped=await cPilotMapWorkingGear(data.tourStart,true);
                 // Wait for RC's asynchronous inventory receipt and fresh GET
                 // on the next tick. Never assume a queued receipt is stored.
                 cPilotAutoSave({...current,lastAutoMapTour:data.tourStart,
+                    lastMaskMapTour:maskNeedsFirstMap?data.tourStart:
+                        state.lastMaskMapTour,
                     lastAutoMapAt:attemptedAt,
                     nextAt:Date.now()+cPilotNextLocalBoundaryMs()});
                 return mapped;
@@ -16287,13 +16298,25 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }catch{return '';}
     }
     function cPilotDirectTarget(row){
-        const path=clean(row?.nextItemPath);
+        // New RC returns one fair rotating target across Tour PPE and the
+        // separate mask template. Old source snapshots still use nextItem.
+        const modern=!!row?.nextRequiredItem;
+        const path=clean(modern?row.nextRequiredPath:row?.nextItemPath);
+        const assetId=clean(modern?row.nextRequiredItem:row?.nextItem);
         const match=path.match(/^\/app\/equipment\/PPE\/pool\/([0-9]+)\/([0-9]+)\/item$/);
-        if(!match||!cPilotRoutinePool(match[1])||
-            !row?.nextItem||row?.attendance!=='working')return null;
-        return{assetId:row.nextItem,ownerName:row.name,
-            ownerPrefix:row.prefix,inspectionModeKey:'tour',
-            type:'PPE',pool:match[1],itemId:match[2],
+        if(!match||!assetId||row?.attendance!=='working')return null;
+        const mask=match[1]===SCBA_FACE_MASK_POOL;
+        const mode=mask?'scbaTour':'tour';
+        if((!mask&&!cPilotRoutinePool(match[1]))||
+            (modern&&row.nextRequiredMode!==mode))return null;
+        // A mask must NEVER be read under the generic structural Tour
+        // questionnaire: the native checked template is 119122.
+        const template=mask?getMode('scbaTour')?.templates?.[match[1]]:'';
+        if(mask&&template!=='119122')return null;
+        return{assetId,ownerName:row.name,
+            ownerPrefix:row.prefix,inspectionModeKey:mode,
+            ...(mask?{template}:{ }),type:mask?'SCBA Face Mask':'PPE',
+            pool:match[1],itemId:match[2],
             url:location.origin+path+'?source=assetManager&sourceTab=PPE'};
     }
     function cPilotQueueScopedInventory(snapshots,scannedAt=new Date().toISOString(),selectedTourStart=''){
@@ -16314,11 +16337,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 clean(p.name).toLowerCase()===name.toLowerCase()&&
                 clean(p.prefix).toUpperCase()===clean(entry.prefix).toUpperCase());
             if(!person?.prefix)continue;
+            const maskTemplate=getMode('scbaTour')?.templates?.[SCBA_FACE_MASK_POOL];
             const gear=(entry.items||[]).filter(item=>
-                cPilotRoutinePool(item.pool)&&
-                item.inspectionModeKey!=='scbaTour'&&
-                !/scba|airpack|face mask/i.test(clean(item.type||'')+' '+clean(item.pool||'')))
-                .map(item=>({assetId:clean(item.assetId),type:clean(item.type||''),
+                (cPilotRoutinePool(item.pool)&&
+                    item.inspectionModeKey!=='scbaTour'&&
+                    !/scba|airpack|face mask/i.test(clean(item.type||'')))||
+                (item.pool===SCBA_FACE_MASK_POOL&&
+                    /scba face mask/i.test(clean(item.type||''))&&
+                    maskTemplate==='119122'))
+                .map(item=>({
+                    assetId:clean(item.assetId),type:clean(item.type||''),
+                    inspectionMode:item.pool===SCBA_FACE_MASK_POOL?
+                        'scbaTour':'tour',
                     assetPath:cPilotNativePath(item.url)}));
             if(!gear.length||gear.length>25||
                 gear.some(item=>!/^[A-Za-z0-9._-]{2,75}$/.test(item.assetId))||
@@ -16341,7 +16371,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return queued;
     }
     function cPilotQueueInventoryFromRun(run){
-        if(run?.modeKey!=='tour'||!Array.isArray(run.discoverySnapshots))
+        if(!['tour','scbaTour'].includes(run?.modeKey)||
+            !Array.isArray(run.discoverySnapshots))
             return 0;
         try{return cPilotQueueScopedInventory(run.discoverySnapshots,
             run.startedAt||new Date().toISOString());}
@@ -16352,7 +16383,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
     }
     function cPilotQueueNativeCompletion(run,item,evidence){
-        if(run?.modeKey!=='tour'||item?.inspectionModeKey==='scbaTour'||
+        const mode=run?.modeKey;
+        const mask=mode==='scbaTour';
+        if(!['tour','scbaTour'].includes(mode)||
+            (mask&&(item?.pool!==SCBA_FACE_MASK_POOL||
+                item?.inspectionModeKey!=='scbaTour'||
+                item?.template!=='119122'))||
+            (!mask&&item?.inspectionModeKey==='scbaTour')||
             !/^itemlog-confirmed-plus-one-/.test(String(evidence||'')))return false;
         const ownerName=clean(item?.ownerName||run?.ownerName||'');
         if(!C_PILOT_NAMES.has(ownerName.toLowerCase()))return false;
@@ -16368,11 +16405,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const sourceItems=sourceSnapshot?.items?.length?
             sourceSnapshot.items:(run.items||[]).filter(x=>
                 clean(x.ownerName||run.ownerName).toLowerCase()===ownerName.toLowerCase());
-        const gear=sourceItems.filter(x=>
-                cPilotRoutinePool(x.pool)&&
-                x.inspectionModeKey!=='scbaTour'&&
-                !/scba|airpack|face mask/i.test(clean(x.type||'')+' '+clean(x.pool||'')))
+        const gear=sourceItems.filter(x=>mask?
+                (x.pool===SCBA_FACE_MASK_POOL&&
+                    x.inspectionModeKey==='scbaTour'&&
+                    x.template==='119122'):
+                (cPilotRoutinePool(x.pool)&&
+                    x.inspectionModeKey!=='scbaTour'&&
+                    !/scba|airpack|face mask/i.test(clean(x.type||''))))
             .map(x=>({assetId:clean(x.assetId),type:clean(x.type||''),
+                inspectionMode:mask?'scbaTour':'tour',
                 assetPath:cPilotNativePath(x.url)}));
         const valid=gear.length>0&&gear.length<=25&&
             gear.every(x=>/^[A-Za-z0-9._-]{2,75}$/.test(x.assetId))&&
@@ -16382,7 +16423,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const receipt={
             id:'ppepilot:'+clean(run.runId||run.checkId||'run')+':'+clean(item.assetId),
             personName:approved.name,personPrefix:approved.prefix,
-            assetId:clean(item.assetId),items:gear,evidence:String(evidence),
+            assetId:clean(item.assetId),inspectionMode:mode,
+            items:gear,evidence:String(evidence),
             verifiedAt:new Date().toISOString()
         };
         const pending=cPilotPending();
@@ -16412,7 +16454,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const complete=Array.isArray(row.gear)&&
                 source.length===Number(row.knownItems||0);
             if(!complete)return{...row,displayCoverageUnknown:true};
-            const gear=source.filter(item=>cPilotRoutineType(item.assetType));
+            const gear=source.filter(item=>
+                item.routineTour===true||cPilotRoutineType(item.assetType));
             const verified=gear.filter(item=>item.status==='verified'&&
                 !!item.nativeCompletionDate);
             return{...row,gear,knownItems:gear.length,
@@ -16444,7 +16487,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             (visible.displayCoverageUnknown?'Unknown':visible.totals.verifiedItems)+
             ' routine native Item Log receipts · '+
             (visible.displayCoverageUnknown?'Unknown':visible.outstandingOnDuty)+
-            ' routine outstanding on duty · '+
+            ' routine outstanding on duty · SCBA masks '+
+            Number(data?.totals?.maskVerifiedItems||0)+' / '+
+            Number(data?.totals?.maskKnownItems||0)+' mapped · '+
             (data.historicalTour?'Reviewing completed C tour':
                 data.activeTour?'Current C tour':'C tour not in progress')+
             '\\nLast ledger update: '+cPilotStamp(data.lastUpdateAt);
@@ -16590,7 +16635,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             if(!readable)unreadable++;
             const id='cshiftpilotread:'+check.checkId+':'+item.ownerPrefix+':'+item.assetId;
             if(existing.some(x=>x.id===id))continue;
-            existing.push({kind:'recheck',id,inspectionMode:'tour',
+            const mode=item.inspectionModeKey==='scbaTour'&&
+                item.pool===SCBA_FACE_MASK_POOL?'scbaTour':'tour';
+            existing.push({kind:'recheck',id,inspectionMode:mode,
                 tourStart:check.tourStart,personPrefix:item.ownerPrefix,
                 personName:item.ownerName,assetId:item.assetId,
                 source:'native_read_only_item_log',
@@ -16622,7 +16669,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             if(!data.activeTour&&!(data.historicalEligible&&!dedicated))
                 throw Error('C-shift rechecks require an active tour or a selected completed C tour.');
             const candidates=data.people.filter(p=>
-                p.attendance==='working'&&p.nextItem&&p.outstandingItems>0);
+                p.attendance==='working'&&
+                ((p.nextRequiredItem&&p.nextRequiredMode)||
+                 (p.nextItem&&p.outstandingItems>0)));
             if(!candidates.length){
                 setStatus('No confirmed-working C-shift firefighter has a mapped outstanding PPE item. Confirm duty and collect verified inventories first.');
                 return false;
@@ -16652,16 +16701,26 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const inventory=await scanPpeCrewOwners(owners,
                     message=>setStatus('BC gear link map: '+message));
                 items=candidates.map(row=>{
+                    const targetId=row.nextRequiredItem||row.nextItem;
+                    const targetMode=row.nextRequiredMode||'tour';
                     const matches=inventory.items.filter(item=>
-                        item.ownerName===row.name&&item.assetId===row.nextItem);
+                        masterNameKey(item.ownerName)===masterNameKey(row.name)&&
+                        item.assetId===targetId);
                     if(matches.length!==1||!matches[0]?.url)
-                        throw Error(row.name+': cannot uniquely locate '+row.nextItem+
+                        throw Error(row.name+': cannot uniquely locate '+targetId+
                             ' in Vector PPE. No inspection result was accepted.');
-                    if(matches[0].inspectionModeKey==='scbaTour')
-                        throw Error('SCBA is excluded from the ordinary PPE BC Check.');
-                    if(!cPilotNativePath(matches[0].url))
+                    const found=matches[0],mask=found.pool===SCBA_FACE_MASK_POOL;
+                    const resolvedMode=mask?'scbaTour':'tour';
+                    if(resolvedMode!==targetMode||
+                        (!mask&&!cPilotRoutinePool(found.pool)))
+                        throw Error(row.name+': native PPE pool disagrees with the expected Tour form.');
+                    const template=mask?getMode('scbaTour')?.templates?.[found.pool]:'';
+                    if(mask&&template!=='119122')
+                        throw Error('SCBA face mask seven-question Tour template is not verified.');
+                    if(!cPilotNativePath(found.url))
                         throw Error(row.name+': native PPE detail route is unsupported for direct verification.');
-                    return {...matches[0],ownerName:row.name,ownerPrefix:row.prefix};
+                    return {...found,ownerName:row.name,ownerPrefix:row.prefix,
+                        inspectionModeKey:resolvedMode,...(mask?{template}:{ })};
                 });
                 const snapshots=owners.map(owner=>({
                     ownerName:owner.name,prefix:owner.prefix,
@@ -16887,8 +16946,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     !data.activeTour?'ARMED (waiting for next C tour)':
                     pilotReading?'READING NATIVE ITEM LOGS':
                     !data.workingCrew?'ARMED (waiting for captain-confirmed staffing)':
-                    !data.totals.knownItems?'ARMED (will map working PPE)':
-                    !data.outstandingOnDuty?'ARMED (no outstanding working gear)':
+                    !(data.totals.knownItems+Number(data.totals.maskKnownItems||0))?
+                        'ARMED (will map working PPE)':
+                    !(data.outstandingOnDuty+Number(data.maskOutstandingOnDuty||0))?
+                        'ARMED (no outstanding working gear)':
                     'ARMED (next native read pending)';
                 status.textContent='C shift '+data.tourStart+' + '+data.tourEnd+
                     ' · '+data.workingCrew+' working / '+data.offCrew+' off'+
@@ -16898,6 +16959,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     ' verified · '+
                     (visible.displayCoverageUnknown?'Unknown':visible.outstandingOnDuty)+
                     ' awaiting verification'+
+                    ' · SCBA masks '+Number(data.totals.maskVerifiedItems||0)+
+                    ' / '+Number(data.totals.maskKnownItems||0)+' mapped'+
                     '\\nLast native record: '+cPilotStamp(data.lastPpeVerificationAt);
                 const oldReader=advancedTools.querySelector('[data-cshift-reader-status]');
                 if(oldReader)oldReader.remove();
@@ -16993,7 +17056,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     if(!captainView){
                         appendRow([row.name,duty,
                             row.displayCoverageUnknown?'Unknown coverage':
-                            row.knownItems?row.verifiedItems+' / '+row.knownItems:'Not mapped',
+                            (row.knownItems?row.verifiedItems+' / '+row.knownItems:'Not mapped')+
+                                ' · Mask '+(row.maskKnownItems?
+                                    row.maskVerifiedItems+' / '+row.maskKnownItems:'?'),
                             {text:row.displayCoverageUnknown?'Unknown':
                                 row.knownItems?row.outstandingItems:'Unknown',
                                 title:'Awaiting verification does not mean an inspection was missed.',
@@ -17001,12 +17066,22 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             row.lastNativeInspectionDate||'Not confirmed'],idx);
                         continue;
                     }
-                    const gear=Array.isArray(row.gear)?row.gear:[];
+                    const structural=Array.isArray(row.gear)?row.gear:[];
+                    const masks=Array.isArray(row.maskGear)?row.maskGear:[];
+                    const gear=[...structural,...masks];
                     if(!gear.length){
                         appendRow([row.name+' · '+duty,'No equipment mapped',
                             {text:'?',kind:'pending',title:'Inventory has not been confirmed'},
                             'No native inspection evidence'],idx);
                         continue;
+                    }
+                    if(!masks.length){
+                        // The mask is mandatory for routine checks but has
+                        // its own Vector seven-question template. No source
+                        // row means unknown mapping, NEVER a failed check.
+                        gear.push({assetId:'',assetType:'SCBA Face Mask',
+                            inspectionMode:'scbaTour',status:'not_yet_verified',
+                            notMapped:true});
                     }
                     for(const [j,item] of gear.entries()){
                         const ok=item.status==='verified'&&!!item.nativeCompletionDate;
@@ -17014,13 +17089,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         const unreadable=item.lastReadResult==='unreadable';
                         appendRow([
                             j===0?row.name+' · '+duty:'',
-                            item.assetType+' · '+item.assetId,
+                            item.assetType+(item.assetId?' · '+item.assetId:''),
+                            item.notMapped?{text:'? NOT MAPPED',kind:'pending',
+                                title:'Mask native item not mapped; no inspection status known'}:
                             ok?{text:'✓ VERIFIED',kind:'ok',title:'Native Vector Item Log confirmed '+item.nativeCompletionDate}:
                                 notDue?{text:'OFF',kind:'off',title:'Captain confirmed off both days'}:
                                 {text:unreadable?'? UNREADABLE':'? NOT YET VERIFIED',kind:'pending',
                                     title:'Not yet verified is not proof of a missed inspection.'},
                             ok?item.nativeCompletionDate:
                                 unreadable?'Read failed; retry pending':
+                                item.notMapped?'Native mask mapping required':
                                 item.lastReadAt?'Last checked '+cPilotStamp(item.lastReadAt):'Awaiting background verification'
                         ],idx);
                     }
