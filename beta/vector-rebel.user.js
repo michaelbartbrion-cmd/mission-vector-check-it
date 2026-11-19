@@ -16197,17 +16197,31 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 return{name:x.name,prefix:x.prefix};
             });
             await ensurePpeEquipmentPage(m=>setStatus('C pilot map: '+m),false);
-            const inventory=await scanPpeCrewOwners(owners,m=>setStatus('C pilot map: '+m));
-            const snapshots=owners.map(owner=>({
+            const inventory=await scanPpeCrewOwners(owners,
+                m=>setStatus('C pilot map: '+m),
+                {readOnlyAllowUnresolved:automated});
+            // The dedicated read-only background tab should preserve valid
+            // owners if one working person's Vector Responsible Party filter
+            // cannot uniquely confirm equipment. The unresolved person stays
+            // UNKNOWN, never certified or silently given an empty inventory.
+            // Manual mapping remains strict by default.
+            const unresolved=new Set((inventory.ownerErrors||[])
+                .map(row=>masterNameKey(row.name)));
+            const snapshots=owners.filter(owner=>
+                !unresolved.has(masterNameKey(owner.name))).map(owner=>({
                 ownerName:owner.name,prefix:owner.prefix,
                 items:inventory.items.filter(x=>
                     masterNameKey(x.ownerName)===masterNameKey(owner.name))
             }));
             const queued=cPilotQueueScopedInventory(snapshots,new Date().toISOString(),board.tourStart);
             if(!queued)
-                throw Error('No valid PPE inventory manifests queued. Review the names and asset identifiers.');
+                throw Error('No uniquely confirmed PPE inventory manifests queued. '+
+                    'Unresolved people remain UNKNOWN, not verified or failed. '+
+                    'Review names and asset identifiers.');
             setStatus('C shift '+board.tourStart+': mapped '+queued+
                 ' confirmed-working PPE owner(s). '+
+                (unresolved.size?unresolved.size+
+                    ' working owner(s) remain UNKNOWN pending Vector ownership resolution. ':'')+
                 (board.historicalTour?'These are current Vector ownership records used to reconstruct historical requirements, not proof of past ownership. ':'')+
                 'Inventory updates are queued for Rebel Command. No safety inspection was performed.');
             return true;

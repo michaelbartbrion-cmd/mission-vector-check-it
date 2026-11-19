@@ -81,12 +81,13 @@ test('off-shift arming preserves designation for next tour and performs no nativ
  assert.equal(h.calls.rechecks.length,0);
  assert.equal(h.readState().tourStart,'2026-11-21');
 });
-function mapHarness({automated=true,working=true,mode='user',approve=false}={}){
- const calls={scans:0,queued:0,confirm:0,scout:0};
+function mapHarness({automated=true,working=true,mode='user',approve=false,partialMissing=false}={}){
+ const calls={scans:0,queued:0,confirm:0,scout:0,options:[],snapshots:[]};
  const prefix='PERSON-0DCD2AB48E2A5588';
  const board={activeTour:true,historicalEligible:false,historicalTour:false,
   tourStart:'2026-11-21',
-  people:[{name:'Michael Brion',prefix,attendance:working?'working':'unconfirmed'}]};
+  people:[{name:'Michael Brion',prefix,attendance:working?'working':'unconfirmed'},
+   ...(partialMissing?[{name:'Jerry Weems',prefix:'PERSON-WEEMS',attendance:'working'}]:[])]};
  const deps={
   isMasterOwnerInstallation:()=>true,panelInterfaceMode:()=>mode,
   setStatus:()=>{},getRun:()=>null,getCaptainDailyCheck:()=>null,
@@ -95,15 +96,21 @@ function mapHarness({automated=true,working=true,mode='user',approve=false}={}){
   document:{querySelector:()=>({scrollIntoView(){}})},
   confirm:()=>{calls.confirm++;return approve;},
   cPilotBridge:async()=>{throw Error('No duty writes are allowed in test');},
-  cPilotCache:null, getActiveMasterRoster:()=>[{name:'Michael Brion',prefix}],
+  cPilotCache:null, getActiveMasterRoster:()=>[{name:'Michael Brion',prefix},
+   ...(partialMissing?[{name:'Jerry Weems',prefix:'PERSON-WEEMS'}]:[])],
   ensurePpeEquipmentPage:async()=>true,
-  scanPpeCrewOwners:async owners=>{
-   calls.scans++;return {items:[{ownerName:owners[0].name,assetId:'A-01',type:'Coat',
-    url:'https://app.vectorcheckit.us/app/equipment/PPE/pool/123/456/item'}]};
+  scanPpeCrewOwners:async (owners,progress,options)=>{
+   calls.scans++;calls.options.push(options);
+   if(partialMissing&&!options?.readOnlyAllowUnresolved)
+     throw Error('Jerry Weems: Responsible Party was not uniquely confirmed');
+   return {items:[{ownerName:owners[0].name,assetId:'A-01',type:'Coat',
+    url:'https://app.vectorcheckit.us/app/equipment/PPE/pool/123/456/item'}],
+    ownerErrors:partialMissing?[{name:'Jerry Weems',error:'not confirmed'}]:[]};
   },
   masterNameKey:x=>String(x||'').toLowerCase(),
   cPilotQueueScopedInventory:(snapshots,scannedAt,tour)=>{
-   calls.queued++;assert.equal(snapshots.length,1);
+   calls.queued++;calls.snapshots.push(snapshots);
+   assert.equal(snapshots.length,1);
    assert.equal(tour,'2026-11-21');return 1;
   },
   clean:x=>String(x||'').trim()
@@ -157,4 +164,22 @@ test('integration: armed tab enters new C tour and uses the actual read-only inv
  assert.equal(inventory.calls.queued,1);
  assert.equal(inventory.calls.confirm,0);
  assert.equal(monitor.calls.rechecks.length,0);
+});
+
+test('background map preserves verified working owner when another confirmed working owner has no unique Vector PPE match',async()=>{
+ const h=mapHarness({partialMissing:true});
+ assert.equal(await h.map('2026-11-21',true),true);
+ assert.equal(h.calls.scans,1);
+ assert.deepEqual(h.calls.options,[{readOnlyAllowUnresolved:true}]);
+ assert.equal(h.calls.queued,1);
+ assert.equal(h.calls.confirm,0);
+ assert.deepEqual(h.calls.snapshots[0].map(s=>s.ownerName),['Michael Brion']);
+ assert.equal(h.calls.snapshots[0][0].items[0].assetId,'A-01');
+});
+test('manual PPE map remains strict when one confirmed working owner is missing and cannot confirm an incomplete crew',async()=>{
+ const h=mapHarness({partialMissing:true,automated:false,mode:'master',approve:true});
+ assert.equal(await h.map('2026-11-21',false),false);
+ assert.equal(h.calls.confirm,1);
+ assert.deepEqual(h.calls.options,[{readOnlyAllowUnresolved:false}]);
+ assert.equal(h.calls.queued,0);
 });
