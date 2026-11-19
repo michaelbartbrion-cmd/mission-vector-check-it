@@ -126,13 +126,21 @@ const cShiftMasterOwner=()=>true,
   if(!overlays[0].textContent.includes('C Shift · PPE Check Status'))throw Error('User crew heading missing');
   if(!overlays[1].textContent.includes('BC Check'))throw Error('Master heading missing');
   for(const overlay of overlays){
-    if(overlay.querySelectorAll('table tr').length<8)throw Error('Seven crew not listed');
     for(const name of __NAMES__)if(!overlay.textContent.includes(name))
       throw Error('Crew member missing '+name);
     if(!overlay.textContent.includes('1 working / 1 off'))
       throw Error('Working/off duty counts missing');
   }
   const user=overlays[0],master=overlays[1];
+  // An ordinary user's roster can include the full crew. BC gets only
+  // confirmed workers in its MAIN summary, not all OFF/unknown firefighters.
+  if(user.querySelector('table').querySelectorAll('tr').length!==8)
+    throw Error('Crew status summary lost seven-person roster');
+  const bcInitial=[...master.querySelector('table').querySelectorAll('tr')];
+  if(bcInitial.length!==2||!bcInitial[1].textContent.includes('Michael Baldree'))
+    throw Error('BC should show only the one confirmed working firefighter');
+  if(/Weston|Brooks|Brion/.test(bcInitial[1].textContent))
+    throw Error('BC showed an off or unconfirmed person as working');
   if(user.querySelectorAll('[data-cshift-duty-editor] select').length)throw Error('Ordinary user can edit duty');
   const initialEditor=master.querySelector('[data-cshift-duty-editor]');
   if(initialEditor.querySelectorAll('select').length!==14)throw Error('Master lacks two day controls');
@@ -241,10 +249,30 @@ const cShiftMasterOwner=()=>true,
      !captain.textContent.includes('? NOT YET VERIFIED')||
      !captain.textContent.includes('? UNREADABLE'))
     throw Error('Captain full PPE grid has missing statuses or source data');
-  if(master.querySelector('table').querySelectorAll('tr').length!==8)
-    throw Error('BC summary unexpectedly expanded into the full gear audit');
+  const bcFinal=[...master.querySelector('table').querySelectorAll('tr')];
+  if(bcFinal.length!==6)
+    throw Error('BC summary should show only the five confirmed working firefighters: '+bcFinal.length);
+  if(bcFinal.some(row=>/Weston|Brooks/.test(row.textContent)))
+    throw Error('BC summary displayed off-duty firefighters');
   if([...master.querySelectorAll('button')].filter(b=>b.parentElement?.parentElement===master.querySelector('section')).length>4)
     throw Error('Too many primary buttons in battalion view');
+  // No captain-confirmed workers is not "all clear" or seven misleading
+  // BC equipment rows. The empty state must explicitly request staffing.
+  for(const row of FIXTURE.people){
+    row.attendance='unconfirmed';
+    row.dutyDay1='unconfirmed';
+    row.dutyDay2='unconfirmed';
+  }
+  FIXTURE.workingCrew=0;FIXTURE.offCrew=0;FIXTURE.unconfirmedCrew=7;
+  showCShiftPilotBoard(true);
+  await new Promise(r=>setTimeout(r,110));
+  const emptyBc=[...document.querySelectorAll('.pilot-overlay')].at(-1);
+  const emptyBcRows=[...emptyBc.querySelector('table').querySelectorAll('tr')];
+  if(emptyBcRows.length!==2||
+     !emptyBcRows[1].textContent.includes('No confirmed working firefighters')||
+     !emptyBcRows[1].textContent.includes('REVIEW STAFFING')||
+     !emptyBcRows[1].textContent.includes('Unknown'))
+    throw Error('BC did not show a clear unknown-staffing empty state');
   document.body.dataset.cshiftSmoke='PASS';
  }catch(error){document.body.dataset.cshiftSmoke='FAIL';document.body.dataset.reason=error.message;}
  },60);

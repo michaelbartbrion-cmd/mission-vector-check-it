@@ -15803,14 +15803,41 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     nextAt:Date.now()+cPilotNextLocalBoundaryMs()});
                 return false;
             }
-            if(data.tourStart!==state.tourStart){
-                cPilotAutoSave({...state,tourStart:data.tourStart,
-                    nextAt:Date.now()});
+            const current={...state,tourStart:data.tourStart};
+            if(data.tourStart!==state.tourStart)
+                cPilotAutoSave({...current,nextAt:Date.now()});
+            // A dedicated, owner-linked tab may discover the CURRENT tour's
+            // PPE ownership without asking the captain to press Map again.
+            // This is an inventory lookup, never a safety inspection.
+            // Attendance must already be captain-confirmed; Scout suggestions
+            // alone do not authorize a working/on-duty declaration.
+            const unmapped=data.people.filter(p=>
+                p.attendance==='working'&&p.knownItems===0);
+            if(unmapped.length){
+                const last=Number(state.lastAutoMapAt||0);
+                if(state.lastAutoMapTour===data.tourStart&&
+                   Date.now()-last<30*60000){
+                    cPilotAutoSave({...current,
+                        nextAt:Math.max(Date.now()+cPilotNextLocalBoundaryMs(),
+                            last+30*60000)});
+                    return false;
+                }
+                const attemptedAt=Date.now();
+                cPilotAutoSave({...current,lastAutoMapTour:data.tourStart,
+                    lastAutoMapAt:attemptedAt,
+                    nextAt:attemptedAt+cPilotNextLocalBoundaryMs()});
+                const mapped=await cPilotMapWorkingGear(data.tourStart,true);
+                // Wait for RC's asynchronous inventory receipt and fresh GET
+                // on the next tick. Never assume a queued receipt is stored.
+                cPilotAutoSave({...current,lastAutoMapTour:data.tourStart,
+                    lastAutoMapAt:attemptedAt,
+                    nextAt:Date.now()+cPilotNextLocalBoundaryMs()});
+                return mapped;
             }
             // Never navigate an active inspection or another Captain Check;
             // only this explicitly designated, owner-linked tab is eligible.
             const started=await startCShiftPilotNativeRecheck(true);
-            if(!started)cPilotAutoSave({...state,
+            if(!started)cPilotAutoSave({...current,
                 nextAt:Date.now()+cPilotNextLocalBoundaryMs()});
             return started;
         }catch{
@@ -16096,8 +16123,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             void cPilotAutoTick();
         },cPilotNextLocalBoundaryMs());
     }
-    async function cPilotMapWorkingGear(selectedTourStart=''){
-        if(!isMasterOwnerInstallation()||panelInterfaceMode()!=='master'){
+    async function cPilotMapWorkingGear(selectedTourStart='',automated=false){
+        if(!isMasterOwnerInstallation()||
+           (!automated&&panelInterfaceMode()!=='master')){
             setStatus('Only the C-shift Master can map working crew PPE.',false);
             return false;
         }
@@ -16111,6 +16139,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 throw Error('Choose an active or completed C-shift tour before mapping PPE.');
             let working=board.people.filter(p=>p.attendance==='working');
             let combinedReviewConfirmed=false;
+            // Background inventory reads cannot silently confirm duty.
+            if(automated&&!working.length)
+                throw Error('Confirm who is working for this C tour before background PPE mapping.');
             if(!working.length){
                 const reviewed=board.people.some(p=>
                     ['working','off'].includes(p.dutyDay1)||
@@ -16156,7 +16187,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 setStatus('C-shift attendance reviewed and saved for '+working.length+
                     ' working firefighters. Starting read-only PPE equipment lookup...');
             }
-            if(!combinedReviewConfirmed&&!confirm('Read the Vector Responsible Party PPE list for '+
+            if(!combinedReviewConfirmed&&!automated&&!confirm('Read the Vector Responsible Party PPE list for '+
                 working.length+' confirmed-working C-shift firefighter(s)? This is read-only and creates no inspection.'))return false;
             const known=getActiveMasterRoster();
             const owners=working.map(p=>{
@@ -16166,17 +16197,31 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 return{name:x.name,prefix:x.prefix};
             });
             await ensurePpeEquipmentPage(m=>setStatus('C pilot map: '+m),false);
-            const inventory=await scanPpeCrewOwners(owners,m=>setStatus('C pilot map: '+m));
-            const snapshots=owners.map(owner=>({
+            const inventory=await scanPpeCrewOwners(owners,
+                m=>setStatus('C pilot map: '+m),
+                {readOnlyAllowUnresolved:automated});
+            // The dedicated read-only background tab should preserve valid
+            // owners if one working person's Vector Responsible Party filter
+            // cannot uniquely confirm equipment. The unresolved person stays
+            // UNKNOWN, never certified or silently given an empty inventory.
+            // Manual mapping remains strict by default.
+            const unresolved=new Set((inventory.ownerErrors||[])
+                .map(row=>masterNameKey(row.name)));
+            const snapshots=owners.filter(owner=>
+                !unresolved.has(masterNameKey(owner.name))).map(owner=>({
                 ownerName:owner.name,prefix:owner.prefix,
                 items:inventory.items.filter(x=>
                     masterNameKey(x.ownerName)===masterNameKey(owner.name))
             }));
             const queued=cPilotQueueScopedInventory(snapshots,new Date().toISOString(),board.tourStart);
             if(!queued)
-                throw Error('No valid PPE inventory manifests queued. Review the names and asset identifiers.');
+                throw Error('No uniquely confirmed PPE inventory manifests queued. '+
+                    'Unresolved people remain UNKNOWN, not verified or failed. '+
+                    'Review names and asset identifiers.');
             setStatus('C shift '+board.tourStart+': mapped '+queued+
                 ' confirmed-working PPE owner(s). '+
+                (unresolved.size?unresolved.size+
+                    ' working owner(s) remain UNKNOWN pending Vector ownership resolution. ':'')+
                 (board.historicalTour?'These are current Vector ownership records used to reconstruct historical requirements, not proof of past ownership. ':'')+
                 'Inventory updates are queued for Rebel Command. No safety inspection was performed.');
             return true;
@@ -16345,7 +16390,20 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         controls.append(tourPicker,close);
         if(battalion&&isMasterOwnerInstallation()){
             const mapGear=makeButton('Map Working Crew PPE',{background:'#ecf2f4',color:'#174963'});
-            mapGear.onclick=()=>void cPilotMapWorkingGear(selectedTourStart);
+            mapGear.onclick=async()=>{
+                if(mapGear.disabled)return;
+                mapGear.disabled=true;
+                try{
+                    await cPilotMapWorkingGear(selectedTourStart);
+                    // Mapping can also confirm captain-reviewed tour duty.
+                    // Update the same BC/Captain board immediately instead
+                    // of leaving an obsolete OFF/UNKNOWN roster until Refresh.
+                    if(overlay.isConnected){
+                        cPilotCache=null;
+                        await load(true);
+                    }
+                }finally{mapGear.disabled=false;}
+            };
             advancedTools.appendChild(mapGear);
             const recheck=makeButton('Check outstanding',
                 {background:'#176b8e',color:'#fff'});
@@ -16452,15 +16510,25 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     tourPicker.value=selectedTourStart;
                 }
                 const bg=cPilotAutoState();
+                const currentRead=getCaptainDailyCheck();
+                const pilotReading=bg?.enabled&&currentRead?.pilotRecheck===true&&
+                    ['running','returning'].includes(currentRead.status);
+                // An armed tab is not itself evidence that a read occurred.
+                const readerState=data.historicalTour?'HISTORICAL REVIEW (no scheduled reads)':
+                    !bg?.enabled?'NOT ARMED':
+                    !data.activeTour?'ARMED (waiting for next C tour)':
+                    pilotReading?'READING NATIVE ITEM LOGS':
+                    !data.workingCrew?'ARMED (waiting for captain-confirmed staffing)':
+                    !data.totals.knownItems?'ARMED (will map working PPE)':
+                    !data.outstandingOnDuty?'ARMED (no outstanding working gear)':
+                    'ARMED (next native read pending)';
                 status.textContent='C shift '+data.tourStart+' + '+data.tourEnd+
                     '  ·  '+data.workingCrew+' working / '+data.offCrew+' off'+
                     (data.unconfirmedCrew?' / '+data.unconfirmedCrew+' unconfirmed':'')+
                     '\\n'+data.totals.verifiedItems+' native Item Log verified · '+
                     data.outstandingOnDuty+' awaiting verification (not necessarily missed)'+
                     '\\nLast verified: '+cPilotStamp(data.lastPpeVerificationAt)+
-                    '  ·  Background reader: '+
-                    (data.historicalTour?'HISTORICAL REVIEW (no scheduled reads)':
-                        bg?.enabled?'SIGNED-IN TAB ACTIVE':'NOT RUNNING')+
+                    '  ·  Background reader: '+readerState+
                     (data.activeTour&&!bg?.enabled?
                         ' (requires a dedicated, signed-in Vector tab)':'');
                 if(data.historicalTour)
@@ -16499,7 +16567,21 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     });
                     table.appendChild(tr);
                 };
-                for(const [idx,row] of data.people.entries()){
+                // The Captain inventory shows every selected crew member and
+                // every known piece, including OFF and unresolved people.
+                // BC's high-level status is for firefighters actually working
+                // during this selected tour; unconfirmed/off counts remain in
+                // the summary above, not misleading extra equipment rows.
+                const visiblePeople=captainView||!battalion ? data.people :
+                    data.people.filter(row=>row.attendance==='working');
+                if(!visiblePeople.length&&!captainView&&battalion){
+                    appendRow(['No confirmed working firefighters',
+                        'REVIEW STAFFING','Not mapped',
+                        {text:'Unknown',kind:'pending',
+                         title:'Captain must confirm staffing before BC PPE review.'},
+                        'No native inspection evidence'],0);
+                }
+                for(const [idx,row] of visiblePeople.entries()){
                     const duty=row.attendance==='working'?'WORKING':
                         row.attendance==='off'?'OFF (both days)':'Unconfirmed';
                     if(!captainView){
