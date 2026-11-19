@@ -256,6 +256,23 @@ const cShiftMasterOwner=()=>true,
     throw Error('BC summary displayed off-duty firefighters');
   if([...master.querySelectorAll('button')].filter(b=>b.parentElement?.parentElement===master.querySelector('section')).length>4)
     throw Error('Too many primary buttons in battalion view');
+  // No captain-confirmed workers is not "all clear" or seven misleading
+  // BC equipment rows. The empty state must explicitly request staffing.
+  for(const row of FIXTURE.people){
+    row.attendance='unconfirmed';
+    row.dutyDay1='unconfirmed';
+    row.dutyDay2='unconfirmed';
+  }
+  FIXTURE.workingCrew=0;FIXTURE.offCrew=0;FIXTURE.unconfirmedCrew=7;
+  showCShiftPilotBoard(true);
+  await new Promise(r=>setTimeout(r,110));
+  const emptyBc=[...document.querySelectorAll('.pilot-overlay')].at(-1);
+  const emptyBcRows=[...emptyBc.querySelector('table').querySelectorAll('tr')];
+  if(emptyBcRows.length!==2||
+     !emptyBcRows[1].textContent.includes('No confirmed working firefighters')||
+     !emptyBcRows[1].textContent.includes('REVIEW STAFFING')||
+     !emptyBcRows[1].textContent.includes('Unknown'))
+    throw Error('BC did not show a clear unknown-staffing empty state');
   document.body.dataset.cshiftSmoke='PASS';
  }catch(error){document.body.dataset.cshiftSmoke='FAIL';document.body.dataset.reason=error.message;}
  },60);
