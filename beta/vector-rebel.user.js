@@ -7026,9 +7026,19 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 .map(({ setOrder, ...owner }) => owner);
             const items = [];
             const discovery = [];
-            const freshInventory = await scanPpeCrewOwners(owners, message => setStatus(message));
+            const freshInventory = await scanPpeCrewOwners(owners,
+                message => setStatus(message), {readOnlyAllowUnresolved:true});
             for (const owner of owners) {
                 setStatus(`Daily Captain Check — preparing verified PPE for ${owner.name}…`);
+                const unresolved=(freshInventory.ownerErrors||[]).find(row=>
+                    masterNameKey(row.name)===masterNameKey(owner.name));
+                if (unresolved) {
+                    // Keep the person's row but never count absent native
+                    // equipment as checked, passed or confirmed absent.
+                    discovery.push({name:owner.name,prefix:owner.prefix,
+                        unknown:[],error:'Native PPE ownership unverified: '+unresolved.error});
+                    continue;
+                }
                 try {
                     const found = await discoverOwnerGear(owner, 'tour', freshInventory);
                     discovery.push({
@@ -9752,11 +9762,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             '. Configure the person gear prefix; department-wide discovery is disabled for this check.');
     }
 
-    // Read-only scoped crew discovery: one bounded Vector search per selected
-    // person. Never invoke scanPpeOwnerInventory(), follow general inventory
-    // pagination, or claim that PERSON-* keys identify gear. A missing member
-    // blocks the audit or monthly preview rather than producing false compliance.
-    async function scanPpeCrewOwners(owners, progress = null) {
+    // Scoped crew discovery: one bounded Vector Responsible Party search per
+    // selected person. Inspection previews remain strict. The optional
+    // historical-only read path retains confirmed gear while explicitly
+    // labeling an unresolved person's PPE as UNKNOWN, never as complete.
+    async function scanPpeCrewOwners(owners, progress = null, options = {}) {
         const config = getConfig();
         if (!Array.isArray(owners) || !owners.length) {
             throw new Error('Choose at least one crew member.');
@@ -9764,6 +9774,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const uniqueNames = new Set();
         const byItem = new Map();
         const searches = [];
+        const ownerErrors = [];
+        const partialHistory = options?.readOnlyAllowUnresolved===true;
         let pageCount = 0;
         let rowCount = 0;
         for (let i = 0; i < owners.length; i++) {
@@ -9779,12 +9791,28 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             try {
                 scoped = await scanPpeByResponsibleParty(owner.name, progress);
             } catch (error) {
-                throw new Error(owner.name + ': ' +
-                    (error?.message || String(error)) +
-                    '. Crew check stopped; no incomplete roster was accepted.');
+                const reason = clean(error?.message || String(error));
+                // Only a confirmed lack of a unique matching Responsible
+                // Party may be represented as an unknown historical person.
+                // Identity conflicts, loading failures and other errors still
+                // stop the entire read, rather than risk wrong-owner evidence.
+                const unresolved = /Responsible Party.+not confirmed as the ONE selected owner|no PPE ownership confirmed|no PPE assigned/i.test(reason);
+                if (!partialHistory || !unresolved)
+                    throw new Error(owner.name + ': ' + reason +
+                        '. Crew check stopped; no incomplete roster was accepted.');
+                ownerErrors.push({ name: owner.name, error: reason });
+                if (progress) progress(owner.name +
+                    ': no uniquely confirmed PPE ownership; marked UNKNOWN in history.');
+                continue;
             }
-            if (!scoped.items.length) throw new Error(owner.name +
-                ': no PPE ownership confirmed. Crew check stopped.');
+            if (!scoped.items.length) {
+                if (!partialHistory) throw new Error(owner.name +
+                    ': no PPE ownership confirmed. Crew check stopped.');
+                ownerErrors.push({name:owner.name,error:'No PPE ownership confirmed'});
+                if (progress) progress(owner.name +
+                    ': no PPE ownership confirmed; marked UNKNOWN in history.');
+                continue;
+            }
             searches.push({
                 name: owner.name, filter: 'Responsible Party',
                 source: 'Vector PPE', assetCount: scoped.items.length
@@ -9807,12 +9835,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
         }
         if (progress) progress('Verified ' + byItem.size + ' assigned PPE item(s) for ' +
-            owners.length + ' crew members using targeted searches.');
+            searches.length + '/' + owners.length + ' crew members using targeted searches.' +
+            (ownerErrors.length ? ' ' + ownerErrors.length +
+                ' owner(s) remain UNKNOWN in this read-only historical report.' : ''));
         return {
             items: [...byItem.values()],
             pageCount,
             rowCount,
             searches,
+            ownerErrors,
             source: 'Vector PPE Responsible Party column',
             scope: 'verified-crew-search',
             capturedAt: new Date().toISOString()
