@@ -44,8 +44,10 @@ let HIST_DUTY=null;
 const sessionStorage={getItem:k=>SESSION.has(k)?SESSION.get(k):null,
  setItem:(k,v)=>SESSION.set(k,String(v)),removeItem:k=>SESSION.delete(k)};
 let cVisible=true;const TAB_ID='smoke-cshift-tab',getRun=()=>null,
- getCaptainDailyCheck=()=>null,getCaptainDailyReport=()=>null,
- showCaptainDailyReport=()=>{},panelInterfaceMode=()=> 'master',
+ getCaptainDailyCheck=()=>null,
+ getCaptainDailyReport=()=>({schemaVersion:8,generatedAt:'2026-11-18T15:00:00Z'}),
+ showCaptainDailyReport=report=>{window.__historyOpened=report.generatedAt;},
+ panelInterfaceMode=()=> 'master',
  localTodayKey=()=> '2026-11-21',
  ensurePpeEquipmentPage=async()=>true,
  scanPpeCrewOwners=async()=>{window.__scanCount++;
@@ -132,6 +134,13 @@ const cShiftMasterOwner=()=>true,
       throw Error('Working/off duty counts missing');
   }
   const user=overlays[0],master=overlays[1];
+  const history=[...master.querySelectorAll('button')]
+    .find(x=>x.textContent==='2-Month PPE History');
+  if(!history||!history.title.includes('Snapshot only'))
+    throw Error('BC does not expose stored two-month PPE trend history prominently');
+  history.click();
+  if(window.__historyOpened!=='2026-11-18T15:00:00Z')
+    throw Error('History control did not open the original source audit');
   // An ordinary user's roster can include the full crew. BC gets only
   // confirmed workers in its MAIN summary, not all OFF/unknown firefighters.
   if(user.querySelector('table').querySelectorAll('tr').length!==8)
