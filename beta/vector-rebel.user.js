@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.84
+// @version      3.2.85
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -33,7 +33,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.84',
+        version: '3.2.85',
         startedAt: Date.now()
     };
 
@@ -41,7 +41,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.84';
+    const VERSION = '3.2.85';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -13746,7 +13746,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         });
         if(new Set(items.map(item=>item.href)).size!==items.length)
             throw new Error('Duplicate native SCBA item URLs; cannot record ambiguous checks.');
-        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.84'};
+        return {items,index:0,phase:'open_item',createdAt:Date.now(),draftOnly:true, inspectionVersion:'3.2.85'};
     }
 
     function scbaAirpackReadNativeQueue() {
@@ -13834,7 +13834,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // form if Vector rerenders or SPA navigation races the interval.
     function scbaAirpackSelectNativeTemplate() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82','3.2.83','3.2.84'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82','3.2.83','3.2.84','3.2.85'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' ||
             queue.chooserSelectionAttemptedAt || getRun())return false;
         const item=queue.items[queue.index];
@@ -13892,7 +13892,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     async function scbaAirpackPrefillVerifiedForm() {
         if(scbaAirpackFormBusy)return false;
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82','3.2.83','3.2.84'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82','3.2.83','3.2.84','3.2.85'].includes(queue.inspectionVersion) ||
             queue.phase!=='native_form_opened' || getRun() ||
             !Number.isFinite(queue.openedAt) ||
             Date.now()-queue.openedAt>180000 || Date.now()<queue.openedAt)return false;
@@ -14041,7 +14041,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const q=scbaAirpackReadNativeQueue();
         if(!q || q.phase!=='form_prefilled' ||
             !q.autoSubmitApproved || !q.physicalInspectionConfirmedAt ||
-            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82','3.2.83','3.2.84'].includes(q.inspectionVersion) || getRun())return false;
+            !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82','3.2.83','3.2.84','3.2.85'].includes(q.inspectionVersion) || getRun())return false;
         const item=q.items[q.index],ins=currentInspection();
         if(!item || !ins || ins.template!==SCBA_FRAME_INSPECTION_TEMPLATE ||
             ins.instance!==q.formInstance || q.submitAttemptedAt)return false;
@@ -14169,7 +14169,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
     function scbaAirpackFillNativeFailureDetails() {
         const queue=scbaAirpackReadNativeQueue();
-        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82','3.2.83','3.2.84'].includes(queue.inspectionVersion) ||
+        if(!queue || !['3.2.64','3.2.65','3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82','3.2.83','3.2.84','3.2.85'].includes(queue.inspectionVersion) ||
             !['form_prefilled','native_form_opened','native_submit_clicked'].includes(queue.phase) ||
             getRun())return false;
         const item=queue.items[queue.index];
@@ -14237,7 +14237,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // authorization. Record a no-retry latch BEFORE the final click.
     function scbaAirpackFinalizeFailure() {
         const q=scbaAirpackReadNativeQueue();
-        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82','3.2.83','3.2.84'].includes(q.inspectionVersion) ||
+        if(!q || !['3.2.66','3.2.67','3.2.68','3.2.69','3.2.70','3.2.71','3.2.72','3.2.73','3.2.74','3.2.75','3.2.76','3.2.77','3.2.78','3.2.79','3.2.80','3.2.81','3.2.82','3.2.83','3.2.84','3.2.85'].includes(q.inspectionVersion) ||
            q.phase!=='native_submit_clicked' || !q.autoSubmitApproved ||
            !q.physicalInspectionConfirmedAt || q.failureFinalSubmitAt ||
            q.failureNotePreparedFor!==q.submittedFormInstance || getRun())return false;
@@ -14412,7 +14412,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         if(!fresh || fresh.items[fresh.index].href!==item.href ||
                            fresh.phase!=='form_prefilled')return;
                         sessionStorage.setItem(SCBA_AIRPACK_NATIVE_HANDOFF_KEY,
-                            JSON.stringify({...fresh,inspectionVersion:'3.2.84',
+                            JSON.stringify({...fresh,inspectionVersion:'3.2.85',
                                 autoSubmitApproved:true,
                                 physicalInspectionConfirmedAt:new Date().toISOString()}));
                         continueButton.disabled=true;
@@ -15742,10 +15742,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         if(Date.now()<Number(state.nextAt||0))return false;
         try{
             const data=await cPilotFetch(true);
-            if(!data.activeTour||data.tourStart!==state.tourStart){
-                cPilotAutoSave(null);
-                setStatus('Dedicated C-shift verifier stopped because the active tour ended.');
+            if(!data.activeTour){
+                // Preserve a one-time operator designation across C tours while
+                // this dedicated, signed-in tab remains alive. Do no Vector
+                // navigation off-shift. Server-side receipt reads still continue.
+                cPilotAutoSave({...state,tourStart:data.nextTourStart,
+                    nextAt:Date.now()+cPilotNextLocalBoundaryMs()});
                 return false;
+            }
+            if(data.tourStart!==state.tourStart){
+                cPilotAutoSave({...state,tourStart:data.tourStart,
+                    nextAt:Date.now()});
             }
             // Never navigate an active inspection or another Captain Check;
             // only this explicitly designated, owner-linked tab is eligible.
@@ -16245,14 +16252,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const {overlay,box}=makeOverlayBox('840px');
         const heading=document.createElement('h2');
         heading.textContent=battalion?
-            (viewMode==='captain'?'Daily Captain Check · C Shift Quick':'BC Check · C Shift Pilot'):
-            'My C Shift · PPE Check Status';
+            (viewMode==='captain'?'Daily Captain Check':'BC Check'):
+            'C Shift · PPE Check Status';
         heading.style.cssText='font:700 20px Arial;color:#143e5a;margin:0 0 8px;';
         const note=document.createElement('p');
         note.style.cssText='font:12px/1.55 Arial;color:#4c6879;margin:0 0 12px;';
-        note.textContent=battalion?
-            'Read-only C-shift check. Each pass reads only ONE outstanding PPE item per confirmed-working firefighter; checked items rotate. Full history scans require an explicit separate selection. No inspection is submitted.':
-            'C shift pilot only. Completion means a newly confirmed native Item Log record. Unknown inventory or unverified duty cannot count as compliant.';
+        note.textContent=viewMode==='captain'&&battalion?
+            'Every mapped PPE item for each firefighter, with its native inspection status. Background verification updates this list. A pending item is not proof of a missed inspection.':
+            battalion?'C-shift overview of who is working and whose equipment still needs verification. Background checking handles individual items.':
+            'C-shift PPE verification status from native Vector Item Logs.';
         const status=document.createElement('div');
         status.setAttribute('role','status');
         status.style.cssText='font:12px Arial;color:#305469;white-space:pre-wrap;';
@@ -16272,16 +16280,31 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         };
         close.onclick=()=>overlay.remove();
         refresh.onclick=()=>void load(true);
-        controls.append(tourPicker,refresh,close);
+        const advanced=document.createElement('details');
+        advanced.style.cssText='margin:7px 0 0;padding:6px 0;color:#597282;font:11px Arial;';
+        const advancedTitle=document.createElement('summary');
+        advancedTitle.textContent='Setup / troubleshooting';
+        advancedTitle.style.cssText='cursor:pointer;color:#597282;font:11px Arial;';
+        const advancedTools=document.createElement('div');
+        advancedTools.style.cssText='display:flex;flex-wrap:wrap;gap:7px;margin:8px 0;';
+        advanced.append(advancedTitle,advancedTools);
+        advancedTools.append(refresh);
+        controls.append(tourPicker,close);
         if(battalion&&isMasterOwnerInstallation()){
             const mapGear=makeButton('Map Working Crew PPE',{background:'#ecf2f4',color:'#174963'});
             mapGear.onclick=()=>void cPilotMapWorkingGear(selectedTourStart);
-            controls.appendChild(mapGear);
-            const recheck=makeButton('Read 1 Outstanding Item / Working Person',
-                {background:'#e8f2f7',color:'#16516a'});
+            advancedTools.appendChild(mapGear);
+            const recheck=makeButton('Check outstanding',
+                {background:'#176b8e',color:'#fff'});
             recheck.onclick=()=>void startCShiftPilotNativeRecheck(false,selectedTourStart);
-            controls.appendChild(recheck);
-            const fullAudit=makeButton('Full PPE History Audit (all items)',
+            controls.insertBefore(recheck,close);
+            const cached=getCaptainDailyReport();
+            if(cached&&viewMode==='captain'){
+                const previous=makeButton('View original detailed history');
+                previous.onclick=()=>showCaptainDailyReport(cached);
+                advancedTools.appendChild(previous);
+            }
+            const fullAudit=makeButton('Rebuild original history (all items)',
                 {background:'#f1f3f5',color:'#566674'});
             fullAudit.title='Optional extended two-month history audit. Scans every mapped item and can take a long time.';
             fullAudit.onclick=()=>{
@@ -16289,7 +16312,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 overlay.remove();
                 void launchCaptainDailyCheckFromAnywhere();
             };
-            controls.appendChild(fullAudit);
+            advancedTools.appendChild(fullAudit);
             const pendingScan=getCaptainDailyCheck();
             if(pendingScan&&['running','returning'].includes(pendingScan.status)&&!getRun()){
                 const stopScan=makeButton('Stop Current Read-Only Scan',
@@ -16304,7 +16327,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     setStatus('Read-only scan stopped. No official PPE inspection was changed.');
                     stopScan.remove();
                 };
-                controls.appendChild(stopScan);
+                advancedTools.appendChild(stopScan);
             }
             const auto=makeButton(cPilotAutoState()?'Stop This Tab Verifier':
                 'Monitor C Shift in This Tab',{background:'#d8f0e5',color:'#155f41'});
@@ -16318,10 +16341,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 }
                 try{
                     const state=await cPilotFetch(true,selectedTourStart);
-                    if(!state.activeTour)
-                        throw Error('The historical C-shift test is manual only. Dedicated monitoring requires a current C shift.');
-                    if(!confirm('Dedicate this Vector tab to C-shift read-only PPE rechecks? It will navigate the tab periodically, one outstanding item per confirmed-working firefighter. Leave this tab open and signed in. No PPE submissions will be made.'))return;
-                    cPilotAutoSave({enabled:true,tabId:TAB_ID,tourStart:state.tourStart,
+                    const requestedStart=state.activeTour?state.tourStart:state.nextTourStart;
+                    if(!/^\d{4}-\d{2}-\d{2}$/.test(requestedStart))
+                        throw Error('Upcoming C tour could not be established.');
+                    if(!confirm('Dedicate this already signed-in Vector tab to read-only background verification? '+
+                        'During each C tour it will check one outstanding item per working firefighter in rotation. '+
+                        'Between tours it waits without navigating Vector. The browser tab must remain open and signed in. '+
+                        'No official PPE inspections or CrewSense changes will be made.'))return;
+                    cPilotAutoSave({enabled:true,tabId:TAB_ID,tourStart:requestedStart,
                         startedAt:Date.now(),nextAt:Date.now()});
                     auto.textContent='Stop This Tab Verifier';
                     void cPilotAutoTick();
@@ -16329,12 +16356,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     setStatus('Could not start dedicated verifier: '+clean(error.message||error),false);
                 }
             };
-            controls.appendChild(auto);
+            advancedTools.appendChild(auto);
         }
         const dutyEditor=document.createElement('section');
         dutyEditor.setAttribute('data-cshift-duty-editor','1');
         dutyEditor.style.cssText='margin-top:12px;padding:8px;background:#f3f7fa;border:1px solid #b9d0dd;border-radius:6px;';
-        box.append(heading,note,controls,status,table,dutyEditor);
+        const staffingDetails=document.createElement('details');
+        staffingDetails.style.cssText='margin-top:10px;';
+        const staffingTitle=document.createElement('summary');
+        staffingTitle.textContent='Correct staffing if needed';
+        staffingTitle.style.cssText='font:700 12px Arial;color:#315b70;cursor:pointer;';
+        staffingDetails.append(staffingTitle,dutyEditor);
+        box.append(heading,note,controls,status,table,staffingDetails,advanced);
         let loadSequence=0;
         async function load(force){
             const sequence=++loadSequence;
@@ -16365,39 +16398,89 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     selectedTourStart=data.tourStart;
                     tourPicker.value=selectedTourStart;
                 }
-                status.textContent='Tour '+data.tourStart+' to '+data.tourEnd+
-                    ' · Last PPE receipt: '+cPilotStamp(data.lastPpeVerificationAt)+
-                    '\\n'+data.totals.verifiedItems+' verified item receipts · '+
-                    data.outstandingOnDuty+' known outstanding on duty · '+
-                    (data.historicalTour?'historical test (manual, no scheduled scans)':
-                        data.cadenceMinutes+'-minute recheck policy')+
-                    '\\nScheduled native rechecks operate only in a dedicated, signed-in Vector tab while it remains open. Duty status is captain-confirmed when marked.';
-                status.textContent+=(data.historicalTour?
-                    '\\nHistorical test: ownership is read today and may not prove past assignment; only native November tour Item Log dates can verify past completion.':'')+
-                    ' | Dedicated tab monitor: '+(cPilotAutoState()?'ENABLED':'OFF')+' | Working confirmed: '+data.workingCrew+' · Off both days: '+data.offCrew+' · Unconfirmed: '+data.unconfirmedCrew+' · Staffing confirmed: '+cPilotStamp(data.lastStaffingUpdateAt);
+                const bg=cPilotAutoState();
+                status.textContent='C shift '+data.tourStart+' + '+data.tourEnd+
+                    '  ·  '+data.workingCrew+' working / '+data.offCrew+' off'+
+                    (data.unconfirmedCrew?' / '+data.unconfirmedCrew+' unconfirmed':'')+
+                    '\\n'+data.totals.verifiedItems+' native Item Log verified · '+
+                    data.outstandingOnDuty+' awaiting verification (not necessarily missed)'+
+                    '\\nLast verified: '+cPilotStamp(data.lastPpeVerificationAt)+
+                    '  ·  Background reader: '+
+                    (data.historicalTour?'HISTORICAL REVIEW (no scheduled reads)':
+                        bg?.enabled?'SIGNED-IN TAB ACTIVE':'NOT RUNNING')+
+                    (data.activeTour&&!bg?.enabled?
+                        ' (requires a dedicated, signed-in Vector tab)':'');
+                if(data.historicalTour)
+                    status.textContent+='\\nHistorical PPE ownership was reconstructed from current assignments; verify past assignments before relying on the totals.';
                 const directLinks=data.people.reduce((sum,row)=>sum+Number(row.mappedPaths||0),0);
-                status.textContent+=' · Direct PPE links '+directLinks+'/'+data.totals.knownItems;
+                if(directLinks<data.totals.knownItems)
+                    status.textContent+='\\nNative direct item links: '+directLinks+' / '+data.totals.knownItems+' mapped.';
                 table.replaceChildren();
+                const captainView=viewMode==='captain'&&battalion;
+                table.style.cssText='width:100%;border-collapse:separate;border-spacing:0;'+
+                    'font:12px Arial;color:#163b50;min-width:'+(captainView?'610px':'570px')+';';
                 const header=document.createElement('tr');
-                for(const text of ['Firefighter','Duty','Known PPE','Verified','Pending','Unreadable','Last Vector inspection date','Next item']){
+                const columns=captainView?
+                    ['PERSON','ITEM','TOUR CHECK','VECTOR INSPECTION DATE']:
+                    ['FIREFIGHTER','DUTY','VERIFIED / KNOWN','AWAITING VERIFICATION','LAST INSPECTION'];
+                for(const text of columns){
                     const th=document.createElement('th');th.textContent=text;
-                    th.style.cssText='text-align:left;padding:7px;border-bottom:2px solid #aac4d2;';
+                    th.style.cssText='position:sticky;top:0;background:#173e63;'+
+                        'color:white;text-align:left;padding:9px;border-bottom:2px solid #aac4d2;';
                     header.appendChild(th);
                 }
                 table.appendChild(header);
-                for(const row of data.people){
+                const appendRow=(values,index=0)=>{
                     const tr=document.createElement('tr');
+                    values.forEach((field,i)=>{
+                        const td=document.createElement('td');
+                        td.textContent=String(field?.text??field??'');
+                        td.title=String(field?.title??'');
+                        td.style.cssText='padding:7px 9px;border-bottom:1px solid #dbe6ec;'+
+                            (index%2?'background:#f8fbfc;':'')+
+                            (field?.kind==='ok'?'font-weight:800;color:#176b32;background:#e5f5e8;':
+                             field?.kind==='pending'?'color:#80570c;background:#fff7df;':
+                             field?.kind==='off'?'color:#647b86;background:#eef2f5;':'');
+                        if(i===0)td.style.fontWeight='700';
+                        tr.appendChild(td);
+                    });
+                    table.appendChild(tr);
+                };
+                for(const [idx,row] of data.people.entries()){
                     const duty=row.attendance==='working'?'WORKING':
                         row.attendance==='off'?'OFF (both days)':'Unconfirmed';
-                    for(const value of [row.name,duty,
-                        row.knownItems||'Not mapped',row.verifiedItems,
-                        row.outstandingItems,row.readErrors||0,row.lastNativeInspectionDate||'Not confirmed',row.nextItem||
-                        (row.attendance==='working'?'Awaiting inventory':'Not scheduled')]){
-                        const td=document.createElement('td');td.textContent=String(value);
-                        td.style.cssText='padding:8px 6px;border-bottom:1px solid #dbe6ec;';
-                        tr.appendChild(td);
+                    if(!captainView){
+                        appendRow([row.name,duty,
+                            row.knownItems?row.verifiedItems+' / '+row.knownItems:'Not mapped',
+                            {text:row.knownItems?row.outstandingItems:'Unknown',
+                                title:'Awaiting verification does not mean an inspection was missed.',
+                                kind:row.outstandingItems?'pending':''},
+                            row.lastNativeInspectionDate||'Not confirmed'],idx);
+                        continue;
                     }
-                    table.appendChild(tr);
+                    const gear=Array.isArray(row.gear)?row.gear:[];
+                    if(!gear.length){
+                        appendRow([row.name+' · '+duty,'No equipment mapped',
+                            {text:'?',kind:'pending',title:'Inventory has not been confirmed'},
+                            'No native inspection evidence'],idx);
+                        continue;
+                    }
+                    for(const [j,item] of gear.entries()){
+                        const ok=item.status==='verified'&&!!item.nativeCompletionDate;
+                        const notDue=row.attendance==='off';
+                        const unreadable=item.lastReadResult==='unreadable';
+                        appendRow([
+                            j===0?row.name+' · '+duty:'',
+                            item.assetType+' · '+item.assetId,
+                            ok?{text:'✓ VERIFIED',kind:'ok',title:'Native Vector Item Log confirmed '+item.nativeCompletionDate}:
+                                notDue?{text:'OFF',kind:'off',title:'Captain confirmed off both days'}:
+                                {text:unreadable?'? UNREADABLE':'? NOT YET VERIFIED',kind:'pending',
+                                    title:'Not yet verified is not proof of a missed inspection.'},
+                            ok?item.nativeCompletionDate:
+                                unreadable?'Read failed; retry pending':
+                                item.lastReadAt?'Last checked '+cPilotStamp(item.lastReadAt):'Awaiting background verification'
+                        ],idx);
+                    }
                 }
                 dutyEditor.replaceChildren();
                 const canEdit=battalion&&isMasterOwnerInstallation()&&

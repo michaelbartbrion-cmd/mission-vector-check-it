@@ -26,7 +26,15 @@ const fixture={ok:true,readOnly:true,scope:'c-shift-ppe-pilot',
   dutyDay1:i===0?'working':i===1?'off':'unconfirmed',
   dutyDay2:i===0?'working':i===1?'off':'unconfirmed',
   knownItems:i===0?3:0,verifiedItems:i===0?1:0,
-  outstandingItems:i===0?2:0,nextItem:i===0?'A-001':''}))};
+  outstandingItems:i===0?2:0,nextItem:i===0?'A-001':'',
+  gear:i===0?[
+   {assetId:'A-001',assetType:'Coat',status:'verified',
+    nativeCompletionDate:'2026-11-21',lastVerifiedAt:'2026-11-21T14:00:00Z'},
+   {assetId:'B-002',assetType:'Pants',status:'not_yet_verified',
+    lastReadResult:'read_ok',lastReadAt:'2026-11-21T14:00:00Z'},
+   {assetId:'C-003',assetType:'Helmet',status:'not_yet_verified',
+    lastReadResult:'unreadable',lastAttemptAt:'2026-11-21T14:01:00Z'}
+  ]:i===1?[{assetId:'OFF-04',assetType:'Boots',status:'not_yet_verified'}]:[]}))};
 const js=`
 (function(){
 const FIXTURE=__DATA__,requests=[],STORE=new Map(),SESSION=new Map();
@@ -36,7 +44,8 @@ let HIST_DUTY=null;
 const sessionStorage={getItem:k=>SESSION.has(k)?SESSION.get(k):null,
  setItem:(k,v)=>SESSION.set(k,String(v)),removeItem:k=>SESSION.delete(k)};
 let cVisible=true;const TAB_ID='smoke-cshift-tab',getRun=()=>null,
- getCaptainDailyCheck=()=>null,panelInterfaceMode=()=> 'master',
+ getCaptainDailyCheck=()=>null,getCaptainDailyReport=()=>null,
+ showCaptainDailyReport=()=>{},panelInterfaceMode=()=> 'master',
  localTodayKey=()=> '2026-11-21',
  ensurePpeEquipmentPage=async()=>true,
  scanPpeCrewOwners=async()=>{window.__scanCount++;
@@ -114,14 +123,14 @@ const cShiftMasterOwner=()=>true,
  try{
   const overlays=[...document.querySelectorAll('.pilot-overlay')];
   if(overlays.length!==2)throw Error('Expected two interfaces');
-  if(!overlays[0].textContent.includes('My C Shift'))throw Error('User crew heading missing');
-  if(!overlays[1].textContent.includes('BC Check · C Shift'))throw Error('Master heading missing');
+  if(!overlays[0].textContent.includes('C Shift · PPE Check Status'))throw Error('User crew heading missing');
+  if(!overlays[1].textContent.includes('BC Check'))throw Error('Master heading missing');
   for(const overlay of overlays){
     if(overlay.querySelectorAll('table tr').length<8)throw Error('Seven crew not listed');
     for(const name of __NAMES__)if(!overlay.textContent.includes(name))
       throw Error('Crew member missing '+name);
-    if(!overlay.textContent.includes('Working confirmed: 1'))
-      throw Error('Working confirmation total missing');
+    if(!overlay.textContent.includes('1 working / 1 off'))
+      throw Error('Working/off duty counts missing');
   }
   const user=overlays[0],master=overlays[1];
   if(user.querySelectorAll('[data-cshift-duty-editor] select').length)throw Error('Ordinary user can edit duty');
@@ -181,8 +190,8 @@ const cShiftMasterOwner=()=>true,
   picker.value='2026-11-15';
   picker.dispatchEvent(new Event('change',{bubbles:true}));
   await new Promise(r=>setTimeout(r,120));
-  if(!master.textContent.includes('Historical test:')||
-     !master.textContent.includes('2026-11-15 to 2026-11-16'))
+  if(!master.textContent.includes('Historical PPE ownership')||
+     !master.textContent.includes('2026-11-15 + 2026-11-16'))
     throw Error('Historical November 15-16 board did not load');
   const historicalEditor=master.querySelector('[data-cshift-duty-editor]');
   if(historicalEditor.querySelectorAll('select').length!==14)
@@ -211,11 +220,31 @@ const cShiftMasterOwner=()=>true,
   const pastPosts=requests.filter(x=>x.url.includes('vr-ppe-pilot-inventory'));
   if(pastPosts.length!==before+1||pastPosts.at(-1).data.tourStart!=='2026-11-15')
     throw Error('Historical scoped inventory did not target Nov 15-16');
-  const single=[...master.querySelectorAll('button')].find(x=>x.textContent.includes('Read 1 Outstanding Item'));
+  const single=[...master.querySelectorAll('button')].find(x=>x.textContent==='Check outstanding');
   single.click();
   await new Promise(r=>setTimeout(r,100));
   if(window.__nativePilotCheck?.tourStart!=='2026-11-15')
     throw Error('Historical read-only one-item recheck did not target Nov 15-16');
+  // Captain must see EVERY mapped piece, while the battalion stays summary only.
+  showCShiftPilotBoard(true,'captain');
+  await new Promise(r=>setTimeout(r,100));
+  const captain=[...document.querySelectorAll('.pilot-overlay')].at(-1);
+  if(!captain.textContent.includes('Daily Captain Check'))
+    throw Error('Captain-specific full gear screen missing');
+  const itemRows=[...captain.querySelector('table').querySelectorAll('tr')];
+  if(itemRows.length!==10)
+    throw Error('Captain gear grid did not include each known item and all seven firefighters: '+itemRows.length);
+  if(!captain.textContent.includes('A-001')||
+     !captain.textContent.includes('B-002')||
+     !captain.textContent.includes('C-003')||
+     !captain.textContent.includes('✓ VERIFIED')||
+     !captain.textContent.includes('? NOT YET VERIFIED')||
+     !captain.textContent.includes('? UNREADABLE'))
+    throw Error('Captain full PPE grid has missing statuses or source data');
+  if(master.querySelector('table').querySelectorAll('tr').length!==8)
+    throw Error('BC summary unexpectedly expanded into the full gear audit');
+  if([...master.querySelectorAll('button')].filter(b=>b.parentElement?.parentElement===master.querySelector('section')).length>4)
+    throw Error('Too many primary buttons in battalion view');
   document.body.dataset.cshiftSmoke='PASS';
  }catch(error){document.body.dataset.cshiftSmoke='FAIL';document.body.dataset.reason=error.message;}
  },60);
