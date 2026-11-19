@@ -5757,7 +5757,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const today=localTodayKey();
         const firstShiftReached=asOf<today || (asOf===today&&new Date().getHours()>=7);
         const due=chosen.some(date=>date<asOf || (date===asOf&&firstShiftReached));
-        return {due,off:false,dutyDates:chosen};
+        return {due,off:false,dutyDates:chosen,
+            assignmentSource:'captain_selected_tour'};
     }
 
     function captainDailyMissingTargets(report) {
@@ -6230,18 +6231,24 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const readable=item?.status==='ok';
         const required=checks.filter(c=>c.due===true);
         const verified=required.filter(c=>readable&&c.ok===true&&!!c.date).length;
-        const missing=readable?required.filter(c=>c.ok!==true).length:0;
+        // Source-confirmed work is required before calling a missing native
+        // check a repeated failure. A base-roster assumption can be useful
+        // for scheduling work, but is not proof the person was on duty.
+        const confirmedWork=c=>['scout_any_unit','swing_selected_tour',
+            'captain_selected_tour'].includes(c.assignmentSource);
+        const missing=readable?required.filter(c=>c.ok!==true&&confirmedWork(c)).length:0;
+        const dutyUnverified=readable?required.filter(c=>c.ok!==true&&!confirmedWork(c)).length:0;
         const unreadable=readable?0:required.length;
         const attendanceUnknown=checks.filter(c=>c.unknown===true&&!c.due).length;
         const off=checks.filter(c=>c.off===true&&!c.due).length;
         const unassigned=checks.filter(c=>c.notAssigned===true&&!c.due).length;
-        const uncertain=unreadable+attendanceUnknown;
+        const uncertain=unreadable+attendanceUnknown+dutyUnverified;
         const repeated=missing>=2;
         const label=repeated?'REPEATED MISSING':
             missing===1?'1 MISSING':
             uncertain?'STATUS UNKNOWN':
             required.length?'NO CONFIRMED MISSES':'NO DUE TOURS';
-        return{verified,missing,unreadable,attendanceUnknown,off,
+        return{verified,missing,unreadable,dutyUnverified,attendanceUnknown,off,
             unassigned,required:required.length,uncertain,repeated,label};
     }
 
@@ -6400,15 +6407,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const due = tour.due === true;
                 const off = tour.off === true;
                 const sourceUnreadable=item.status!=='ok'&&due;
+                const dutyUnverified=due&&![ 'scout_any_unit','swing_selected_tour',
+                    'captain_selected_tour'].includes(tour.assignmentSource||'');
                 const tourFinished=headerTour.endDate<auditWindow.asOfDate;
                 const pendingTour=due&&!tourFinished;
-                const unknown=tour.unknown===true||sourceUnreadable;
+                const unknown=tour.unknown===true||sourceUnreadable||dutyUnverified;
                 const notAssigned=tour.notAssigned===true;
                 // A real native inspection is a fact even for a swing or
                 // someone normally on another shift. Never hide this green
                 // check behind today's Captain Set membership.
                 const ok=item.status==='ok' && tour.ok===true && !!tour.date;
-                const missing=due&&!ok&&!sourceUnreadable&&tourFinished;
+                const missing=due&&!ok&&!sourceUnreadable&&!dutyUnverified&&tourFinished;
                 const mark = document.createElement('div');
                 mark.style.cssText = 'height:27px;display:flex;align-items:center;justify-content:center;border-radius:5px;border:1px solid ' +
                     (ok ? '#78b684' : missing ? '#dc7f7f' : unknown||pendingTour?'#ecb55b':'#d8e1e6') + ';background:' +
@@ -6417,7 +6426,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     ';font-size:'+(off&&!ok?'9px':'17px')+';font-weight:900;line-height:1;';
                 mark.textContent=ok?'✓':off?
                     (tour.offSource==='captain_manual'?'OFF*':'OFF'):
-                    sourceUnreadable?'?':pendingTour?'…':due?'✕':unknown?'?':'';
+                    sourceUnreadable?'?':pendingTour?'…':dutyUnverified?'?':due?'✕':unknown?'?':'';
                 const manualDifferentShift=notAssigned&&tour.offSource==='captain_manual';
                 const offDetail=tour.offSource==='captain_manual'?
                     (manualDifferentShift?'Captain-entered DIFFERENT SHIFT / other captain':'Captain-entered entire-tour OFF')+
@@ -6433,6 +6442,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     (offDetail||(sourceUnreadable?
                         'Native PPE inspection history is unreadable. This is UNKNOWN, not a missed check.':
                         pendingTour?'Current tour remains OPEN; inspection may still be completed.':
+                        dutyUnverified?'Working assignment for this historic tour has not been source-confirmed. An unreadable or missing check may NOT be called a missed inspection.':
                         unknown?'Scout could not verify a unit assignment or both full days OFF/deployed; review required.':
                         otherShiftDetail)||(off?'Off/deployed this entire tour; PPE not due':due?
                     (ok?'completed '+(tour.date||''): 'worked any unit, PPE required and missing'):

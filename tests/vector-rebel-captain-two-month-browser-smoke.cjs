@@ -18,7 +18,7 @@ const tours=[
 const check=(startDate,params={})=>({
  startDate,endDate:tours.find(t=>t.startDate===startDate).endDate,
  month:startDate.slice(0,7),due:true,off:false,unknown:false,notAssigned:false,
- ok:false,date:'',...params
+ ok:false,date:'',assignmentSource:'scout_any_unit',...params
 });
 const report={schemaVersion:8,reportId:'TEST',generatedAt:'2026-11-19T15:00:00Z',
  setName:'Captain C Test',shift:'C',setId:'C',swingHistoryLimited:true,

@@ -13,7 +13,7 @@ const window={asOfDate:'2026-11-19',tours:[
  ['2026-10-13','2026-10-14'],['2026-10-19','2026-10-20'],
  ['2026-11-01','2026-11-02'],['2026-11-19','2026-11-20']]
  .map(([startDate,endDate])=>({startDate,endDate}))};
-const check=(startDate,attrs)=>({startDate,due:true,off:false,unknown:false,ok:false,date:'',...attrs});
+const check=(startDate,attrs)=>({startDate,due:true,off:false,unknown:false,ok:false,date:'',assignmentSource:'scout_any_unit',...attrs});
 test('per-person per-PPE history detects repeated verified missing tours, not just a single gap',()=>{
  const coat={status:'ok',tourChecks:[
   check('2026-10-01',{ok:true,date:'2026-10-01'}),
@@ -35,6 +35,17 @@ test('ongoing tour is not counted as a repeated missed check even if currently d
  assert.equal(r.missing,1);
  assert.equal(r.repeated,false);
  assert.equal(r.required,1);
+});
+test('roster-only expected tours cannot become an invented repeated-miss pattern',()=>{
+ const r=pattern({status:'ok',tourChecks:[
+  check('2026-10-01',{assignmentSource:'base_roster_inferred'}),
+  check('2026-10-07',{assignmentSource:''}),
+  check('2026-10-13',{assignmentSource:'scout_any_unit',ok:false})]},window);
+ assert.equal(r.missing,1);
+ assert.equal(r.dutyUnverified,2);
+ assert.equal(r.uncertain,2);
+ assert.equal(r.repeated,false);
+ assert.equal(r.label,'1 MISSING');
 });
 test('unreadable native history is unknown, never two false misses',()=>{
  const r=pattern({status:'error',tourChecks:[
@@ -76,9 +87,9 @@ test('legacy archive grid renders unreadable due history as question mark and in
  const to=src.indexOf('    function showCaptainDailySetPicker()',from);
  const body=src.slice(from,to);
  assert.match(body,/sourceUnreadable=item\.status!=='ok'&&due/);
- assert.match(body,/sourceUnreadable\?'\?':pendingTour\?'…':due\?'✕'/);
+ assert.match(body,/sourceUnreadable\?'\?':pendingTour\?'…':dutyUnverified\?'\?':due\?'✕'/);
  assert.match(body,/makeHead\('TWO-MONTH PATTERN'/);
  assert.match(body,/pattern\.repeated/);
- assert.match(body,/const missing=due&&!ok&&!sourceUnreadable&&tourFinished/);
+ assert.match(body,/const missing=due&&!ok&&!sourceUnreadable&&!dutyUnverified&&tourFinished/);
  assert.match(body,/REPEATED MISSING CHECKS/);
 });
