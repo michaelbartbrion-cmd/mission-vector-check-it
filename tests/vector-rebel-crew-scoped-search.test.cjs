@@ -8,7 +8,7 @@ function section(start,end){
   assert.ok(i>=0&&j>i,start+' boundaries');
   return script.slice(i,j);
 }
-const code=section('async function scanPpeCrewOwners(owners, progress = null) {',
+const code=section('async function scanPpeCrewOwners(owners, progress = null, options = {}) {',
   'async function scanPpeOwnerInventory(progress = null) {')+
   '\nreturn scanPpeCrewOwners;';
 const crew=['Michael Brion','Mike Baldree','Jerry Weems','Robert Brooks','Jarred Weston']
@@ -81,4 +81,82 @@ test('Crew editor no longer requests or saves PPE search prefixes',()=>{
   const profile=section('function renderProfile() {','function renderLinkedEquipment() {');
   assert.doesNotMatch(profile,/My PPE asset prefix/);
   assert.doesNotMatch(profile,/newPrefix/);
+});
+
+test('read-only Captain history preserves verified crew gear if one off-duty owner has no uniquely confirmed PPE',async()=>{
+  const h=harness(async (name,i)=>{
+    if(name==='Robert Brooks')throw Error('Responsible Party "Robert Brooks" was not confirmed as the ONE selected owner');
+    return {pageCount:1,rowCount:1,items:[{pool:'300045',itemId:String(i),
+      assetId:'ITEM-'+i,ownerName:name,status:'In Service'}]};
+  });
+  const r=await h.scan(crew,null,{readOnlyAllowUnresolved:true});
+  assert.deepEqual(h.calls,crew.map(x=>x.name),'continue to inspect remaining owners');
+  assert.equal(r.items.length,crew.length-1);
+  assert.equal(r.ownerErrors.length,1);
+  assert.equal(r.ownerErrors[0].name,'Robert Brooks');
+  assert.match(r.ownerErrors[0].error,/not confirmed as the ONE selected owner/);
+  assert.equal(r.searches.length,crew.length-1);
+});
+test('unreadable Vector page is still a blocking error, even in partial read-only mode',async()=>{
+  const h=harness(async name=>{if(name==='Mike Baldree')
+      throw Error('PPE rows did not stabilize before timeout');
+    return {pageCount:1,rowCount:1,items:[{pool:'300045',itemId:'15',
+      assetId:'ITEM-15',ownerName:name}]};
+  });
+  await assert.rejects(h.scan(crew,null,{readOnlyAllowUnresolved:true}),
+    /Mike Baldree: PPE rows did not stabilize.*Crew check stopped/);
+});
+test('Captain history does not treat unresolved ownership as passed inspections',()=>{
+  const daily=section('async function startCaptainDailyCheck(set, auditAsOfDate) {',
+    'async function resumeCaptainDailyCheck() {');
+  const report=section('function buildCaptainDailyReport(check) {',
+    'function showCaptainHistoricalOffEditor(');
+  assert.match(daily,/readOnlyAllowUnresolved:true/);
+  assert.match(daily,/Native PPE ownership unverified:/);
+  assert.match(daily,/if \(!items.length\) throw new Error\('Daily Captain Check found no mapped PPE items/);
+  assert.match(report,/allReadable = itemRows.length > 0/);
+  assert.match(report,/&& !discovery.error/);
+});
+
+test('actual Captain report keeps valid native green receipts but marks unresolved owner NOT COMPLIANT',()=>{
+  const reportBody=section('function buildCaptainDailyReport(check) {',
+    'function showCaptainHistoricalOffEditor(');
+  const make=new Function('captainAuditWindow','captainOwnerTourDuty',
+    'localTodayKey','getCaptainHistoricalOffTours',reportBody+
+    '\nreturn buildCaptainDailyReport;')(
+    ()=>({startDate:'2026-11-15',months:['2026-11'],tours:[
+      {startDate:'2026-11-15',endDate:'2026-11-16',
+       month:'2026-11',eligibleDates:['2026-11-15','2026-11-16']}] }),
+    ()=>({due:true,off:false,unknown:false,dutyDates:['2026-11-15']}),
+    ()=> '2026-11-15',()=>({schemaVersion:1,entries:{}})
+  );
+  const result=make({
+    checkId:'read-only-test',setId:'crew',setName:'Station 4',shift:'C',
+    auditAsOfDate:'2026-11-15',
+    owners:[{name:'Michael Brion',prefix:'P-BRION'},
+      {name:'Robert Brooks',prefix:'P-BROOKS'}],
+    discovery:[{name:'Robert Brooks',prefix:'P-BROOKS',
+      unknown:[],error:'Native PPE ownership unverified'}],
+    items:[{ownerPrefix:'P-BRION',assetId:'BRION-COAT',type:'Bunker Coat'}],
+    results:[{ownerPrefix:'P-BRION',assetId:'BRION-COAT',
+      status:'ok',tour:{dates:['2026-11-15']}}]
+  });
+  assert.equal(result.ownerCount,2);
+  assert.equal(result.owners[0].tourCheckOk,true);
+  assert.equal(result.owners[0].tourPassedCount,1);
+  assert.equal(result.owners[1].gearCount,0);
+  assert.equal(result.owners[1].compliant,false);
+  assert.equal(result.owners[1].allReadable,false);
+  assert.match(result.owners[1].discoveryError,/unverified/);
+});
+
+test('historical Captain grid retains an explicit visible person row for owners with zero verified gear',()=>{
+  const renderer=section('function showCaptainDailyReport(',
+    'function showCaptainDailySetPicker() {');
+  assert.match(renderer,/if \(!ownerItems\.length\) \{/);
+  assert.match(renderer,/person\.textContent=owner\.name\|\|owner\.prefix\|\|'Unknown'/);
+  assert.match(renderer,/PPE INVENTORY UNVERIFIED/);
+  assert.match(renderer,/NO VERIFIED EQUIPMENT LIST\. INSPECTION HISTORY UNKNOWN/);
+  assert.match(renderer,/placeholder\.append\(person,item,monthsUnknown\)/);
+  assert.match(renderer,/tbody\.appendChild\(placeholder\)/);
 });
