@@ -23,6 +23,7 @@ function renderMock({master=false,owner=false}={}){
  const run=new Function('document','PANEL_ID','panelInterfaceMode',
   'isMasterOwnerInstallation','refreshMasterAlertBadge','refreshInterfaceNotice','calls',
   'const showPpeCleanRepairForm=()=>{},launchCaptainDailyCheckFromAnywhere=()=>calls.push(\'full\'),'+
+  'getCaptainDailyReport=()=>null,showCaptainDailyReport=()=>calls.push(\'cached\'),'+
   'cPilotEligible=()=>true,showCShiftPilotBoard=(b,m)=>calls.push([\'quick\',b,m||\'bc\']),'+
   'showSharedMasterList=()=>{},showStation4ScbaAirpackCheck=()=>{},'+
   'showApparatusCheck=()=>{},showMasterErrorInbox=()=>{},'+

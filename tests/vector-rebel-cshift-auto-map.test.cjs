@@ -60,10 +60,23 @@ test('unconfirmed staffing never causes background inventory mapping or silent a
 test('when current gear is mapped the dedicated tab resumes targeted native rechecks without crawling',async()=>{
  const h=tickHarness({data:{activeTour:true,tourStart:'2026-11-21',
    people:[{name:'Michael Brion',attendance:'working',knownItems:10,
-     outstandingItems:3,nextItem:'A-01'}]}});
+     maskKnownItems:1,outstandingItems:3,nextItem:'A-01'}]}});
  assert.equal(await h.tick(),true);
  assert.equal(h.calls.mapped.length,0);
  assert.deepEqual(h.calls.rechecks,[true]);
+});
+test('mapped structural PPE with no mapped mask triggers one bounded mask inventory lookup',async()=>{
+ const h=tickHarness({state:{tourStart:'2026-11-21',nextAt:0},
+  data:{activeTour:true,tourStart:'2026-11-21',people:[
+   {name:'Michael Brion',attendance:'working',knownItems:10,
+    maskKnownItems:0,outstandingItems:3,nextItem:'A-01'}]}});
+ assert.equal(await h.tick(),true);
+ assert.deepEqual(h.calls.mapped,[['2026-11-21',true]]);
+ assert.equal(h.readState().lastMaskMapTour,'2026-11-21');
+ h.readState().nextAt=0;
+ await h.tick();
+ assert.equal(h.calls.mapped.length,1,'mask inventory must not repeatedly crawl');
+ assert.deepEqual(h.calls.rechecks,[true],'subsequent tick returns to normal native Item Log rotation');
 });
 test('a failed or pending auto-map has a per-tour cooldown to avoid repeated expensive full inventory scans',async()=>{
  const at=Date.now();

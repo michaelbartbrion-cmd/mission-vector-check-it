@@ -16,8 +16,9 @@ const names=['Michael Baldree','Michael Brion','Jerry Weems','Jared Weston',
 const fixture={ok:true,readOnly:true,scope:'c-shift-ppe-pilot',
  shift:'C',tourStart:'2026-11-21',tourEnd:'2026-11-22',activeTour:true,
  latestCompletedTourStart:'2026-11-15',historicalTour:false,historicalEligible:false,
- totals:{crew:7,knownItems:3,verifiedItems:1,outstandingItems:2},
- outstandingOnDuty:2,workingCrew:1,offCrew:1,unconfirmedCrew:5,
+ totals:{crew:7,knownItems:4,verifiedItems:1,outstandingItems:3,
+   maskKnownItems:1,maskVerifiedItems:1,maskOutstandingItems:0},
+ outstandingOnDuty:3,workingCrew:1,offCrew:1,unconfirmedCrew:5,
  cadenceMinutes:2,lastUpdateAt:'2026-11-21T14:00:00Z',
  lastPpeVerificationAt:'2026-11-21T14:00:00Z',
  lastStaffingUpdateAt:'2026-11-21T14:01:00Z',
@@ -25,33 +26,43 @@ const fixture={ok:true,readOnly:true,scope:'c-shift-ppe-pilot',
   attendance:i===0?'working':i===1?'off':'unconfirmed',
   dutyDay1:i===0?'working':i===1?'off':'unconfirmed',
   dutyDay2:i===0?'working':i===1?'off':'unconfirmed',
-  knownItems:i===0?3:0,verifiedItems:i===0?1:0,
-  outstandingItems:i===0?2:0,nextItem:i===0?'A-001':'',
+  knownItems:i===0?4:0,verifiedItems:i===0?1:0,
+  outstandingItems:i===0?3:0,nextItem:i===0?'A-001':'',
+  maskKnownItems:i===0?1:0,maskVerifiedItems:i===0?1:0,
+  maskOutstandingItems:0,
+  maskGear:i===0?[{assetId:'MASK-001',assetType:'SCBA Face Mask',
+    inspectionMode:'scbaTour',status:'verified',
+    nativeCompletionDate:'2026-11-21'}]:[],
   gear:i===0?[
-   {assetId:'A-001',assetType:'Coat',status:'verified',
+   {assetId:'A-001',assetType:'Bunker Coat',status:'verified',
     nativeCompletionDate:'2026-11-21',lastVerifiedAt:'2026-11-21T14:00:00Z'},
-   {assetId:'B-002',assetType:'Pants',status:'not_yet_verified',
+   {assetId:'B-002',assetType:'Bunker Pant',status:'not_yet_verified',
     lastReadResult:'read_ok',lastReadAt:'2026-11-21T14:00:00Z'},
-   {assetId:'C-003',assetType:'Helmet',status:'not_yet_verified',
-    lastReadResult:'unreadable',lastAttemptAt:'2026-11-21T14:01:00Z'}
-  ]:i===1?[{assetId:'OFF-04',assetType:'Boots',status:'not_yet_verified'}]:[]}))};
+   {assetId:'C-003',assetType:'Structural Helmet',status:'not_yet_verified',
+    lastReadResult:'unreadable',lastAttemptAt:'2026-11-21T14:01:00Z'},
+   {assetId:'EXTRA-01',assetType:'Wildland Helmet',status:'not_yet_verified'}
+  ]:i===1?[{assetId:'OFF-04',assetType:'Structural Boot',status:'not_yet_verified'}]:[]}))};
 const js=`
 (function(){
 const FIXTURE=__DATA__,requests=[],STORE=new Map(),SESSION=new Map();
 const location={origin:'https://app.vectorcheckit.us',href:'https://app.vectorcheckit.us/main/asset-manager'};
+const SCBA_FACE_MASK_POOL='299947',getMode=()=>({templates:{'299947':'119122'}});
 window.__scanCount=0;
 let HIST_DUTY=null;
+let CAPTAIN_REPORT={schemaVersion:8,generatedAt:'2026-11-18T15:00:00Z'};
 const sessionStorage={getItem:k=>SESSION.has(k)?SESSION.get(k):null,
  setItem:(k,v)=>SESSION.set(k,String(v)),removeItem:k=>SESSION.delete(k)};
 let cVisible=true;const TAB_ID='smoke-cshift-tab',getRun=()=>null,
- getCaptainDailyCheck=()=>null,getCaptainDailyReport=()=>null,
- showCaptainDailyReport=()=>{},panelInterfaceMode=()=> 'master',
+ getCaptainDailyCheck=()=>null,
+ getCaptainDailyReport=()=>CAPTAIN_REPORT,
+ showCaptainDailyReport=report=>{window.__historyOpened=report.generatedAt;},
+ panelInterfaceMode=()=> 'master',
  localTodayKey=()=> '2026-11-21',
  ensurePpeEquipmentPage=async()=>true,
  scanPpeCrewOwners=async()=>{window.__scanCount++;
   return{items:[{ownerName:'Michael Baldree',assetId:'A-001',type:'Coat',
-   pool:'300082',itemId:'4605913',
-   url:'https://app.vectorcheckit.us/app/equipment/PPE/pool/300082/4605913/item?source=assetManager&sourceTab=PPE'}]};},
+   pool:'300045',itemId:'4605913',
+   url:'https://app.vectorcheckit.us/app/equipment/PPE/pool/300045/4605913/item?source=assetManager&sourceTab=PPE'}]};},
  masterNameKey=x=>String(x||'').toLowerCase(),
  inferRegularTourWindow=()=>({isActiveTour:true,startDate:'2026-11-21'}),
  saveCaptainDailyCheck=check=>{window.__nativePilotCheck=check;},
@@ -132,6 +143,20 @@ const cShiftMasterOwner=()=>true,
       throw Error('Working/off duty counts missing');
   }
   const user=overlays[0],master=overlays[1];
+  if(user.textContent.includes('Background reader:')||
+      user.textContent.includes('Native direct item links:'))
+    throw Error('Ordinary C-shift user was shown collector diagnostics');
+  if(!master.querySelector('[data-cshift-reader-status]')?.textContent.includes('Background reader:'))
+    throw Error('Master owner lost detailed collector status');
+  if(master.querySelector('[data-cshift-reader-status]')?.parentElement?.parentElement?.open)
+    throw Error('Owner troubleshooting is expanded by default');
+  const history=[...master.querySelectorAll('button')]
+    .find(x=>x.textContent==='2-Month PPE History');
+  if(!history||!history.title.includes('Snapshot only'))
+    throw Error('BC does not expose stored two-month PPE trend history prominently');
+  history.click();
+  if(window.__historyOpened!=='2026-11-18T15:00:00Z')
+    throw Error('History control did not open the original source audit');
   // An ordinary user's roster can include the full crew. BC gets only
   // confirmed workers in its MAIN summary, not all OFF/unknown firefighters.
   if(user.querySelector('table').querySelectorAll('tr').length!==8)
@@ -173,7 +198,7 @@ const cShiftMasterOwner=()=>true,
   const mapped=requests.find(x=>x.url.includes('vr-ppe-pilot-inventory'));
   if(!mapped||mapped.data.personName!=='Michael Baldree'||
       mapped.data.items.length!==1||
-      mapped.data.items[0].assetPath!=='/app/equipment/PPE/pool/300082/4605913/item')throw Error('Scoped PPE map not delivered: '+String(window.__nativeStatus)+'; requests='+requests.map(x=>x.url).join(','));
+      mapped.data.items[0].assetPath!=='/app/equipment/PPE/pool/300045/4605913/item')throw Error('Scoped PPE map not delivered: '+String(window.__nativeStatus)+'; requests='+requests.map(x=>x.url).join(','));
   const monitor=[...master.querySelectorAll('button')].find(x=>x.textContent.includes('Monitor C Shift in This Tab'));
   if(!monitor)throw Error('Dedicated-tab monitoring button not found');
   const scansAfterMap=window.__scanCount;
@@ -188,10 +213,29 @@ const cShiftMasterOwner=()=>true,
   const session=JSON.parse(SESSION.get('vectorRebelCShiftDedicatedRecheckerV1')||'null');
   if(!session?.enabled||session.tourStart!=='2026-11-21')
     throw Error('Dedicated monitor not bound to one C-shift tour');
-  if(window.__nativePilotCheck.items[0].pool!=='300082'||
+  if(window.__nativePilotCheck.items[0].pool!=='300045'||
      window.__nativePilotCheck.items[0].itemId!=='4605913')
     throw Error('Direct native PPE target did not preserve exact pool and item identity');
+  monitor.click(); // Stop structural PPE read before testing the mask path.
+  // Same background reader must be able to select the separate native
+  // seven-question mask template from the server's rotation, not reuse
+  // the structural PPE questionnaire.
+  FIXTURE.people[0].nextRequiredItem='MASK-001';
+  FIXTURE.people[0].nextRequiredMode='scbaTour';
+  FIXTURE.people[0].nextRequiredPath='/app/equipment/PPE/pool/299947/4605914/item';
+  monitor.click();
+  await new Promise(r=>setTimeout(r,110));
+  const maskTarget=window.__nativePilotCheck?.items?.[0];
+  if(!maskTarget||maskTarget.assetId!=='MASK-001'||
+     maskTarget.pool!=='299947'||maskTarget.template!=='119122'||
+     maskTarget.inspectionModeKey!=='scbaTour')
+    throw Error('Background reader did not route SCBA mask to exact native Tour form');
+  if(window.__scanCount!==scansAfterMap)
+    throw Error('Mask native target unnecessarily rescanned the whole crew');
   monitor.click(); // Stop live monitor before switching to the completed tour.
+  delete FIXTURE.people[0].nextRequiredItem;
+  delete FIXTURE.people[0].nextRequiredMode;
+  delete FIXTURE.people[0].nextRequiredPath;
   const picker=master.querySelector('select[aria-label="Select C shift tour"]');
   if(!picker||![...picker.options].some(x=>x.value==='2026-11-15'))
     throw Error('Last completed C tour November 15-16 is missing');
@@ -239,9 +283,14 @@ const cShiftMasterOwner=()=>true,
   const captain=[...document.querySelectorAll('.pilot-overlay')].at(-1);
   if(!captain.textContent.includes('Daily Captain Check'))
     throw Error('Captain-specific full gear screen missing');
+  if(captain.textContent.includes('EXTRA-01'))
+    throw Error('Previously stored supplemental gear leaked into Captain routine view');
   const itemRows=[...captain.querySelector('table').querySelectorAll('tr')];
-  if(itemRows.length!==10)
-    throw Error('Captain gear grid did not include each known item and all seven firefighters: '+itemRows.length);
+  if(itemRows.length!==12)
+    throw Error('Captain gear grid did not include each required item and all seven firefighters: '+itemRows.length);
+  if(!captain.textContent.includes('MASK-001')||
+      !captain.textContent.includes('SCBA Face Mask'))
+    throw Error('Captain routine report lost separately verified SCBA face mask');
   if(!captain.textContent.includes('A-001')||
      !captain.textContent.includes('B-002')||
      !captain.textContent.includes('C-003')||
@@ -250,12 +299,45 @@ const cShiftMasterOwner=()=>true,
      !captain.textContent.includes('? UNREADABLE'))
     throw Error('Captain full PPE grid has missing statuses or source data');
   const bcFinal=[...master.querySelector('table').querySelectorAll('tr')];
+  if(!bcFinal.some(row=>row.textContent.includes('1 / 3')))
+    throw Error('BC counts still include supplemental PPE');
+  if(!master.querySelector('[data-cshift-excluded]')?.textContent.includes('1 stored supplemental PPE'))
+    throw Error('Master diagnostics do not show legacy extra-record count');
   if(bcFinal.length!==6)
     throw Error('BC summary should show only the five confirmed working firefighters: '+bcFinal.length);
   if(bcFinal.some(row=>/Weston|Brooks/.test(row.textContent)))
     throw Error('BC summary displayed off-duty firefighters');
   if([...master.querySelectorAll('button')].filter(b=>b.parentElement?.parentElement===master.querySelector('section')).length>4)
     throw Error('Too many primary buttons in battalion view');
+  // The shared C-pilot has the seven regular crew; a one-day guest from
+  // the officer's saved native Captain report is shown only on their
+  // assigned day, without counting native checks on the next day.
+  CAPTAIN_REPORT={
+    schemaVersion:8,generatedAt:'2026-11-21T18:00:00Z',
+    tourRoster:{startDate:'2026-11-21',endDate:'2026-11-22',
+      basePrefixes:['PERSON-0'],swingPrefixes:['GUEST-01'],
+      onByDate:{'2026-11-21':['PERSON-0','GUEST-01'],
+                '2026-11-22':['PERSON-0']}},
+    owners:[{name:'Visiting Firefighter',prefix:'GUEST-01',
+      items:[
+      {assetId:'G-COAT',type:'Bunker Coat',inspectionModeKey:'tour',
+       status:'ok',tourChecks:[{startDate:'2026-11-21',ok:true,date:'2026-11-21'}]},
+      {assetId:'G-PANTS',type:'Bunker Pant',inspectionModeKey:'tour',
+       status:'ok',tourChecks:[{startDate:'2026-11-21',ok:true,date:'2026-11-22'}]},
+      {assetId:'G-MASK',type:'SCBA Face Mask',inspectionModeKey:'scbaTour',
+       status:'ok',tourChecks:[{startDate:'2026-11-21',ok:true,date:'2026-11-21'}]}
+      ]}]};
+  showCShiftPilotBoard(true);
+  await new Promise(r=>setTimeout(r,125));
+  const guestBc=[...document.querySelectorAll('.pilot-overlay')].at(-1);
+  const guestRow=[...guestBc.querySelectorAll('table tr')].find(x=>
+      x.textContent.includes('Visiting Firefighter'));
+  if(!guestRow||!guestRow.textContent.includes('WORKING 2026-11-21')||
+      !guestRow.textContent.includes('1 / 2')||
+      !guestRow.textContent.includes('Mask 1 / 1')||
+      guestRow.textContent.includes('2026-11-22'))
+    throw Error('BC other-shift visitor not displayed with exact one-day native check');
+  CAPTAIN_REPORT={schemaVersion:8,generatedAt:'2026-11-18T15:00:00Z'};
   // No captain-confirmed workers is not "all clear" or seven misleading
   // BC equipment rows. The empty state must explicitly request staffing.
   for(const row of FIXTURE.people){
