@@ -14,14 +14,15 @@ function harness(){
    req.onload({status:200,responseText:JSON.stringify(
     req.url.includes('vr-ppe-pilot-recheck')?{ok:true,scope:'c-shift-ppe-pilot-recheck',assetId:arg.assetId,verified:true}:
     req.url.includes('completion')?{ok:true,accepted:true,scope:'c-shift-ppe-pilot',assetId:arg.assetId}:
+    req.url.includes('vr-ppe-pilot-inventory')?{ok:true,readOnly:true,scope:'c-shift-ppe-pilot-inventory',personName:arg.personName,knownItems:arg.items.length}:
     {ok:true,readOnly:true,scope:'c-shift-ppe-pilot',shift:'C',people:Array.from({length:7},(_,i)=>({name:i===0?'Michael Brion':'Other '+i,knownItems:0,verifiedItems:0,outstandingItems:0})),
      totals:{knownItems:0,verifiedItems:0,outstandingItems:0},activeTour:true,tourStart:'2026-11-21',lastUpdateAt:'',cadenceMinutes:2}
    )});
  };
  const api=new Function('isMasterOwnerInstallation','getConfig','clean','loadJSON','saveJSON','getActiveMasterRoster',
  'rebelCommandPaired','ensureRebelCommandEnrollment','rebelCommandPairing','GM_xmlhttpRequest','REBEL_COMMAND_ENDPOINT',
- 'document','makeOverlayBox','makeButton','location',segment+
- '\nreturn {queue:cPilotQueueNativeCompletion,pending:cPilotPending,flush:cPilotFlushReceipts,fetch:cPilotFetch,show:showCShiftPilotBoard,queueReadOnly:cPilotQueueReadOnlyResults,nativePath:cPilotNativePath,directTarget:cPilotDirectTarget};')(
+ 'document','makeOverlayBox','makeButton','location','inferRegularTourWindow',segment+
+ '\nreturn {queue:cPilotQueueNativeCompletion,queueInventory:cPilotQueueScopedInventory,pending:cPilotPending,flush:cPilotFlushReceipts,fetch:cPilotFetch,show:showCShiftPilotBoard,queueReadOnly:cPilotQueueReadOnlyResults,nativePath:cPilotNativePath,directTarget:cPilotDirectTarget};')(
  ()=>true,()=>({inspectorName:'Michael Brion'}),
  x=>String(x||'').trim(),
  (key,fallback)=>store.has(key)?store.get(key):fallback,
@@ -30,18 +31,22 @@ function harness(){
  bridge,'https://example.test/bridge',
  {querySelector:()=>null},()=>({overlay:{remove(){}},box:{append(){}}}),
  ()=>({onclick:null}),
- {origin:'https://app.vectorcheckit.us',href:'https://app.vectorcheckit.us/main/asset-manager'}
+ {origin:'https://app.vectorcheckit.us',href:'https://app.vectorcheckit.us/main/asset-manager'},
+ ()=>({isActiveTour:true,startDate:'2026-11-21'})
  );
  return{...api,store,events};
 }
 test('native Item Log confirmation enqueues known PPE, sends one C-shift receipt and clears after server acknowledgement',async()=>{
  const h=harness();
  const run={runId:'ppe-42',modeKey:'tour',ownerName:'Michael Brion',
-  items:[{assetId:'500-01',type:'Coat',ownerName:'Michael Brion'},
-   {assetId:'500-02',type:'Pants',ownerName:'Michael Brion'}],
+  items:[{assetId:'500-01',type:'Coat',ownerName:'Michael Brion',pool:'300045'},
+   {assetId:'500-02',type:'Pants',ownerName:'Michael Brion',pool:'300036'}],
   discoverySnapshots:[{ownerName:'Michael Brion',prefix:'PERSON-0DCD2AB48E2A5588',
-   items:[{assetId:'500-01',type:'Coat'},{assetId:'500-02',type:'Pants'},
-   {assetId:'500-03',type:'Helmet'},{assetId:'600-01',type:'SCBA Face Mask'}]}]};
+   items:[{assetId:'500-01',type:'Coat',pool:'300045'},
+    {assetId:'500-02',type:'Pants',pool:'300036'},
+    {assetId:'500-03',type:'Helmet',pool:'299882'},
+    {assetId:'600-01',type:'SCBA Face Mask',pool:'299947'},
+    {assetId:'700-01',type:'Wildland Helmet',pool:'300006'}]}]};
  const item=run.items[0];
  assert.equal(h.queue(run,item,'itemlog-confirmed-plus-one-0-to-1-key-abc123'),true);
  await new Promise(resolve=>setImmediate(resolve));
@@ -53,8 +58,34 @@ test('native Item Log confirmation enqueues known PPE, sends one C-shift receipt
  assert.equal(sent.assetId,'500-01');assert.equal(sent.items.length,3);
  assert.ok(sent.items.some(x=>x.assetId==='500-03'));
  assert.ok(!sent.items.some(x=>x.assetId==='600-01'));
+ assert.ok(!sent.items.some(x=>x.assetId==='700-01'));
  assert.equal(sent.evidence,'itemlog-confirmed-plus-one-0-to-1-key-abc123');
  assert.ok(!('failureNote' in sent));
+});
+test('background C-shift inventory only transmits routine Tour PPE, never assigned supplemental gear or SCBA mask',async()=>{
+ const h=harness(),base='https://app.vectorcheckit.us/app/equipment/PPE/pool/';
+ const items=[
+  {assetId:'COAT-1',type:'Bunker Coat',pool:'300045',url:base+'300045/11/item'},
+  {assetId:'PANTS-1',type:'Bunker Pants',pool:'300036',url:base+'300036/12/item'},
+  {assetId:'MASK-1',type:'SCBA Face Mask',pool:'299947',url:base+'299947/13/item',inspectionModeKey:'scbaTour'},
+  {assetId:'WILD-1',type:'Wildland Helmet',pool:'300006',url:base+'300006/14/item'},
+  {assetId:'DUAL-1',type:'Dual Certification Coat',pool:'299896',url:base+'299896/15/item'},
+  {assetId:'WRONG-1',type:'Other PPE',pool:'300082',url:base+'300082/16/item'}
+ ];
+ const accepted=h.queueInventory([{ownerName:'Michael Brion',prefix:'PERSON-0DCD2AB48E2A5588',items}],
+  '2026-11-21T15:00:00Z','2026-11-21');
+ assert.equal(accepted,1);
+ await new Promise(resolve=>setImmediate(resolve));
+ await h.flush();
+ const posts=h.events.filter(e=>e.url.includes('vr-ppe-pilot-inventory'));
+ assert.equal(posts.length,1,'one scoped inventory POST only');
+ const sent=JSON.parse(posts[0].data);
+ assert.deepEqual(sent.items.map(x=>x.assetId),['COAT-1','PANTS-1']);
+ assert.deepEqual(sent.items.map(x=>x.assetPath),[
+  '/app/equipment/PPE/pool/300045/11/item',
+  '/app/equipment/PPE/pool/300036/12/item'
+ ]);
+ assert.equal(h.pending().length,0,'acknowledged inventory is removed');
 });
 test('non-confirmed fallback and other-shift users never emit a completion receipt',()=>{
  const h=harness();
@@ -116,19 +147,21 @@ test('recheck is only available through confirmed-working Master, never through 
 });
 test('BC pilot uses only same-origin cached native PPE paths and preserves exact pool/item identity',()=>{
  const h=harness();
- const good='https://app.vectorcheckit.us/app/equipment/PPE/pool/300082/4605913/item?source=assetManager&sourceTab=PPE';
- const path='/app/equipment/PPE/pool/300082/4605913/item';
+ const good='https://app.vectorcheckit.us/app/equipment/PPE/pool/300045/4605913/item?source=assetManager&sourceTab=PPE';
+ const path='/app/equipment/PPE/pool/300045/4605913/item';
  assert.equal(h.nativePath(good),path);
  assert.equal(h.nativePath('https://evil.example/app/equipment/PPE/pool/300082/4605913/item'),'');
  assert.equal(h.nativePath('javascript:alert(1)'),'');
  assert.equal(h.nativePath('/app/equipment/PPE/pool/../../secret'),'');
  const direct=h.directTarget({name:'Michael Brion',prefix:'PERSON-0DCD2AB48E2A5588',
   attendance:'working',nextItem:'BRION-4111218',nextItemPath:path});
- assert.equal(direct.pool,'300082');assert.equal(direct.itemId,'4605913');
+ assert.equal(direct.pool,'300045');assert.equal(direct.itemId,'4605913');
  assert.equal(direct.assetId,'BRION-4111218');
  assert.equal(direct.url,good);
  assert.equal(h.directTarget({name:'Michael Brion',attendance:'off',nextItem:'BRION-4111218',nextItemPath:path}),null);
  assert.equal(h.directTarget({name:'Michael Brion',attendance:'working',nextItem:'BRION-4111218',nextItemPath:'https://evil.example/steal'}),null);
+ assert.equal(h.directTarget({name:'Michael Brion',attendance:'working',nextItem:'BRION-4111218',nextItemPath:'/app/equipment/PPE/pool/300082/4605913/item'}),null,
+   'supplemental equipment is excluded from background C pilot');
 });
 test('dedicated BC monitor will not repeat a full crew equipment crawl when stored links are absent',()=>{
  assert.match(src,/if\(dedicated&&!directReady\)\{/);

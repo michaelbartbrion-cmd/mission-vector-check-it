@@ -52,8 +52,8 @@ let cVisible=true;const TAB_ID='smoke-cshift-tab',getRun=()=>null,
  ensurePpeEquipmentPage=async()=>true,
  scanPpeCrewOwners=async()=>{window.__scanCount++;
   return{items:[{ownerName:'Michael Baldree',assetId:'A-001',type:'Coat',
-   pool:'300082',itemId:'4605913',
-   url:'https://app.vectorcheckit.us/app/equipment/PPE/pool/300082/4605913/item?source=assetManager&sourceTab=PPE'}]};},
+   pool:'300045',itemId:'4605913',
+   url:'https://app.vectorcheckit.us/app/equipment/PPE/pool/300045/4605913/item?source=assetManager&sourceTab=PPE'}]};},
  masterNameKey=x=>String(x||'').toLowerCase(),
  inferRegularTourWindow=()=>({isActiveTour:true,startDate:'2026-11-21'}),
  saveCaptainDailyCheck=check=>{window.__nativePilotCheck=check;},
@@ -182,7 +182,7 @@ const cShiftMasterOwner=()=>true,
   const mapped=requests.find(x=>x.url.includes('vr-ppe-pilot-inventory'));
   if(!mapped||mapped.data.personName!=='Michael Baldree'||
       mapped.data.items.length!==1||
-      mapped.data.items[0].assetPath!=='/app/equipment/PPE/pool/300082/4605913/item')throw Error('Scoped PPE map not delivered: '+String(window.__nativeStatus)+'; requests='+requests.map(x=>x.url).join(','));
+      mapped.data.items[0].assetPath!=='/app/equipment/PPE/pool/300045/4605913/item')throw Error('Scoped PPE map not delivered: '+String(window.__nativeStatus)+'; requests='+requests.map(x=>x.url).join(','));
   const monitor=[...master.querySelectorAll('button')].find(x=>x.textContent.includes('Monitor C Shift in This Tab'));
   if(!monitor)throw Error('Dedicated-tab monitoring button not found');
   const scansAfterMap=window.__scanCount;
@@ -197,7 +197,7 @@ const cShiftMasterOwner=()=>true,
   const session=JSON.parse(SESSION.get('vectorRebelCShiftDedicatedRecheckerV1')||'null');
   if(!session?.enabled||session.tourStart!=='2026-11-21')
     throw Error('Dedicated monitor not bound to one C-shift tour');
-  if(window.__nativePilotCheck.items[0].pool!=='300082'||
+  if(window.__nativePilotCheck.items[0].pool!=='300045'||
      window.__nativePilotCheck.items[0].itemId!=='4605913')
     throw Error('Direct native PPE target did not preserve exact pool and item identity');
   monitor.click(); // Stop live monitor before switching to the completed tour.

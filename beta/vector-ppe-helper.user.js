@@ -7343,11 +7343,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         unknown: (found.unknown || []).map(item => item.assetId),
                         error: ''
                     });
-                    (found.items || []).forEach(item => items.push({
-                        ...item,
-                        ownerName: owner.name,
-                        ownerPrefix: owner.prefix
-                    }));
+                    // A Captain historical audit reads only equipment that
+                    // actually requires the Tour PPE or face-mask check.
+                    // Other assigned equipment remains out of scope.
+                    (found.items || []).filter(captainTourRequiredItem)
+                        .forEach(item => items.push({
+                            ...item,ownerName:owner.name,ownerPrefix:owner.prefix
+                        }));
                 } catch (error) {
                     discovery.push({ name: owner.name, prefix: owner.prefix, unknown: [], error: error.message });
                 }
@@ -16250,6 +16252,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             return false;
         }finally{cPilotSending=false;}
     }
+    // The existing Rebel Command pilot supports structural Tour PPE only.
+    // Do not put other assigned PPE or the separate SCBA face mask into
+    // its manifest until the backend supports scbaTour explicitly.
+    function cPilotRoutinePool(pool){
+        return ['300045','300036','299879','299882','299900','299881']
+            .includes(clean(pool));
+    }
     function cPilotNativePath(raw){
         const value=clean(raw);
         if(!value)return '';
@@ -16263,7 +16272,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     function cPilotDirectTarget(row){
         const path=clean(row?.nextItemPath);
         const match=path.match(/^\/app\/equipment\/PPE\/pool\/([0-9]+)\/([0-9]+)\/item$/);
-        if(!match||!row?.nextItem||row?.attendance!=='working')return null;
+        if(!match||!cPilotRoutinePool(match[1])||
+            !row?.nextItem||row?.attendance!=='working')return null;
         return{assetId:row.nextItem,ownerName:row.name,
             ownerPrefix:row.prefix,inspectionModeKey:'tour',
             type:'PPE',pool:match[1],itemId:match[2],
@@ -16288,6 +16298,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 clean(p.prefix).toUpperCase()===clean(entry.prefix).toUpperCase());
             if(!person?.prefix)continue;
             const gear=(entry.items||[]).filter(item=>
+                cPilotRoutinePool(item.pool)&&
                 item.inspectionModeKey!=='scbaTour'&&
                 !/scba|airpack|face mask/i.test(clean(item.type||'')+' '+clean(item.pool||'')))
                 .map(item=>({assetId:clean(item.assetId),type:clean(item.type||''),
@@ -16341,6 +16352,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             sourceSnapshot.items:(run.items||[]).filter(x=>
                 clean(x.ownerName||run.ownerName).toLowerCase()===ownerName.toLowerCase());
         const gear=sourceItems.filter(x=>
+                cPilotRoutinePool(x.pool)&&
                 x.inspectionModeKey!=='scbaTour'&&
                 !/scba|airpack|face mask/i.test(clean(x.type||'')+' '+clean(x.pool||'')))
             .map(x=>({assetId:clean(x.assetId),type:clean(x.type||''),
