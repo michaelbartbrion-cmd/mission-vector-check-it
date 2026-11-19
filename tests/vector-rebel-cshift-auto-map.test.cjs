@@ -29,7 +29,8 @@ function tickHarness(input={}){
      calls.rechecks.push(dedicated);return input.startResult??true;
    },
    cPilotMapWorkingGear:async (...args)=>{
-     calls.mapped.push(args);return input.mapResult??true;
+     calls.mapped.push(args);
+     return input.mapFn?input.mapFn(...args):input.mapResult??true;
    }
  };
  const keys=Object.keys(deps);
@@ -145,4 +146,15 @@ test('Captain and BC distinguish armed monitoring from an actual native Item Log
  assert.match(src,/READING NATIVE ITEM LOGS/);
  assert.match(src,/ARMED \(next native read pending\)/);
  assert.doesNotMatch(src,/SIGNED-IN TAB ACTIVE/);
+});
+
+test('integration: armed tab enters new C tour and uses the actual read-only inventory mapper without a prompt',async()=>{
+ const inventory=mapHarness({working:true,mode:'user'});
+ const monitor=tickHarness({mapFn:inventory.map});
+ assert.equal(await monitor.tick(),true);
+ assert.deepEqual(monitor.calls.mapped,[['2026-11-21',true]]);
+ assert.equal(inventory.calls.scans,1);
+ assert.equal(inventory.calls.queued,1);
+ assert.equal(inventory.calls.confirm,0);
+ assert.equal(monitor.calls.rechecks.length,0);
 });
