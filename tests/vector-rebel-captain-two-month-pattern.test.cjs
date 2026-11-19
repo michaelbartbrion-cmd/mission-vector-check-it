@@ -42,5 +42,7 @@ test('Captain and BC both offer the same existing two-month audit with no automa
 test('historical report contains no AI scoring, repeat flags or diagnosis',()=>{
  assert.doesNotMatch(src,/captainTwoMonthItemPattern/);
  assert.doesNotMatch(report,/NEEDS REVIEW|ALL DUE TOUR CHECKS COMPLETE|2-month pattern:/);
- assert.match(report,/Audit through/);
+ assert.match(report,/Last Item Log read/);
+ assert.match(report,/data-captain-work-row/);
+ assert.match(report,/Collection details \/ diagnostics/);
 });

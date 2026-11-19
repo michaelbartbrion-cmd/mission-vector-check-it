@@ -84,6 +84,15 @@ const js=String.raw`
    if(!miniBadge||miniBadge.textContent!=='1'||miniBadge.style.display!=='flex')
       throw Error('Master error count not visible in minimized badge');
    result.numericAlertBadge=true;
+   cachedHistory=true;
+   const masterCaptain=[...document.querySelectorAll(
+       '[data-vector-ppe-actions] button')]
+       .find(b=>b.textContent==='Daily Captain Check');
+   masterCaptain.click();
+   if(historyShown!==1||nativeHistoryStarted!==0)
+      throw Error('Master Captain did not open the existing two-month history');
+   cachedHistory=false;
+   result.masterCaptainHistory=true;
    setStatus('SCBA handoff stopped: unexpected form',false);
    updateMinimizedPanelBadge();
    if(miniBadge.textContent!=='!')throw Error('Local failure badge not visible');
@@ -124,7 +133,7 @@ const js=String.raw`
    if(switcher.style.display!=='none')throw Error('Non-admin can see Master toggle');
    const captain=button('Daily Captain Check');
    cachedHistory=true;captain.click();
-   if(historyShown!==1||nativeHistoryStarted!==0)
+   if(historyShown!==2||nativeHistoryStarted!==0)
       throw Error('Ordinary Captain unnecessarily scans despite cached two-month history');
    cachedHistory=false;captain.click();
    if(nativeHistoryStarted!==1)

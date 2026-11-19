@@ -71,14 +71,16 @@ function run(h){
 function item(report,owner,asset){
  return report.owners.find(x=>x.prefix===owner).items.find(i=>i.assetId===asset);
 }
-test('a swing person real historical inspection remains green, without retroactive due',()=>{
+test('a swing on another shift does not show other-shift historic checks in this Captain view',()=>{
  const h=harness(),r=run(h);
  const checked=item(r,weems.prefix,'W-1').tourChecks[0];
  assert.equal(checked.due,false);
  assert.equal(checked.off,false);
  assert.equal(checked.notAssigned,true);
- assert.equal(checked.ok,true);
- assert.equal(checked.date,'2026-11-09');
+ assert.equal(checked.ok,false);
+ assert.equal(checked.date,'');
+ assert.deepEqual(item(r,weems.prefix,'W-1').tourDates,['2026-11-09'],
+  'raw native history remains stored without being displayed on an unassigned tour');
  const owner=r.owners.find(x=>x.prefix===weems.prefix);
  assert.equal(owner.tourRequirementCount,2,
    'only current due tour requires the two items');

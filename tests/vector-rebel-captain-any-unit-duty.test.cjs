@@ -139,7 +139,7 @@ test('old Different shift / other captain note no longer creates exemption',()=>
  const h=setup(manual);
  assert.equal(h.duty(bob,tour,window,roster,{},null).due,true);
 });
-test('swing past uninspected tours are blank and verified past native checks stay green',()=>{
+test('other-shift swing shows only selected duty-day check, not earlier other-shift checks',()=>{
  const {h,report}=checkResult([...work(bob.name),...work(swing.name)]);
  const swingRow=report.owners.find(o=>o.prefix==='CASHMAN');
  const pants=swingRow.items.find(x=>x.assetId==='CASHMAN-P');
@@ -150,8 +150,10 @@ test('swing past uninspected tours are blank and verified past native checks sta
  assert.equal(coat.tourChecks[0].off,false);
  assert.equal(coat.tourChecks[0].notAssigned,true);
  assert.equal(pants.tourChecks[0].due,false);
- assert.equal(pants.tourChecks[0].ok,true);
- assert.equal(pants.tourChecks[0].date,'2026-10-10');
+ assert.equal(pants.tourChecks[0].ok,false);
+ assert.equal(pants.tourChecks[0].date,'');
+ assert.equal(pants.tourDates[0],'2026-10-10',
+  'native evidence is retained but not attributed to this Captain tour');
  assert.equal(coat.tourChecks[1].due,true);
  assert.ok(!h.missing(report).some(x=>x.assetId==='CASHMAN-C'&&
    !coat.tourChecks[1].due),'past swing tour is never missing');
