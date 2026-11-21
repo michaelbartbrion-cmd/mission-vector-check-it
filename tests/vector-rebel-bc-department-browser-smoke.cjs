@@ -79,12 +79,25 @@ const pilot={activeTour:true,tourStart:'2026-11-21',tourEnd:'2026-11-22',people:
  {name:'Jerry Weems',prefix:'PERSON-WEEMS',dutyDay1:'off',
   lastDutyConfirmedAt:'2026-11-21T15:00:00Z'}
 ]};
-let requests=0,monitorOpened=0;
+let requests=0,attendanceRequests=0,monitorOpened=0;
 const cPilotBridge=async(method,action,data,query)=>{
- if(method!=='GET'||action!=='vr-bc-department-roster'||query.date!=='2026-11-21')
-  throw Error('Unexpected BC network call');
- requests++;
- return scheduled;
+ if(method!=='GET')throw Error('Unexpected method');
+ if(action==='vr-bc-department-roster'){
+  if(query.date!=='2026-11-21')throw Error('Wrong roster date');
+  requests++;return scheduled;
+ }
+ if(action==='vr-captain-attendance'){
+  attendanceRequests++;
+  const dates=query.dates.split(','),people=JSON.parse(query.people);
+  return{ok:true,readOnly:true,scope:'captain-attendance-evidence',
+   records:people.flatMap(name=>dates.map(date=>({
+    name,date,sourceQuality:'good_direct_capture',
+    status:name==='Nicole Duncan'&&['2026-10-27','2026-10-28'].includes(date)?
+     'full_leave_evidence':name==='Austin Fox'&&date==='2026-10-27'?
+     'work_evidence':'unknown'
+   })))};
+ }
+ throw Error('Unexpected BC network call '+action);
 };
 const cPilotFetch=async()=>pilot;
 const showCShiftPilotBoard=()=>{monitorOpened++};
@@ -108,9 +121,18 @@ try{
  if(!headers.includes('October 2026')||!headers.includes('November 2026')||
     !headers.includes('10-27 / 10-28')||!headers.includes('11-27 / 11-28'))
    throw Error('BC did not show both full calendar months');
- const body=[...table.querySelectorAll('tr')].slice(2);
- if(!body[0]?.textContent.includes('Steven Beagle'))
-   throw Error('BC must sort Battalion 501 before station crews');
+ const grouped=[...table.querySelectorAll('tr[data-bc-station-group]')];
+ if(grouped[0]?.getAttribute('data-bc-station-group')!=='BC'||
+    grouped[1]?.getAttribute('data-bc-station-group')!=='Station 1')
+   throw Error('BC must lead station groups, followed by Station 1');
+ if(!grouped[0].nextElementSibling?.textContent.includes('Steven Beagle'))
+   throw Error('BC station group must list Battalion 501 first');
+ const nicole=[...table.querySelectorAll('tr')].find(x=>x.textContent.includes('Nicole Duncan'));
+ if(!nicole||!nicole.textContent.includes('OFF'))
+   throw Error('Trusted two-day CrewSense leave evidence did not show OFF');
+ const austin=[...table.querySelectorAll('tr')].find(x=>x.textContent.includes('Austin Fox'));
+ if(!austin||!austin.textContent.includes('NOT VERIFIED'))
+   throw Error('Other employees must show explicit NOT VERIFIED rather than blank');
  if(!summary.textContent.includes('STALE: review needed'))
    throw Error('BC failed to label six-day-old schedule stale');
  if(!names.some(x=>x.includes('Michael Brion')&&
@@ -132,9 +154,11 @@ try{
    x.textContent.includes('Austin Fox')&&x.textContent.includes('OFF')))
    throw Error('BC review did not retain explicit OFF person');
  if(!summary.textContent.includes('BC-confirmed'))throw Error('BC local confirmed date missing');
- if(STORE.size!==1||requests!==1)throw Error('BC touched something other than local date-specific review');
+ if(STORE.size!==1||requests!==1||attendanceRequests!==1)
+   throw Error('BC review performed wrong network or persistent storage operation');
  result={pass:true,citywide:true,staleLabel:true,twoMonths:true,
   completedAndPartial:true,offVisible:true,bcFirst:true,
+  attendanceReadOnly:true,stationGroups:true,
   noOldOt:true,localReview:true,monitorHidden:true};
 }catch(error){result={pass:false,error:String(error.message)}}
 document.body.dataset.bcDepartment=result.pass?'PASS':'FAIL';
