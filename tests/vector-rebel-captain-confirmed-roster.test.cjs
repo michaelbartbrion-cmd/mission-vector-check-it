@@ -89,3 +89,29 @@ test('original picker defaults to current C-shift Captain Set, not last saved sh
  const same=run(choices,{},()=> 'C-set','last',()=> '2026-11-21',infer,x=>x);
  assert.equal(same,'C-set');
 });
+
+test('unconfigured current C shift can use exactly seven verified published roster identities, without saving a Captain Set',()=>{
+ const start=source.indexOf('        const usableSets = (config.captainSets || [])');
+ const end=source.indexOf('        if (!usableSets.length)',start);
+ assert.ok(start>=0&&end>start);
+ const part=source.slice(start,end);
+ const approved=['Michael Baldree','Michael Brion','Jerry Weems','Jared Weston',
+  'Robert Brooks','Matthew Cashman','Morgan Bowland'];
+ const roster=approved.map((name,i)=>({name,prefix:'PERSON-'+i,active:true}));
+ const cPilotNames=new Set(approved.map(x=>x.toLowerCase()));
+ const fn=new Function('config','resolveCaptainSetPeople','inferRegularTourWindow',
+  'localTodayKey','captainShiftLabel','getMasterRosterState','getActiveMasterRoster',
+  'C_PILOT_NAMES','masterNameKey',part+'\nreturn usableSets;');
+ const args=(published=true,active=true,list=roster)=>
+  [{captainSets:[]},()=>[],()=>({isActiveTour:active}),
+   ()=> '2026-11-21',s=>s,()=>({source:published?'shared-command':'local'}),
+   ()=>list,cPilotNames,x=>String(x).toLowerCase()];
+ const today=fn(...args());
+ assert.equal(today.length,1);
+ assert.equal(today[0].shift,'C');
+ assert.deepEqual(today[0].memberPrefixes,roster.map(x=>x.prefix));
+ assert.equal(fn(...args(false)).length,0,'private unverified roster cannot be silently promoted');
+ assert.equal(fn(...args(true,false)).length,0,'not a C-shift day');
+ assert.equal(fn(...args(true,true,roster.slice(0,6))).length,0,'partial roster is not guessed');
+ assert.equal(fn(...args(true,true,[...roster.slice(0,6),{...roster[6],prefix:'PERSON-0'}])).length,0,'duplicate identities block fallback');
+});

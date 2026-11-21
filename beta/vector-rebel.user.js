@@ -6590,6 +6590,28 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 memberCount: (set.memberPrefixes || []).length
             }))
             .filter(set => set.people.length && set.people.length === set.memberCount);
+        // No setup hurdle for the active C tour when the seven-person
+        // published shared roster exists. This is a TEMPORARY Captain Set,
+        // never a claim of attendance or a modification to saved settings.
+        const onCurrentCShift=inferRegularTourWindow(
+            new Date(localTodayKey()+'T12:00:00'),'C').isActiveTour;
+        if(onCurrentCShift&&
+            !usableSets.some(set=>captainShiftLabel(set.shift)==='C')&&
+            getMasterRosterState().source==='shared-command'){
+            const regular=getActiveMasterRoster().filter(person=>
+                person.active!==false&&
+                C_PILOT_NAMES.has(masterNameKey(person.name)));
+            if(regular.length===7&&
+               new Set(regular.map(person=>person.prefix)).size===7&&
+               new Set(regular.map(person=>masterNameKey(person.name))).size===7){
+                usableSets.unshift({
+                    id:'current-c-shift-published-roster',
+                    name:'C Shift · Published Master Roster',
+                    shift:'C',memberPrefixes:regular.map(person=>person.prefix),
+                    memberCount:7,people:regular
+                });
+            }
+        }
         if (!usableSets.length) {
             setStatus('No Captain Sets are ready. Open Settings → Captain Sets and add crew members by exact Vector Responsible Party name and save the set.', false);
             showSettings('captain');
