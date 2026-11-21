@@ -7,6 +7,8 @@ const first=src.indexOf('    function showMasterErrorInbox(){');
 const last=src.indexOf('    function localCalendarDate(){',first);
 assert.ok(first>0&&last>first);
 const feature=src.slice(first,last);
+const realWait=src.match(/^    function wait\(ms\)\{return new Promise\(resolve=>setTimeout\(resolve,Math\.max\(0,Number\(ms\)\|\|0\)\)\);\}$/m)?.[0];
+assert.ok(realWait,'real async wait helper must be defined before review all');
 const browser=[
  process.env.CHROME_PATH,
  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -38,7 +40,7 @@ const makeButton=label=>{
  const b=document.createElement('button');b.textContent=label;return b;
 };
 const clean=x=>String(x||''),setStatus=x=>messages.push(x);
-const wait=async()=>{};
+__WAIT_HELPER__
 const confirm=()=>confirmed;
 const markMasterErrorReviewed=async id=>{
  acknowledged.push(id);return true;
@@ -55,8 +57,8 @@ await new Promise(r=>setTimeout(r,80));
 const overlay=document.querySelector('.test-overlay');
 const summary=overlay.querySelector('[role=status]');
 const reviewAll=[...overlay.querySelectorAll('button')]
- .find(b=>b.textContent.startsWith('Clear ')&&
-   b.textContent.includes('Notifications'));
+ .find(b=>b.textContent.startsWith('Review All ')&&
+   b.textContent.includes('Errors'));
 let output={pass:false};
 try{
  if(!summary.textContent.includes('21 previous software reports')||
@@ -77,6 +79,11 @@ try{
     new Set(acknowledged).size!==21)
   throw Error('Each original report was not acknowledged exactly once');
  if(errorInbox.count!==0)throw Error('Summary did not reload RC count');
+ const reviewStatus=[...overlay.querySelectorAll('[role=status]')]
+  .find(el=>el.textContent.includes('Reviewed 21 of 21'));
+ if(!reviewStatus||!reviewStatus.textContent.includes('Original reports')&&
+    !reviewStatus.textContent.includes('No official PPE inspections'))
+  throw Error('No visible bulk-review completion feedback');
  if(!messages.some(s=>s.includes('21 report(s) marked REVIEWING')&&
     s.includes('No native PPE inspection')))
   throw Error('No explicit acknowledgment versus physical check semantics');
@@ -87,7 +94,7 @@ const pre=document.createElement('pre');pre.id='result';
 pre.textContent=JSON.stringify(output);document.body.appendChild(pre);
 document.body.dataset.errorInboxSmoke=output.pass?'PASS':'FAIL';
 })();
-`.replace('__FEATURE__',feature);
+`.replace('__FEATURE__',feature).replace('__WAIT_HELPER__',realWait);
 const html='<!doctype html><html><body><script>'+script+'</script></body></html>';
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'vector-error-inbox-'));
 try{
@@ -95,7 +102,7 @@ try{
  const r=spawnSync(browser,['--headless=new','--no-first-run',
   '--disable-background-networking','--disable-extensions','--disable-gpu',
   '--user-data-dir='+path.join(tmp,'profile'),
-  '--virtual-time-budget=1500','--dump-dom','file:///'+f.replace(/\\/g,'/')],{
+  '--virtual-time-budget=6500','--dump-dom','file:///'+f.replace(/\\/g,'/')],{
   encoding:'utf8',timeout:25000,maxBuffer:6*1024*1024,windowsHide:true
  });
  if(r.error)throw r.error;
