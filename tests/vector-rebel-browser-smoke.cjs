@@ -37,9 +37,14 @@ const js=String.raw`
  const refreshPanelInfo=()=>{},refreshMasterAlertBadge=()=>{},refreshInterfaceNotice=()=>{};
  const getRun=()=>null;
  const noop=()=>{},showPpeCleanRepairForm=noop,showStation4ScbaAirpackCheck=noop;
- const launchMyInspectionFromAnywhere=noop,launchCaptainDailyCheckFromAnywhere=noop;
+ const launchMyInspectionFromAnywhere=noop;
+ let cachedHistory=false,historyShown=0,nativeHistoryStarted=0,pilotShown=0;
+ const getCaptainDailyReport=()=>cachedHistory?{
+   schemaVersion:8,owners:[{name:'Fixture Captain',items:[]}]}:null;
+ const showCaptainDailyReport=()=>{historyShown++;};
+ const launchCaptainDailyCheckFromAnywhere=()=>{nativeHistoryStarted++;};
  const showApparatusCheck=noop,showProblemReport=noop;
- const showCShiftPilotBoard=noop,cPilotEligible=()=>false,
+ const showCShiftPilotBoard=()=>{pilotShown++;},cPilotEligible=()=>true,
    cPilotRefreshSummary=async()=>{},cPilotFlushReceipts=async()=>{},
    cPilotScheduleBoardPoll=()=>{};
  const showSettings=noop,checkManagedInterfaceRelease=noop;
@@ -79,6 +84,20 @@ const js=String.raw`
    if(!miniBadge||miniBadge.textContent!=='1'||miniBadge.style.display!=='flex')
       throw Error('Master error count not visible in minimized badge');
    result.numericAlertBadge=true;
+   cachedHistory=true;
+   const masterCaptain=[...document.querySelectorAll(
+       '[data-vector-ppe-actions] button')]
+       .find(b=>b.textContent==='Daily Captain Check');
+   masterCaptain.click();
+   if(historyShown!==1||nativeHistoryStarted!==0)
+      throw Error('Master Captain did not open the existing two-month history');
+   cachedHistory=false;
+   masterCaptain.click();
+   if(nativeHistoryStarted!==1||pilotShown!==0)
+      throw Error('Master Daily Captain Check fell into empty C-shift pilot instead of original audit');
+   nativeHistoryStarted=0;
+   result.masterCaptainHistory=true;
+   result.masterCaptainMissingHistoryOriginal=true;
    setStatus('SCBA handoff stopped: unexpected form',false);
    updateMinimizedPanelBadge();
    if(miniBadge.textContent!=='!')throw Error('Local failure badge not visible');
@@ -117,6 +136,14 @@ const js=String.raw`
    owner=false;masterServerVerified=false;
    renderPanelInterface();assertLabels(actions(),user,'Non-admin user');
    if(switcher.style.display!=='none')throw Error('Non-admin can see Master toggle');
+   const captain=button('Daily Captain Check');
+   cachedHistory=true;captain.click();
+   if(historyShown!==2||nativeHistoryStarted!==0)
+      throw Error('Ordinary Captain unnecessarily scans despite cached two-month history');
+   cachedHistory=false;captain.click();
+   if(nativeHistoryStarted!==1)
+      throw Error('Ordinary Captain cannot start first read-only history audit when no data exists');
+   result.captainHistoryNoRescan=true;
    result.nonAdminSwitchHidden=true;result.panelCount=document.querySelectorAll('#'+PANEL_ID).length;
    if(result.panelCount!==1)throw Error('Duplicate panel');
    result.pass=true;

@@ -23,6 +23,7 @@ function renderMock({master=false,owner=false}={}){
  const run=new Function('document','PANEL_ID','panelInterfaceMode',
   'isMasterOwnerInstallation','refreshMasterAlertBadge','refreshInterfaceNotice','calls',
   'const showPpeCleanRepairForm=()=>{},launchCaptainDailyCheckFromAnywhere=()=>calls.push(\'full\'),'+
+  'getCaptainDailyReport=()=>null,showCaptainDailyReport=()=>calls.push(\'cached\'),'+
   'cPilotEligible=()=>true,showCShiftPilotBoard=(b,m)=>calls.push([\'quick\',b,m||\'bc\']),'+
   'showSharedMasterList=()=>{},showStation4ScbaAirpackCheck=()=>{},'+
   'showApparatusCheck=()=>{},showMasterErrorInbox=()=>{},'+
@@ -56,12 +57,13 @@ test('Master Interface keeps user actions and exposes additional owner tools',()
  assert.equal(v.mode,'MASTER INTERFACE');
  assert.equal(v.switch.textContent,'Preview User Interface');
 });
-test('Master has a dedicated BC Check and Captain defaults to a one-person rotating check, not full audit',()=>{
+test('Master BC Check is separate from the original detailed Daily Captain Check',()=>{
  const master=renderMock({master:true,owner:true});
  const click=(v,label)=>v.buttons.find(x=>x.textContent===label).onclick();
  click(master,'BC Check');
  click(master,'Daily Captain Check');
- assert.deepEqual(master.calls,[['quick',true,'bc'],['quick',true,'captain']]);
+ assert.deepEqual(master.calls,[['quick',true,'bc'],'full'],
+  'Daily Captain Check must not open an empty rotating pilot for the Master');
  const user=renderMock({master:false,owner:false});
  click(user,'Daily Captain Check');
  assert.deepEqual(user.calls,['full'],'other user workflow is not silently changed');
