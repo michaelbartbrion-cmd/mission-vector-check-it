@@ -100,7 +100,7 @@ const bc=part('    const BC_DAILY_ROSTER_KEY=',
 const C=new Set(['michael brion','jared weston','jerry weems']);
 const f=new Function('clean','masterNameKey','C_PILOT_NAMES',
  'getCaptainPersonOptions','addDateKeyDays',bc+
- '\nreturn {bcDepartmentDailyRows,bcCShiftHistoryCell};')(
+ '\nreturn {bcDepartmentDailyRows,bcCShiftHistoryCell,bcDepartmentStationRank,bcDepartmentStationName,bcDepartmentAttendanceCell};')(
  x=>String(x||'').trim(),normalize,C,
  ()=>[{name:'Current OT',prefix:'NEWOT'},
      {name:'Michael Brion',prefix:'BRION'},
@@ -108,7 +108,7 @@ const f=new Function('clean','masterNameKey','C_PILOT_NAMES',
  (day,n)=>new Date(Date.parse(day+'T00:00:00Z')+n*86400000)
   .toISOString().slice(0,10)
 );
-test('BC includes every scheduled apparatus citywide and current confirmed C, excludes off C and old OT',()=>{
+test('BC includes department workers and explicit OFF staff while excluding previous-tour OT',()=>{
  const date='2026-11-21';
  const schedule={people:[
   {name:'Michael Brion',prefix:'BRION',units:['Truck 504'],sourceStatus:'scheduled_work_evidence'},
@@ -132,9 +132,12 @@ test('BC includes every scheduled apparatus citywide and current confirmed C, ex
  assert.ok(rows.some(x=>x.name==='Steven Beagle'));
  assert.ok(rows.find(x=>x.name==='Michael Brion').confirmed);
  assert.ok(rows.find(x=>x.name==='Michael Brion').cShifter);
- assert.equal(rows.some(x=>x.name==='Jerry Weems'),false);
+ assert.equal(rows.find(x=>x.name==='Jerry Weems').duty,'off');
+ assert.equal(rows.find(x=>x.name==='Jerry Weems').confirmed,true);
  assert.equal(rows.some(x=>x.name==='Prior OT'),false);
  assert.ok(rows.every(x=>x.source!=='bc_confirmed'));
+ assert.equal(rows[0].name,'Steven Beagle');
+ assert.equal(f.bcDepartmentStationName(rows[0]),'BC');
 });
 test('BC explicit same-date confirmed rollcall overrides stale schedule without touching CrewSense',()=>{
  const date='2026-11-21',schedule={people:[
@@ -148,24 +151,113 @@ test('BC explicit same-date confirmed rollcall overrides stale schedule without 
  assert.equal(f.bcDepartmentDailyRows(schedule,null,null,'2026-11-22',manual).length,2,
   'Nov 21 rollcall does not erase tomorrow\'s schedule');
 });
-test('short C tour history counts only actual native checks; uncollected sources are unknown',()=>{
- const report={owners:[{name:'Michael Brion',items:[
-  {status:'ok',tourChecks:[{startDate:'2026-11-15',ok:true}]},
-  {status:'ok',tourChecks:[{startDate:'2026-11-15',ok:false}]},
-  {status:'error',tourChecks:[{startDate:'2026-11-15',ok:false}]}
- ]}]};
- assert.deepEqual(f.bcCShiftHistoryCell(report,'Michael Brion','2026-11-15'),
-  {label:'1 / 3',detail:'1 native checks confirmed of 3 known items. Remaining are unverified, not proven missed.'});
- assert.equal(f.bcCShiftHistoryCell(report,'Michael Brion','2026-11-21').label,'?');
- assert.equal(f.bcCShiftHistoryCell(report,'Unknown C member','2026-11-15').label,'?');
+test('BC summary classifies completed, partial, missing, unknown, and OFF without false PASS',()=>{
+ const tour='2026-11-15';
+ const report={sourceNativeReadAt:'2026-11-21T16:00:00Z',owners:[{
+  name:'Michael Brion',items:[
+   {status:'ok',tourChecks:[{startDate:tour,endDate:'2026-11-16',due:true,ok:true,
+     resultStatus:'passed'}]},
+   {status:'ok',tourChecks:[{startDate:tour,endDate:'2026-11-16',due:true,ok:false}]},
+   {status:'error',tourChecks:[{startDate:tour,endDate:'2026-11-16',due:true,ok:false}]}
+  ]}]};
+ const partial=f.bcCShiftHistoryCell(report,'Michael Brion',tour);
+ assert.equal(partial.label,'PARTIAL 1 / 3');
+ assert.equal(partial.tone,'partial');
+ assert.match(partial.detail,/completion is not automatically/i);
+ assert.equal(f.bcCShiftHistoryCell(report,'Unknown C member',tour).label,'UNKNOWN');
+
+ report.owners[0].items[1].tourChecks[0].ok=true;
+ report.owners[0].items[1].tourChecks[0].resultStatus='failed';
+ report.owners[0].items[2].status='ok';
+ report.owners[0].items[2].tourChecks[0].ok=true;
+ report.owners[0].items[2].tourChecks[0].resultStatus='unknown';
+ const complete=f.bcCShiftHistoryCell(report,'Michael Brion',tour);
+ assert.equal(complete.label,'ALL COMPLETED · ISSUE');
+ assert.equal(complete.tone,'issue');
+ assert.match(complete.detail,/1 known failed answer/);
+
+ report.owners[0].items.forEach(item=>{
+  item.tourChecks[0].ok=false;
+  item.tourChecks[0].complete=false;
+ });
+ assert.equal(f.bcCShiftHistoryCell(report,'Michael Brion',tour).label,
+  'NOT COMPLETED');
+ report.owners[0].items[1].status='error';
+ assert.equal(f.bcCShiftHistoryCell(report,'Michael Brion',tour).label,
+  'NOT VERIFIED');
+ report.owners[0].items.forEach(item=>{
+  item.tourChecks[0].off=true;item.tourChecks[0].due=false;
+ });
+ assert.equal(f.bcCShiftHistoryCell(report,'Michael Brion',tour).label,'OFF');
+});
+test('BC dated pilot receipts distinguish partial from result-unknown completion',()=>{
  const nativeBoard={people:[{name:'Jared Weston',gear:[
   {assetId:'A',status:'verified',nativeCompletionDate:'2026-11-15'},
   {assetId:'B',status:'not_yet_verified'},
   {assetId:'C',status:'verified',nativeCompletionDate:'2026-11-12'}
  ],maskGear:[{assetId:'MASK',status:'verified',
   nativeCompletionDate:'2026-11-16'}]}]};
- const result=f.bcCShiftHistoryCell(report,'Jared Weston',
+ const partial=f.bcCShiftHistoryCell(null,'Jared Weston',
   '2026-11-15',nativeBoard);
- assert.equal(result.label,'2 / 4');
- assert.match(result.detail,/native-dated Item Log receipts/);
+ assert.equal(partial.label,'PARTIAL 2 / 4');
+ assert.equal(partial.tone,'partial');
+ nativeBoard.people[0].gear[1]={assetId:'B',status:'verified',nativeCompletionDate:'2026-11-15'};
+ nativeBoard.people[0].gear[2].nativeCompletionDate='2026-11-16';
+ const complete=f.bcCShiftHistoryCell(null,'Jared Weston','2026-11-15',nativeBoard);
+ assert.equal(complete.label,'ALL COMPLETED');
+ assert.equal(complete.tone,'recorded','date-only receipt must not go green PASS');
+ nativeBoard.people[0].lastDutyConfirmedAt='2026-11-15T12:00:00Z';
+ nativeBoard.people[0].dutyDay1='off';
+ nativeBoard.people[0].dutyDay2='off';
+ assert.equal(f.bcCShiftHistoryCell(null,'Jared Weston','2026-11-15',nativeBoard).label,'OFF');
+});
+test('Station order puts BC above stations 1 to 6, independent of apparatus name',()=>{
+ const schedule={people:[
+  {name:'Station 5',units:['Engine 505'],sourceStatus:'scheduled_work_evidence'},
+  {name:'Station 4',units:['Truck 504'],sourceStatus:'scheduled_work_evidence'},
+  {name:'Station 2',units:['Medic 502'],sourceStatus:'scheduled_work_evidence'},
+  {name:'Chief',units:['Battalion 501'],sourceStatus:'scheduled_work_evidence'},
+  {name:'Station 1',units:['Engine 501'],sourceStatus:'scheduled_work_evidence'},
+  {name:'Station 3',units:['Engine 503'],sourceStatus:'scheduled_work_evidence'}
+ ]};
+ const rows=f.bcDepartmentDailyRows(schedule,null,null,'2026-11-21');
+ assert.deepEqual(rows.map(x=>x.name),[
+  'Chief','Station 1','Station 2','Station 3','Station 4','Station 5']);
+});
+test('BC manual review retains explicitly selected working people and off selections',()=>{
+ const date='2026-11-21',schedule={people:[
+  {name:'Michael Brion',units:['Truck 504'],sourceStatus:'scheduled_work_evidence'},
+  {name:'Austin Fox',units:['Truck 501'],sourceStatus:'scheduled_work_evidence'}
+ ]};
+ const manual={date,confirmedAt:'2026-11-21T15:00:00Z',
+  people:[{name:'Michael Brion'}],offPeople:[{name:'Austin Fox'}]};
+ const rows=f.bcDepartmentDailyRows(schedule,null,null,date,manual);
+ assert.equal(rows.length,2);
+ assert.equal(rows.find(p=>p.name==='Michael Brion').duty,'working');
+ assert.equal(rows.find(p=>p.name==='Austin Fox').duty,'off');
+});
+
+test('BC uses verified full-tour OFF and work evidence for employees without a Captain Item Log',()=>{
+ const tour={startDate:'2026-10-27',endDate:'2026-10-28'};
+ const records=new Map([
+  ['nicole duncan|2026-10-27',{status:'full_leave_evidence',sourceQuality:'good_direct_capture'}],
+  ['nicole duncan|2026-10-28',{status:'deployment_evidence',sourceQuality:'good_direct_capture'}],
+  ['austin fox|2026-10-27',{status:'work_evidence',sourceQuality:'good_direct_capture'}],
+  ['austin fox|2026-10-28',{status:'unknown',sourceQuality:'good_direct_capture'}]
+ ]);
+ const unknown={label:'UNKNOWN',tone:'unknown',detail:'No native history'};
+ const off=f.bcDepartmentAttendanceCell(records,'Nicole Duncan',tour,unknown);
+ assert.equal(off.label,'OFF');
+ assert.match(off.detail,/both/i);
+ const other=f.bcDepartmentAttendanceCell(records,'Austin Fox',tour,unknown);
+ assert.equal(other.label,'NOT VERIFIED');
+ assert.match(other.detail,/no dated native/i);
+ const untouched=f.bcDepartmentAttendanceCell(records,'Someone Else',tour,unknown);
+ assert.equal(untouched.label,'UNKNOWN');
+ const native={label:'ALL COMPLETED',tone:'recorded',detail:'2 native completions'};
+ assert.deepEqual(f.bcDepartmentAttendanceCell(records,'Nicole Duncan',tour,native),native,
+  'CrewSense must never erase native completed PPE evidence');
+ records.get('nicole duncan|2026-10-28').sourceQuality='unverified';
+ assert.equal(f.bcDepartmentAttendanceCell(records,'Nicole Duncan',tour,unknown).label,'UNKNOWN',
+  'one untrusted day cannot falsely establish two full days OFF');
 });

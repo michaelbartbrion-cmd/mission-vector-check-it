@@ -31,10 +31,17 @@ const makeOverlayBox=()=>{
 };
 const loadJSON=(k,def)=>STORE.has(k)?STORE.get(k):def;
 const saveJSON=(k,v)=>STORE.set(k,structuredClone(v));
-const captainAuditWindow=()=>({tours:[
- {startDate:'2026-11-09'}, {startDate:'2026-11-15'}, {startDate:'2026-11-21'}
+const displayMonthKey=x=>x==='2026-10'?'October 2026':'November 2026';
+const captainAuditWindow=()=>({months:['2026-10','2026-11'],tours:[
+ {month:'2026-10',startDate:'2026-10-27',endDate:'2026-10-28'},
+ {month:'2026-11',startDate:'2026-11-03',endDate:'2026-11-04'},
+ {month:'2026-11',startDate:'2026-11-09',endDate:'2026-11-10'},
+ {month:'2026-11',startDate:'2026-11-15',endDate:'2026-11-16'},
+ {month:'2026-11',startDate:'2026-11-21',endDate:'2026-11-22'},
+ {month:'2026-11',startDate:'2026-11-27',endDate:'2026-11-28'}
 ]});
 const report={
+ sourceNativeReadAt:'2026-11-21T19:00:00Z',
  currentTourCrewConfirmedAt:'2026-11-21T15:00:00Z',
  tourRoster:{startDate:'2026-11-21',endDate:'2026-11-22',
   basePrefixes:['PERSON-BRION'],swingPrefixes:[],
@@ -42,11 +49,17 @@ const report={
    '2026-11-22':['PERSON-BRION']}},
  owners:[{name:'Michael Brion',prefix:'PERSON-BRION',items:[
   {status:'ok',tourChecks:[
-    {startDate:'2026-11-09',ok:true},{startDate:'2026-11-15',ok:true},
-    {startDate:'2026-11-21',ok:true}]},
+    {startDate:'2026-10-27',endDate:'2026-10-28',due:true,ok:true,resultStatus:'unknown'},
+    {startDate:'2026-11-03',endDate:'2026-11-04',due:true,ok:true,resultStatus:'unknown'},
+    {startDate:'2026-11-09',endDate:'2026-11-10',due:true,ok:true,resultStatus:'unknown'},
+    {startDate:'2026-11-15',endDate:'2026-11-16',due:true,ok:true,resultStatus:'unknown'},
+    {startDate:'2026-11-21',endDate:'2026-11-22',due:true,ok:true,resultStatus:'unknown'}]},
   {status:'ok',tourChecks:[
-    {startDate:'2026-11-09',ok:false},{startDate:'2026-11-15',ok:true},
-    {startDate:'2026-11-21',ok:false}]}
+    {startDate:'2026-10-27',endDate:'2026-10-28',due:true,ok:true,resultStatus:'passed'},
+    {startDate:'2026-11-03',endDate:'2026-11-04',due:true,ok:false},
+    {startDate:'2026-11-09',endDate:'2026-11-10',due:true,ok:false},
+    {startDate:'2026-11-15',endDate:'2026-11-16',due:true,ok:true,resultStatus:'unknown'},
+    {startDate:'2026-11-21',endDate:'2026-11-22',due:true,ok:false}]}
  ]},{name:'Prior Tour OT',prefix:'PERSON-OLDOT',items:[]}]
 };
 const getCaptainDailyReport=()=>report;
@@ -66,12 +79,25 @@ const pilot={activeTour:true,tourStart:'2026-11-21',tourEnd:'2026-11-22',people:
  {name:'Jerry Weems',prefix:'PERSON-WEEMS',dutyDay1:'off',
   lastDutyConfirmedAt:'2026-11-21T15:00:00Z'}
 ]};
-let requests=0,monitorOpened=0;
+let requests=0,attendanceRequests=0,monitorOpened=0;
 const cPilotBridge=async(method,action,data,query)=>{
- if(method!=='GET'||action!=='vr-bc-department-roster'||query.date!=='2026-11-21')
-  throw Error('Unexpected BC network call');
- requests++;
- return scheduled;
+ if(method!=='GET')throw Error('Unexpected method');
+ if(action==='vr-bc-department-roster'){
+  if(query.date!=='2026-11-21')throw Error('Wrong roster date');
+  requests++;return scheduled;
+ }
+ if(action==='vr-captain-attendance'){
+  attendanceRequests++;
+  const dates=query.dates.split(','),people=JSON.parse(query.people);
+  return{ok:true,readOnly:true,scope:'captain-attendance-evidence',
+   records:people.flatMap(name=>dates.map(date=>({
+    name,date,sourceQuality:'good_direct_capture',
+    status:name==='Nicole Duncan'&&['2026-10-27','2026-10-28'].includes(date)?
+     'full_leave_evidence':name==='Austin Fox'&&date==='2026-10-27'?
+     'work_evidence':'unknown'
+   })))};
+ }
+ throw Error('Unexpected BC network call '+action);
 };
 const cPilotFetch=async()=>pilot;
 const showCShiftPilotBoard=()=>{monitorOpened++};
@@ -88,14 +114,30 @@ try{
     !names.some(x=>x.includes('Nicole Duncan')&&x.includes('Engine 506'))||
     !names.some(x=>x.includes('Steven Beagle')&&x.includes('Battalion 501')))
    throw Error('BC did not display workers from stations outside Station 4');
- if(names.some(x=>x.includes('Jerry Weems'))||
+ if(!names.some(x=>x.includes('Jerry Weems')&&x.includes('OFF'))||
     names.some(x=>x.includes('Prior Tour OT')))
-   throw Error('BC roster included current OFF or previous-tour overtime');
+   throw Error('BC failed OFF duty or included previous-tour overtime');
+ const headers=[...table.querySelectorAll('th')].map(x=>x.textContent);
+ if(!headers.includes('October 2026')||!headers.includes('November 2026')||
+    !headers.includes('10-27 / 10-28')||!headers.includes('11-27 / 11-28'))
+   throw Error('BC did not show both full calendar months');
+ const grouped=[...table.querySelectorAll('tr[data-bc-station-group]')];
+ if(grouped[0]?.getAttribute('data-bc-station-group')!=='BC'||
+    grouped[1]?.getAttribute('data-bc-station-group')!=='Station 1')
+   throw Error('BC must lead station groups, followed by Station 1');
+ if(!grouped[0].nextElementSibling?.textContent.includes('Steven Beagle'))
+   throw Error('BC station group must list Battalion 501 first');
+ const nicole=[...table.querySelectorAll('tr')].find(x=>x.textContent.includes('Nicole Duncan'));
+ if(!nicole||!nicole.textContent.includes('OFF'))
+   throw Error('Trusted two-day CrewSense leave evidence did not show OFF');
+ const austin=[...table.querySelectorAll('tr')].find(x=>x.textContent.includes('Austin Fox'));
+ if(!austin||!austin.textContent.includes('NOT VERIFIED'))
+   throw Error('Other employees must show explicit NOT VERIFIED rather than blank');
  if(!summary.textContent.includes('STALE: review needed'))
    throw Error('BC failed to label six-day-old schedule stale');
  if(!names.some(x=>x.includes('Michael Brion')&&
-    x.includes('1 / 2')&&x.includes('2 / 2')))
-   throw Error('BC did not show C shift short native tour history');
+    x.includes('PARTIAL 1 / 2')&&x.includes('ALL COMPLETED')))
+   throw Error('BC did not show partial and all-completed native tour statuses');
  if(!table.querySelector('th')?.textContent.includes('FIREFIGHTER'))
    throw Error('BC did not use consistent Captain-like table');
  if(overlay.querySelectorAll('details').length!==1||monitorOpened)
@@ -108,10 +150,15 @@ try{
  if(!remove)throw Error('BC review did not show one checkbox per scheduled person');
  remove.checked=false;remove.dispatchEvent(new Event('change',{bubbles:true}));
  review.click();
- if(table.textContent.includes('Austin Fox'))throw Error('BC confirmed roster did not exclude removed person');
+ if(![...table.querySelectorAll('tr')].some(x=>
+   x.textContent.includes('Austin Fox')&&x.textContent.includes('OFF')))
+   throw Error('BC review did not retain explicit OFF person');
  if(!summary.textContent.includes('BC-confirmed'))throw Error('BC local confirmed date missing');
- if(STORE.size!==1||requests!==1)throw Error('BC touched something other than local date-specific review');
- result={pass:true,citywide:true,staleLabel:true,shortHistory:true,
+ if(STORE.size!==1||requests!==1||attendanceRequests!==1)
+   throw Error('BC review performed wrong network or persistent storage operation');
+ result={pass:true,citywide:true,staleLabel:true,twoMonths:true,
+  completedAndPartial:true,offVisible:true,bcFirst:true,
+  attendanceReadOnly:true,stationGroups:true,
   noOldOt:true,localReview:true,monitorHidden:true};
 }catch(error){result={pass:false,error:String(error.message)}}
 document.body.dataset.bcDepartment=result.pass?'PASS':'FAIL';
