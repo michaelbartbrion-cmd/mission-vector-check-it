@@ -72,9 +72,9 @@ test('Master Check for Update gives immediate, visible result for current, newer
   assert.equal(await api.checkManagedInterfaceRelease({manual:true}),true);
   assert.ok(messages.some(x=>x.includes('No newer release is available')));
   assert.equal(api.get().lastManualUpdateCheck.published,'3.2.92');
-  calls.push({code:200,body:'// @version      3.2.92'});
+  calls.push({code:200,body:'// @version      3.2.93'});
   assert.equal(await api.checkManagedInterfaceRelease({manual:true}),true);
-  assert.equal(api.get().availableRelease,'3.2.92');
+  assert.equal(api.get().availableRelease,'3.2.93');
   assert.ok(messages.some(x=>x.includes('Select Install Update below')));
   calls.push({kind:'timeout'});
   assert.equal(await api.checkManagedInterfaceRelease({manual:true}),false);
