@@ -109,7 +109,7 @@ test('recheck is only available through confirmed-working Master, never through 
  const menu=src.slice(src.indexOf('    function showCShiftPilotBoard('),
    src.indexOf('    let lastInterfaceErrorInboxPoll=0;'));
  assert.match(menu,/if\(battalion&&isMasterOwnerInstallation\(\)\)/);
- assert.match(src,/p\.attendance==='working'&&p\.nextItem&&p\.outstandingItems>0/);
+ assert.match(src,/p\.attendance==='working'&&[\s\S]*?\(p\.nextRequiredItem\|\|p\.nextItem\)/);
  assert.match(src,/if\(check\.pilotRecheck===true\)/);
  assert.match(src,/cPilotQueueReadOnlyResults\(check\)/);
  assert.match(src,/nativeAssetIdentityVerified:readable/);
@@ -130,9 +130,11 @@ test('BC pilot uses only same-origin cached native PPE paths and preserves exact
  assert.equal(h.directTarget({name:'Michael Brion',attendance:'off',nextItem:'BRION-4111218',nextItemPath:path}),null);
  assert.equal(h.directTarget({name:'Michael Brion',attendance:'working',nextItem:'BRION-4111218',nextItemPath:'https://evil.example/steal'}),null);
 });
-test('dedicated BC monitor will not repeat a full crew equipment crawl when stored links are absent',()=>{
- assert.match(src,/if\(dedicated&&!directReady\)\{/);
- assert.match(src,/Automatic monitoring will not repeatedly crawl crew equipment/);
+test('Enterprise BC monitor rotates just one owner per lease and scopes first-time mapping to that owner',()=>{
+ assert.match(src,/const candidates=dedicated&&eligible\.length\?/);
+ assert.match(src,/\[eligible\[cursor%eligible\.length\]\]/);
+ assert.match(src,/scanPpeCrewOwners\(owners,/);
+ assert.match(src,/persistentSetRaw\(cursorKey,String\(\(cursor\+1\)%1000000\)\)/);
  assert.match(src,/if\(!directReady\)\{[\s\S]*?scanPpeCrewOwners\(owners,/);
  assert.match(src,/if\(!dedicated&&!confirm\('Run one read-only PPE Item Log check/);
 });

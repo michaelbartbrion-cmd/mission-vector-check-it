@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Scout
 // @namespace    mission-vector-check-it-rebel-scout
-// @version      1.1.52
+// @version      1.1.53
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-scout.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-scout.user.js
 // @description  Read-only CrewSense staffing and overtime collector for Mission Vector Check It.
@@ -16,6 +16,7 @@
 // @grant        GM_setClipboard
 // @connect      base44.app
 // @connect      raw.githubusercontent.com
+// @connect      127.0.0.1
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
@@ -23,7 +24,7 @@
 (function(){
 'use strict';
 if (window.top !== window.self || window.MVCI_REBEL_SCOUT_CORE) return;
-const VERSION='1.1.52';
+const VERSION='1.1.53';
 const ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const PAIR_KEY='rebelScoutPairingV1';
 const LEGACY_PAIR_KEYS=['vectorStaffingCollectorPairing_v1','vectorOvertimeCollectorPairing_v1'];
@@ -44,7 +45,7 @@ migrateLegacy();
 /* --- Staffing collector: consolidated from verified vector-staffing-bridge 0.29.0 --- */
 (function(){
 'use strict';
-const VERSION='1.1.52';
+const VERSION='1.1.53';
 const ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const PAIR_KEY='vectorStaffingCollectorPairing_v1';
 const STABLE_MS=900;
@@ -125,7 +126,7 @@ async function independentlyVerifyStableRoster(workDate,first){
     domDisplayedDate()===workDate && first.rows.length===second.rows.length &&
     censusFingerprint(second.rows)===fingerprint;
 }
-async function performScrape(options={}){state.running=true;state.status='reading';state.lastError='';const expected=clean(options.expectedDate||'');try{startObservation();const stableBefore=await waitStable();const before=domDisplayedDate();if(!before)throw new Error('Could not identify the rendered ListView date.');if(expected&&before!==expected)throw new Error(`CrewSense rendered ${before}, not requested ${expected}.`);const result=await sweep();const stableAfter=await waitStable(6000);const after=domDisplayedDate();if(!after||before!==after)throw new Error(`Rendered date changed during scrape (${before||'unknown'} → ${after||'unknown'}).`);if(expected&&after!==expected)throw new Error(`CrewSense rendered ${after}, not requested ${expected}.`);const rows=result.rows,regular=rows.filter(r=>/Salary Step\s*\[1010\]/i.test(r.scheduleType||r.rawText)&&Number(r.lengthHours)===expectedRegularHours(before)&&!/Sub\s*\[1010\]|Additional Time|Overtime|OT Sign|Force Hire|Backfill|Disaster Relief|Trade|Swap|Vacation|Sick|Leave|Time Off/i.test(r.rawText)).length,groups=new Set(rows.map(r=>r.assignmentGroup).filter(Boolean)).size,noLoading=!loadingVisible(),independentlyStable=(!stableBefore||!stableAfter)&&await independentlyVerifyStableRoster(before,result),full=(stableBefore&&stableAfter||independentlyStable)&&noLoading&&result.scrollSweepComplete&&rows.length>=MIN_ROWS&&regular>=MIN_REGULAR&&groups>=MIN_GROUPS,digest=hash32(JSON.stringify(rows.map(r=>[r.personId,r.assignmentGroup,r.rawText]).sort())),capturedAt=new Date().toISOString(),payload={batchId:`unified:${before}:${Date.now()}:${digest}`,capturedAt,sourceVersion:`vector-bridge-${VERSION}`,pageMode:'ListView',captureComplete:full,diagnostics:{pageStableBefore:stableBefore||independentlyStable,pageStableAfter:stableAfter||independentlyStable,pageStable:(stableBefore&&stableAfter)||independentlyStable,independentRosterVerified:independentlyStable,allVisibleGroupsScanned:result.scrollSweepComplete,scrollSweepComplete:result.scrollSweepComplete,noLoadingIndicator:noLoading,dateConfidence:'high',dateSource:'rendered-dom',expectedDate:expected||null,visibleScheduleRows:rows.length,candidateRegularRows:regular,groupCount:groups,scroller:result.scroller},days:[{workDate:before,shiftLabel:'',rows}]};const body=await sendCapture(payload);state.status=body?.staffing?.quality==='good'?'sent-good':'sent-partial';state.lastCapture={date:before,rows:rows.length,regular,groups,full,quality:body?.staffing?.quality||'unknown',at:capturedAt,sourceVersion:`vector-bridge-${VERSION}`};return status()}catch(e){state.status='error';state.lastError=clean(e?.message||e);throw e}finally{stopObservation();state.running=false;state.currentPromise=null}}
+async function performScrape(options={}){state.running=true;state.status='reading';state.lastError='';const expected=clean(options.expectedDate||'');try{startObservation();const stableBefore=await waitStable();const before=domDisplayedDate();if(!before)throw new Error('Could not identify the rendered ListView date.');if(expected&&before!==expected)throw new Error(`CrewSense rendered ${before}, not requested ${expected}.`);const result=await sweep();const stableAfter=await waitStable(6000);const after=domDisplayedDate();if(!after||before!==after)throw new Error(`Rendered date changed during scrape (${before||'unknown'} â†’ ${after||'unknown'}).`);if(expected&&after!==expected)throw new Error(`CrewSense rendered ${after}, not requested ${expected}.`);const rows=result.rows,regular=rows.filter(r=>/Salary Step\s*\[1010\]/i.test(r.scheduleType||r.rawText)&&Number(r.lengthHours)===expectedRegularHours(before)&&!/Sub\s*\[1010\]|Additional Time|Overtime|OT Sign|Force Hire|Backfill|Disaster Relief|Trade|Swap|Vacation|Sick|Leave|Time Off/i.test(r.rawText)).length,groups=new Set(rows.map(r=>r.assignmentGroup).filter(Boolean)).size,noLoading=!loadingVisible(),independentlyStable=(!stableBefore||!stableAfter)&&await independentlyVerifyStableRoster(before,result),full=(stableBefore&&stableAfter||independentlyStable)&&noLoading&&result.scrollSweepComplete&&rows.length>=MIN_ROWS&&regular>=MIN_REGULAR&&groups>=MIN_GROUPS,digest=hash32(JSON.stringify(rows.map(r=>[r.personId,r.assignmentGroup,r.rawText]).sort())),capturedAt=new Date().toISOString(),payload={batchId:`unified:${before}:${Date.now()}:${digest}`,capturedAt,sourceVersion:`vector-bridge-${VERSION}`,pageMode:'ListView',captureComplete:full,diagnostics:{pageStableBefore:stableBefore||independentlyStable,pageStableAfter:stableAfter||independentlyStable,pageStable:(stableBefore&&stableAfter)||independentlyStable,independentRosterVerified:independentlyStable,allVisibleGroupsScanned:result.scrollSweepComplete,scrollSweepComplete:result.scrollSweepComplete,noLoadingIndicator:noLoading,dateConfidence:'high',dateSource:'rendered-dom',expectedDate:expected||null,visibleScheduleRows:rows.length,candidateRegularRows:regular,groupCount:groups,scroller:result.scroller},days:[{workDate:before,shiftLabel:'',rows}]};const body=await sendCapture(payload);state.status=body?.staffing?.quality==='good'?'sent-good':'sent-partial';state.lastCapture={date:before,rows:rows.length,regular,groups,full,quality:body?.staffing?.quality||'unknown',at:capturedAt,sourceVersion:`vector-bridge-${VERSION}`};return status()}catch(e){state.status='error';state.lastError=clean(e?.message||e);throw e}finally{stopObservation();state.running=false;state.currentPromise=null}}
 function scrapeNow(options={}){if(state.currentPromise)return state.currentPromise;state.currentPromise=performScrape(options);return state.currentPromise}
 function status(){return{paired:paired(),running:state.running,status:state.status,lastCapture:state.lastCapture,lastError:state.lastError,renderedDate:domDisplayedDate(),version:VERSION}}
 function mutationRelevant(m){const target=m.target?.nodeType===1?m.target:m.target?.parentElement;if(target&&ownElement(target))return false;if(m.type==='childList'){const nodes=[...m.addedNodes,...m.removedNodes];if(nodes.length&&nodes.every(n=>{const el=n.nodeType===1?n:n.parentElement;return el?ownElement(el):false}))return false}return true}
@@ -352,12 +353,12 @@ window.MVCI_REBEL_SCOUT_STAFFING={version:VERSION,configure,scrapeNow,captureSig
   }
 
   function statusText() {
-    if (!isPaired()) return 'OT PRIORITY · pair Scheduling first';
-    if (state.running) return 'OT PRIORITY · reading…';
-    if (state.status === 'sent-good') return 'OT PRIORITY · sent ✓';
-    if (state.status === 'sent-partial') return 'OT PRIORITY · sent · verify';
-    if (state.status === 'error') return `OT PRIORITY · error`;
-    return 'OT PRIORITY · capture';
+    if (!isPaired()) return 'OT PRIORITY Â· pair Scheduling first';
+    if (state.running) return 'OT PRIORITY Â· readingâ€¦';
+    if (state.status === 'sent-good') return 'OT PRIORITY Â· sent âœ“';
+    if (state.status === 'sent-partial') return 'OT PRIORITY Â· sent Â· verify';
+    if (state.status === 'error') return `OT PRIORITY Â· error`;
+    return 'OT PRIORITY Â· capture';
   }
 
   function renderStatus() {}
@@ -448,7 +449,7 @@ GM_deleteValue('rebelScoutActionInputV1');
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_SCOUT_ACTIONS)return;
-const VERSION='1.1.52';
+const VERSION='1.1.53';
 const core=window.MVCI_REBEL_SCOUT_CORE;
 const STATE_KEY='rebelScoutActionInputV1';
 const SYNC_KEY='rebelScoutSyncQueueV1';
@@ -547,7 +548,7 @@ async function pageClickScheduleRow(row){installRowBridge();if(!row?.isConnected
 function installOtRowBridge(){if(document.getElementById(OT_ROW_BRIDGE_ID))return;const s=document.createElement('script');s.id=OT_ROW_BRIDGE_ID;s.textContent=`(()=>{if(window.__MVCI_OT_ROW_BRIDGE_120)return;window.__MVCI_OT_ROW_BRIDGE_120=1;document.addEventListener('mvci:ot-row-click-v120',ev=>{const d=ev.detail||{};let ok=false,err='';try{const row=document.querySelector(d.selector);if(!row)throw new Error('OT target row not found');const jq=window.jQuery;if(jq)jq(row).trigger('click');else if(typeof row.click==='function')row.click();else row.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window}));ok=true}catch(e){err=String(e&&e.message||e)}document.dispatchEvent(new CustomEvent('mvci:ot-row-click-result-v120',{detail:{nonce:d.nonce,ok,err}}))})})();`;document.documentElement.appendChild(s)}
 async function pageClickOtRow(row){installOtRowBridge();if(!row?.isConnected)throw new Error('CrewSense OT target row is no longer connected.');const nonce=`v120-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,attr='data-mvci-ot-row-target';row.setAttribute(attr,nonce);const selector=`[${attr}="${nonce}"]`,cleanup=()=>{try{if(row.getAttribute(attr)===nonce)row.removeAttribute(attr)}catch(_){}};return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{document.removeEventListener('mvci:ot-row-click-result-v120',fn);cleanup();reject(new Error('CrewSense OT row-open bridge timed out.'))},5000);const fn=ev=>{if(ev.detail?.nonce!==nonce)return;clearTimeout(timer);document.removeEventListener('mvci:ot-row-click-result-v120',fn);cleanup();ev.detail?.ok?resolve(ev.detail):reject(new Error(ev.detail?.err||'CrewSense OT row-open bridge failed.'))};document.addEventListener('mvci:ot-row-click-result-v120',fn);document.dispatchEvent(new CustomEvent('mvci:ot-row-click-v120',{detail:{nonce,selector}}))})}
 function michaelSelectedChip(dlg){
-  const chips=[...dlg.querySelectorAll('li.tagedit-listelement-old,.tagedit-listelement-old')].filter(visible).filter(el=>/^Michael Brion(?:\s*x)?$/i.test(clean(el.textContent||'').replace(/×/g,'x'))||/^Michael Brion\b/i.test(clean(el.textContent||'')));
+  const chips=[...dlg.querySelectorAll('li.tagedit-listelement-old,.tagedit-listelement-old')].filter(visible).filter(el=>/^Michael Brion(?:\s*x)?$/i.test(clean(el.textContent||'').replace(/Ã—/g,'x'))||/^Michael Brion\b/i.test(clean(el.textContent||'')));
   return chips.length===1?chips[0]:null;
 }
 function installOtAutocompleteBridge(){
@@ -804,7 +805,7 @@ window.MVCI_REBEL_SCOUT_ACTIONS=Object.freeze({
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_SCOUT)return;
-const VERSION='1.1.52';
+const VERSION='1.1.53';
 const core=window.MVCI_REBEL_SCOUT_CORE;
 function compareScoutVersions(a,b){
  const digits=v=>String(v||'').split('.').map(x=>Number(x)||0);
@@ -1077,6 +1078,27 @@ async function runQueue(){if(state.runner)return;state.runner=true;try{while(tru
   }
 }finally{state.runner=false;state.busy=false;render()}}
 async function startSync(mode='normal'){if(!core.paired()){saveStatus('Pair Rebel Scout before syncing.','error');return}if(!ownLock(false)){saveStatus('Sync is already running in another CrewSense tab.','info');return}const old=queue();if(old.active){state.open=true;set('rebelScoutExpandedV1',true);saveStatus('Resuming existing read-only Scout sync; progress will appear here.','info');runQueue();return}state.busy=true;state.open=true;set('rebelScoutExpandedV1',true);saveStatus('Contacting Rebel Command for the latest read-only staffing/OT sync plan...','info');try{const plan=await syncPlanReliable('initial',mode),hard=Math.max(1,Number(plan?.config?.hardSafetyMaxChecks)||250),budget=Math.max(1,Math.min(hard,Number(plan?.config?.legacyMaxDatesPerSession)||18)),q={schemaVersion:3,mode,operationalDate:mode==='daily-review'?currentOperationalDate():'',active:true,startedAt:Date.now(),index:0,items:[],results:[],successKeys:[],finalFailures:[],attempts:{},navReloads:{},hardSafetyMax:hard,sessionBudget:budget,sessionKeys:[],totalAdded:0};mergeNewNeeded(q,plan);q.active=q.items.length>0;saveQueue(q);if(!q.active){releaseLock();recordDailyReview(q,true,'All selected dates already current');saveStatus('All selected dates already current. No scan required.','success');return}state.open=true;set('rebelScoutExpandedV1',true);render();saveStatus(`Background Scout batch started: ${q.items.length} highest-priority checks (session budget ${budget}). Keep this CrewSense tab open; you can work in other tabs while Scout runs.`,'info');runQueue()}catch(e){releaseLock();if(mode==='daily-review')recordDailyReview({mode,operationalDate:currentOperationalDate()},false,clean(e?.message||e));saveStatus(`Sync could not start: ${clean(e?.message||e)}`,'error')}finally{state.busy=false;render()}}
+// Enterprise worker: exactly ONE current operational-day full-census
+// ListView capture. It uses the existing authenticated Scout collector and
+// persistent queue, rather than a new browser, new login, or 18-date sync.
+async function startEnterpriseCurrentStaffing(workDate){
+  if(!core.paired()||state.busy||queue().active||!ownLock(false))
+    return false;
+  const today=currentOperationalDate();
+  if(workDate!==today){releaseLock();return false}
+  const item={type:'staffing',workDate:today};
+  const q={schemaVersion:3,mode:'enterprise-current',
+    operationalDate:today,active:true,startedAt:Date.now(),index:0,
+    items:[item],results:[],successKeys:[],finalFailures:[],
+    attempts:{},navReloads:{},hardSafetyMax:1,sessionBudget:1,
+    sessionKeys:['staffing:'+today],totalAdded:1};
+  saveQueue(q);
+  // Uses the existing read-only scheduler. If ListView navigation reloads,
+  // runQueue resumes via Scout's persisted queue startup path.
+  saveStatus('Enterprise slow worker: one current-day staffing capture.','info');
+  void runQueue();
+  return true;
+}
 function stopSync(){const q=queue();q.active=false;q.stoppedAt=Date.now();saveQueue(q);releaseLock();if(q.mode==='daily-review')try{sessionStorage.removeItem(SHIFT_WATCH_KEY)}catch(_){}saveStatus('Sync stopped by user.','info')}
 function shiftWatchEnabled(){try{return sessionStorage.getItem(SHIFT_WATCH_KEY)==='on'}catch(_){return false}}
 function shiftWatchLast(){try{return JSON.parse(sessionStorage.getItem(SHIFT_WATCH_LAST_KEY)||'{}')}catch(_){return {}}}
@@ -1128,11 +1150,91 @@ async function captureCurrentStaffing(){try{state.busy=true;render();const d=act
 async function captureCurrentOT(){try{state.busy=true;render();if(!isRankingPage())throw new Error('Open the CrewSense Global OT Rankings page first.');const d=actualVisibleDate();const r=await window.MVCI_REBEL_SCOUT_OT.captureRanking({force:true});saveStatus(`OT ranking ${d||''} captured (${r?.ranking?.quality||'unknown'}).`,r?.ranking?.quality==='good'?'success':'info')}catch(e){saveStatus(clean(e?.message||e),'error')}finally{state.busy=false;render()}}
 async function runNextAction(){const api=window.MVCI_REBEL_SCOUT_ACTIONS;if(!api)throw new Error('Action input module is unavailable.');const trace=window.MVCI_REBEL_SCOUT_TRACE,st=api.status?.()||{};if(st.actionType==='schedule'&&st.stage==='prepared'){if(st.testOnly===true)throw new Error('This schedule preview is test-only. Clear the local action state from Tools / Diagnostics before running another action.');await trace?.startAction?.({packageKey:st.packageKey,actionType:st.actionType,targetDate:st.targetDate,command:'commit-schedule'});await trace?.checkpoint?.('trace_user_command','User invoked COMMIT ONE SCHEDULE SAVE.');return api.commitPrepared()}if(st.actionType==='overtime_signup'&&st.stage==='ot_preview_ready'){if(st.testOnly===true)throw new Error('This OT preview is test-only. Clear the local action state from Tools / Diagnostics before running another action.');await trace?.startAction?.({packageKey:st.packageKey,actionType:st.actionType,targetDate:st.targetDate,command:'commit-ot'});await trace?.checkpoint?.('trace_user_command','User invoked COMMIT ONE OT SIGNUP.');return api.commitOtPrepared()}await trace?.startAction?.({command:'run-next-action'});await trace?.checkpoint?.('trace_user_command','User invoked RUN NEXT ACTION before Scout queried the Rebel Command worklist.');try{const list=await api.worklist(),all=Array.isArray(list)?list:[],recover=all.filter(x=>x.stage==='reread_verification'||x.status==='writing').sort((a,b)=>String(a.targetDate||'').localeCompare(String(b.targetDate||''))),isNonWritable=x=>(api.nonWritablePackage||(()=>false))(x),writable=all.filter(x=>!isNonWritable(x)),pool=recover.length?recover:(writable.length?writable:all),pkg=pool.sort((a,b)=>String(a.targetDate||'').localeCompare(String(b.targetDate||'')))[0];if(!pkg)throw new Error('No approved/queued Rebel Command action is waiting.');await trace?.startAction?.({packageKey:pkg.packageKey,actionType:pkg.actionType,targetDate:pkg.targetDate,command:'package-selected'});await trace?.checkpoint?.('trace_package_selected','Scout selected the Rebel Command action package.',{package:{packageKey:pkg.packageKey,actionType:pkg.actionType,targetDate:pkg.targetDate,status:pkg.status,stage:pkg.stage}});if(pkg.actionType==='schedule')return api.startScheduleInput();if(pkg.actionType==='overtime_signup')return api.startOtInput();throw new Error(`Unsupported Rebel Command action type: ${clean(pkg.actionType||'unknown')}.`)}catch(e){await trace?.checkpoint?.('trace_action_command_error','RUN NEXT ACTION failed before or during package dispatch.',{error:{message:clean(e?.message||e)}});await trace?.stop?.('command_error');throw e}}
 function style(){if(document.getElementById(STYLE_ID))return;const s=document.createElement('style');s.id=STYLE_ID;s.textContent=`#${ROOT_ID}{position:fixed;right:16px;bottom:16px;z-index:2147483647;font-family:Arial,sans-serif;color:#243746}#${ROOT_ID} *{box-sizing:border-box}#${ROOT_ID} .orb{width:54px;height:54px;border:2px solid #1b5a7a;border-radius:50%;background:#fff;color:#153e5c;box-shadow:0 5px 18px rgba(13,50,72,.28);cursor:pointer;padding:0;margin:0;display:flex;align-items:center;justify-content:center;}#${ROOT_ID} .orb.header-orb{width:38px;height:38px;min-width:38px;border-color:rgba(255,255,255,.7);box-shadow:none}#${ROOT_ID} .orb.header-orb img{width:30px!important;height:30px!important;}#${ROOT_ID} .p{width:390px;max-width:calc(100vw - 24px);margin-bottom:8px;background:#f6f8f9;border:1px solid #cbd8df;border-radius:11px;box-shadow:0 10px 30px #0005;overflow:hidden}#${ROOT_ID} .h{background:#173e63;color:#fff;padding:12px 14px;display:flex;justify-content:space-between;gap:10px}#${ROOT_ID} .b{padding:12px}#${ROOT_ID} button{cursor:pointer}#${ROOT_ID} .a{width:100%;min-height:42px;margin-top:8px;border:1px solid #173e63;border-radius:8px;background:#173e63;color:#fff;font-weight:800}#${ROOT_ID} .a.commit{background:#177245;border-color:#177245}#${ROOT_ID} .s{min-height:34px;border:1px solid #cbd8df;border-radius:8px;background:#fff;color:#29495a;font-weight:700;padding:7px}#${ROOT_ID} .grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}#${ROOT_ID} .m{margin-top:8px;padding:8px;border:1px solid #dce5ea;border-radius:8px;background:#fff;font-size:11px;line-height:1.4;max-height:120px;overflow:auto}#${ROOT_ID} .ok{border-color:#a7d9bd;background:#f0fbf5;color:#216340}#${ROOT_ID} .err{border-color:#efb2b2;background:#fff4f4;color:#8b2c2c}#${ROOT_ID} .meta{font-size:10px;color:#637987;line-height:1.35;margin-bottom:5px}`;document.documentElement.appendChild(s)}
-function render(){style();let r=document.getElementById(ROOT_ID);if(!r){r=document.createElement('div');r.id=ROOT_ID;document.documentElement.appendChild(r)}r.replaceChildren();const q=queue();if(state.open){const p=document.createElement('div');p.className='p';p.innerHTML=`<div class="h"><div><b>REBEL SCOUT</b><div style="font-size:10px;opacity:.75">v${VERSION} · read-only CrewSense collector</div></div><button id="rs-close" class="orb header-orb" type="button" title="Minimize Rebel Scout" aria-label="Minimize Rebel Scout">${REBEL_SYMBOL_HTML}</button></div><div class="b"><div class="meta">Connection: <b>${core.paired()?'paired':'needed'}</b> · Page: <b>${isListView()?'Staffing ListView':isRankingPage()?'OT Rankings':'CrewSense'}</b>${actualVisibleDate()?` · Date: <b>${esc(actualVisibleDate())}</b>`:''}</div><button id="rs-sync" class="a" ${state.busy?'disabled':''}>${state.busy?'CHECKING RC CONNECTION…':q.active?`RESUME SYNC · ${Math.min((q.index||0)+1,q.items?.length||0)}/${q.items?.length||0}`:'SYNC REBEL COMMAND'}</button>${q.active?'<button id="rs-stop" class="a" style="background:#fff;color:#173e63">STOP SYNC</button>':''}<button id="rs-watch" class="s" style="width:100%;margin-top:7px" type="button">${shiftWatchEnabled()?'STOP DAILY REVIEW':'DAILY STAFFING REVIEW (THIS TAB)'}</button><button id="rs-report" class="s" style="width:100%;margin-top:8px">IMPORT STAFFING REPORT CSV</button><details style="margin-top:8px"><summary class="meta" style="cursor:pointer;font-weight:700">DIAGNOSTICS / CONNECTION</summary><div style="margin-top:6px"><div class="grid"><button id="rs-staff" class="s" ${!isListView()||state.busy?'disabled':''}>CAPTURE STAFFING</button><button id="rs-ot" class="s" ${!isRankingPage()||state.busy?'disabled':''}>CAPTURE OT RANKING</button></div><button id="rs-connect" class="s" style="width:100%;margin-top:6px">CONNECTION</button><button id="rs-update" class="s" style="width:100%;margin-top:6px">CHECK FOR UPDATE</button><a id="rs-install" class="s" href="${esc(core.managedUpdateUrl)}" target="_blank" rel="noopener noreferrer" style="display:block;width:100%;margin-top:6px;text-align:center;text-decoration:none">INSTALL / UPDATE MANUALLY</a></div></details><div class="m ${state.kind==='success'?'ok':state.kind==='error'?'err':''}">${esc(state.message)}${q.active&&q.items?.[q.index]?`<br><b>Current:</b> ${esc(q.items[q.index].type)} · ${esc(q.items[q.index].workDate)}`:''}</div><div class="meta" style="margin-top:8px">Read-only collector. Scout gathers staffing and overtime information for Rebel Command. CrewSense editing is disabled in this build.</div></div>`;r.appendChild(p);p.querySelector('#rs-close').onclick=()=>{state.open=false;set('rebelScoutExpandedV1',false);render()};p.querySelector('#rs-sync').onclick=()=>q.active?runQueue():startSync();p.querySelector('#rs-report').disabled=state.busy||q.active;p.querySelector('#rs-report').onclick=chooseStaffingReport;p.querySelector('#rs-stop')?.addEventListener('click',stopSync);p.querySelector('#rs-watch').onclick=()=>shiftWatchEnabled()?stopShiftWatch():startShiftWatch();p.querySelector('#rs-staff').onclick=captureCurrentStaffing;p.querySelector('#rs-ot').onclick=captureCurrentOT;p.querySelector('#rs-connect').onclick=async()=>{try{await core.configure();saveStatus('Connection configuration complete.','success')}catch(e){saveStatus(`Connection failed: ${clean(e?.message||e)}`,'error')}};p.querySelector('#rs-update').onclick=checkForScoutUpdate}else{const orb=document.createElement('button');orb.className='orb';orb.type='button';orb.innerHTML=REBEL_SYMBOL_HTML;orb.title='Open Rebel Scout';orb.setAttribute('aria-label','Open Rebel Scout');orb.onclick=()=>{state.open=true;set('rebelScoutExpandedV1',true);render()};r.appendChild(orb)}}
+function render(){style();let r=document.getElementById(ROOT_ID);if(!r){r=document.createElement('div');r.id=ROOT_ID;document.documentElement.appendChild(r)}r.replaceChildren();const q=queue();if(state.open){const p=document.createElement('div');p.className='p';p.innerHTML=`<div class="h"><div><b>REBEL SCOUT</b><div style="font-size:10px;opacity:.75">v${VERSION} Â· read-only CrewSense collector</div></div><button id="rs-close" class="orb header-orb" type="button" title="Minimize Rebel Scout" aria-label="Minimize Rebel Scout">${REBEL_SYMBOL_HTML}</button></div><div class="b"><div class="meta">Connection: <b>${core.paired()?'paired':'needed'}</b> Â· Page: <b>${isListView()?'Staffing ListView':isRankingPage()?'OT Rankings':'CrewSense'}</b>${actualVisibleDate()?` Â· Date: <b>${esc(actualVisibleDate())}</b>`:''}</div><button id="rs-sync" class="a" ${state.busy?'disabled':''}>${state.busy?'CHECKING RC CONNECTIONâ€¦':q.active?`RESUME SYNC Â· ${Math.min((q.index||0)+1,q.items?.length||0)}/${q.items?.length||0}`:'SYNC REBEL COMMAND'}</button>${q.active?'<button id="rs-stop" class="a" style="background:#fff;color:#173e63">STOP SYNC</button>':''}<button id="rs-watch" class="s" style="width:100%;margin-top:7px" type="button">${shiftWatchEnabled()?'STOP DAILY REVIEW':'DAILY STAFFING REVIEW (THIS TAB)'}</button><button id="rs-report" class="s" style="width:100%;margin-top:8px">IMPORT STAFFING REPORT CSV</button><details style="margin-top:8px"><summary class="meta" style="cursor:pointer;font-weight:700">DIAGNOSTICS / CONNECTION</summary><div style="margin-top:6px"><div class="grid"><button id="rs-staff" class="s" ${!isListView()||state.busy?'disabled':''}>CAPTURE STAFFING</button><button id="rs-ot" class="s" ${!isRankingPage()||state.busy?'disabled':''}>CAPTURE OT RANKING</button></div><button id="rs-connect" class="s" style="width:100%;margin-top:6px">CONNECTION</button><button id="rs-update" class="s" style="width:100%;margin-top:6px">CHECK FOR UPDATE</button><a id="rs-install" class="s" href="${esc(core.managedUpdateUrl)}" target="_blank" rel="noopener noreferrer" style="display:block;width:100%;margin-top:6px;text-align:center;text-decoration:none">INSTALL / UPDATE MANUALLY</a></div></details><div class="m ${state.kind==='success'?'ok':state.kind==='error'?'err':''}">${esc(state.message)}${q.active&&q.items?.[q.index]?`<br><b>Current:</b> ${esc(q.items[q.index].type)} Â· ${esc(q.items[q.index].workDate)}`:''}</div><div class="meta" style="margin-top:8px">Read-only collector. Scout gathers staffing and overtime information for Rebel Command. CrewSense editing is disabled in this build.</div></div>`;r.appendChild(p);p.querySelector('#rs-close').onclick=()=>{state.open=false;set('rebelScoutExpandedV1',false);render()};p.querySelector('#rs-sync').onclick=()=>q.active?runQueue():startSync();p.querySelector('#rs-report').disabled=state.busy||q.active;p.querySelector('#rs-report').onclick=chooseStaffingReport;p.querySelector('#rs-stop')?.addEventListener('click',stopSync);p.querySelector('#rs-watch').onclick=()=>shiftWatchEnabled()?stopShiftWatch():startShiftWatch();p.querySelector('#rs-staff').onclick=captureCurrentStaffing;p.querySelector('#rs-ot').onclick=captureCurrentOT;p.querySelector('#rs-connect').onclick=async()=>{try{await core.configure();saveStatus('Connection configuration complete.','success')}catch(e){saveStatus(`Connection failed: ${clean(e?.message||e)}`,'error')}};p.querySelector('#rs-update').onclick=checkForScoutUpdate}else{const orb=document.createElement('button');orb.className='orb';orb.type='button';orb.innerHTML=REBEL_SYMBOL_HTML;orb.title='Open Rebel Scout';orb.setAttribute('aria-label','Open Rebel Scout');orb.onclick=()=>{state.open=true;set('rebelScoutExpandedV1',true);render()};r.appendChild(orb)}}
 restoreStatus();render();
 setInterval(()=>{if(shiftWatchEnabled())patrolCurrentShift()},60000);
 setTimeout(()=>{if(shiftWatchEnabled())patrolCurrentShift()},3500);
 setInterval(()=>{const q=queue();if(q.active){pulseLock();render()}},30000);
 setTimeout(()=>{const q=queue();if(q.active){state.open=true;set('rebelScoutExpandedV1',true);saveStatus('Resuming saved Scout sync. Status and any errors will remain visible.','info');runQueue()}},1300);
-window.MVCI_REBEL_SCOUT={version:VERSION,collectorOnly:true,startSync,stopSync,runQueue,captureCurrentStaffing,captureCurrentOT,importStaffingReport,chooseStaffingReport,status:()=>({paired:core.paired(),collectorOnly:true,queue:queue(),shiftWatchEnabled:shiftWatchEnabled(),shiftWatchLast:shiftWatchLast(),visibleDate:actualVisibleDate(),page:isListView()?'staffing':isRankingPage()?'overtime':'other'})};
+window.MVCI_REBEL_SCOUT={version:VERSION,collectorOnly:true,startSync,startEnterpriseCurrentStaffing,stopSync,runQueue,captureCurrentStaffing,captureCurrentOT,importStaffingReport,chooseStaffingReport,status:()=>({paired:core.paired(),collectorOnly:true,queue:queue(),shiftWatchEnabled:shiftWatchEnabled(),shiftWatchLast:shiftWatchLast(),visibleDate:actualVisibleDate(),page:isListView()?'staffing':isRankingPage()?'overtime':'other'})};
+})();
+
+/* Enterprise-only, no-UI bridge. Never runs on other firefighters' tabs.
+   A dedicated ?mvci_worker=staffing CrewSense tab is required. */
+(function(){
+'use strict';
+const ROLE='staffing', URL='http://127.0.0.1:18764';
+const TAB_KEY='mvciEnterpriseBrowserTabV1';
+const LEASE_KEY='mvciEnterpriseStaffingLeaseV1';
+const ACTIVE_KEY='mvciEnterpriseDedicatedRoleV1';
+try{
+  if(new URLSearchParams(location.search).get('mvci_worker')===ROLE)
+    sessionStorage.setItem(ACTIVE_KEY,ROLE);
+  if(sessionStorage.getItem(ACTIVE_KEY)!==ROLE)return;
+}catch{return}
+const tabId=(()=>{let t=sessionStorage.getItem(TAB_KEY);
+  if(!t){t='scout-'+Date.now().toString(36)+'-'+
+    Math.random().toString(36).slice(2);sessionStorage.setItem(TAB_KEY,t)}
+  return t})();
+let running=false;
+function call(route,data){
+  return new Promise((resolve,reject)=>{
+    GM_xmlhttpRequest({method:'POST',url:URL+'/v1/'+route,
+      headers:{'Content-Type':'application/json','X-MVCI-Collector':'v1'},
+      data:JSON.stringify({role:ROLE,tabId,...data}),timeout:9000,
+      onload:r=>{let x={};try{x=JSON.parse(r.responseText||'{}')}catch{}
+        if(r.status===200&&x.ok===true)resolve(x);
+        else reject(Error('broker '+r.status+' '+(x.error||'unknown')))},
+      onerror:()=>reject(Error('enterprise worker unavailable')),
+      ontimeout:()=>reject(Error('enterprise worker timeout'))
+    });
+  });
+}
+function readLease(){try{return JSON.parse(sessionStorage.getItem(LEASE_KEY)||'null')}catch{return null}}
+function saveLease(v){try{
+  if(v)sessionStorage.setItem(LEASE_KEY,JSON.stringify(v));
+  else sessionStorage.removeItem(LEASE_KEY)
+}catch{}}
+async function pulse(){
+  if(running)return;running=true;
+  try{
+    const api=window.MVCI_REBEL_SCOUT;
+    if(!api?.startEnterpriseCurrentStaffing||!api?.status)return;
+    const now=api.status();
+    const ready=now.paired===true;
+    const busy=now.queue?.active===true;
+    await call('heartbeat',{ready,dedicated:true,busy});
+    const lease=readLease();
+    if(lease){
+      if(busy)return;
+      const q=now.queue||{};
+      // A real full-census sent-good receipt is required. A request,
+      // navigation, or an unverified ListView is NOT completion.
+      const success=q.operationalDate===lease.workDate&&
+        (q.successKeys||[]).includes('staffing:'+lease.workDate)&&
+        (q.finalFailures||[]).every(x=>x.key!=='staffing:'+lease.workDate);
+      try{await call('complete',{id:lease.id,
+        outcome:success?'success':'error'})}finally{saveLease(null)}
+      return;
+    }
+    if(!ready||busy)return;
+    const task=await call('claim',{});
+    if(!task.granted)return;
+    saveLease({id:task.id,workDate:task.workDate,
+      claimedAt:Date.now()});
+    const started=await api.startEnterpriseCurrentStaffing(task.workDate);
+    if(!started){
+      try{await call('complete',{id:task.id,outcome:'auth_required'})}finally{
+        saveLease(null)
+      }
+    }
+  }catch(_){
+    // Server status exposes missed heartbeats; don't spam the crew UI.
+  }finally{running=false}
+}
+setTimeout(()=>void pulse(),4500);
+setInterval(()=>void pulse(),25000);
+window.MVCI_ENTERPRISE_STAFFING_BRIDGE={role:ROLE,status:()=>({
+  dedicated:true,tabId,hasLease:!!readLease()
+})};
 })();
