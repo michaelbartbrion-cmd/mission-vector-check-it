@@ -84,8 +84,8 @@ try{
  if(!reviewStatus||!reviewStatus.textContent.includes('Original reports')&&
     !reviewStatus.textContent.includes('No official PPE inspections'))
   throw Error('No visible bulk-review completion feedback');
- if(!messages.some(s=>s.includes('21 report(s) marked REVIEWING')&&
-    s.includes('No native PPE inspection')))
+ if(!messages.some(s=>s.includes('Reviewed 21 of 21 software reports')&&
+    s.includes('No official PPE inspections')))
   throw Error('No explicit acknowledgment versus physical check semantics');
  output={pass:true,initialCount:21,acknowledged:21,
   confirmedOnly:true,postCount:errorInbox.count};
