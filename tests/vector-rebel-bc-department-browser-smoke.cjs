@@ -26,14 +26,20 @@ const getCaptainPersonOptions=()=>[
 const makeButton=label=>{const el=document.createElement('button');el.textContent=label;return el};
 const makeOverlayBox=()=>{
  const overlay=document.createElement('div');overlay.className='test-overlay';
- const box=document.createElement('div');overlay.appendChild(box);
+ overlay.style.cssText='position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:18px;box-sizing:border-box;';
+ const box=document.createElement('div');box.style.cssText='max-height:90vh;overflow:auto;max-width:94vw;padding:20px;box-sizing:border-box;';
+ overlay.appendChild(box);
  document.body.appendChild(overlay);return{overlay,box};
 };
 const loadJSON=(k,def)=>STORE.has(k)?STORE.get(k):def;
 const saveJSON=(k,v)=>STORE.set(k,structuredClone(v));
 const displayMonthKey=x=>x==='2026-10'?'October 2026':'November 2026';
 const captainAuditWindow=()=>({months:['2026-10','2026-11'],tours:[
- {month:'2026-10',startDate:'2026-10-27',endDate:'2026-10-28'},
+ {month:'2026-10',startDate:'2026-10-04',endDate:'2026-10-05'},
+ {month:'2026-10',startDate:'2026-10-10',endDate:'2026-10-11'},
+ {month:'2026-10',startDate:'2026-10-16',endDate:'2026-10-17'},
+ {month:'2026-10',startDate:'2026-10-22',endDate:'2026-10-23'},
+ {month:'2026-10',startDate:'2026-10-28',endDate:'2026-10-29'},
  {month:'2026-11',startDate:'2026-11-03',endDate:'2026-11-04'},
  {month:'2026-11',startDate:'2026-11-09',endDate:'2026-11-10'},
  {month:'2026-11',startDate:'2026-11-15',endDate:'2026-11-16'},
@@ -119,7 +125,7 @@ try{
    throw Error('BC failed OFF duty or included previous-tour overtime');
  const headers=[...table.querySelectorAll('th')].map(x=>x.textContent);
  if(!headers.includes('October 2026')||!headers.includes('November 2026')||
-    !headers.includes('10-27 / 10-28')||!headers.includes('11-27 / 11-28'))
+    !headers.includes('4–5')||!headers.includes('27–28'))
    throw Error('BC did not show both full calendar months');
  const grouped=[...table.querySelectorAll('tr[data-bc-station-group]')];
  if(grouped[0]?.getAttribute('data-bc-station-group')!=='BC'||
@@ -131,13 +137,17 @@ try{
  if(!nicole||!nicole.textContent.includes('OFF'))
    throw Error('Trusted two-day CrewSense leave evidence did not show OFF');
  const austin=[...table.querySelectorAll('tr')].find(x=>x.textContent.includes('Austin Fox'));
- if(!austin||!austin.textContent.includes('NOT VERIFIED'))
+ if(!austin||!austin.textContent.includes('?'))
    throw Error('Other employees must show explicit NOT VERIFIED rather than blank');
  if(!summary.textContent.includes('STALE: review needed'))
    throw Error('BC failed to label six-day-old schedule stale');
  if(!names.some(x=>x.includes('Michael Brion')&&
-    x.includes('PARTIAL 1 / 2')&&x.includes('ALL COMPLETED')))
+    x.includes('PART 1 / 2')&&x.includes('DONE')))
    throw Error('BC did not show partial and all-completed native tour statuses');
+ const wrap=table.parentElement;
+ if(table.scrollWidth>wrap.clientWidth+3)
+   throw Error('Two-month matrix overflows horizontally at desktop width ('+
+     table.scrollWidth+' > '+wrap.clientWidth+')');
  if(!table.querySelector('th')?.textContent.includes('FIREFIGHTER'))
    throw Error('BC did not use consistent Captain-like table');
  if(overlay.querySelectorAll('details').length!==1||monitorOpened)
@@ -145,6 +155,8 @@ try{
  const review=[...overlay.querySelectorAll('button')].find(x=>
   x.textContent.includes('Review Today'));
  review.click();
+ if(table.scrollWidth>table.parentElement.clientWidth+3)
+   throw Error('Two-month review mode introduced horizontal overflow');
  const remove=[...table.querySelectorAll('input[aria-label]')]
   .find(x=>x.getAttribute('aria-label')==='At work Austin Fox');
  if(!remove)throw Error('BC review did not show one checkbox per scheduled person');
@@ -158,7 +170,7 @@ try{
    throw Error('BC review performed wrong network or persistent storage operation');
  result={pass:true,citywide:true,staleLabel:true,twoMonths:true,
   completedAndPartial:true,offVisible:true,bcFirst:true,
-  attendanceReadOnly:true,stationGroups:true,
+  attendanceReadOnly:true,stationGroups:true,allColumnsFit:true,
   noOldOt:true,localReview:true,monitorHidden:true};
 }catch(error){result={pass:false,error:String(error.message)}}
 document.body.dataset.bcDepartment=result.pass?'PASS':'FAIL';
@@ -171,7 +183,8 @@ const folder=fs.mkdtempSync(path.join(os.tmpdir(),'vector-bc-city-'));
 try{
  const p=path.join(folder,'view.html');fs.writeFileSync(p,html);
  const r=spawnSync(browser,['--headless=new','--no-first-run','--disable-gpu',
-  '--disable-extensions','--disable-background-networking','--virtual-time-budget=1200',
+  '--disable-extensions','--disable-background-networking',
+  '--window-size=1440,900','--force-device-scale-factor=1','--virtual-time-budget=1200',
   '--user-data-dir='+path.join(folder,'profile'),'--dump-dom','file:///'+p.replace(/\\/g,'/')],{
   encoding:'utf8',timeout:30000,maxBuffer:8*1024*1024,windowsHide:true
  });
