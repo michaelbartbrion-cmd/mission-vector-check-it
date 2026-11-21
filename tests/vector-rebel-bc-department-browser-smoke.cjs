@@ -98,7 +98,7 @@ const cPilotBridge=async(method,action,data,query)=>{
   return{ok:true,readOnly:true,scope:'captain-attendance-evidence',
    records:people.flatMap(name=>dates.map(date=>({
     name,date,sourceQuality:'good_direct_capture',
-    status:name==='Nicole Duncan'&&['2026-10-27','2026-10-28'].includes(date)?
+    status:name==='Nicole Duncan'&&['2026-10-28','2026-10-29'].includes(date)?
      'full_leave_evidence':name==='Austin Fox'&&date==='2026-10-27'?
      'work_evidence':'unknown'
    })))};
