@@ -17370,6 +17370,27 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
         return{label:'UNKNOWN',detail:'No mapped native PPE history for this person and tour',tone:'unknown'};
     }
+    // CrewSense is a read-only attendance source. It may establish a full
+    // day OFF when both operational days have verified leave/deployment
+    // evidence, but it never proves a PPE inspection was completed.
+    function bcDepartmentAttendanceCell(evidence,name,tour,nativeCell){
+        if(nativeCell?.tone&&nativeCell.tone!=='unknown')
+            return nativeCell;
+        const statuses=[tour.startDate,tour.endDate].map(d=>
+            evidence.get(masterNameKey(name)+'|'+d)).filter(Boolean);
+        const offStates=new Set(['full_leave_evidence','deployment_evidence']);
+        if(statuses.length===2&&statuses.every(r=>
+            r.sourceQuality==='good_direct_capture'&&offStates.has(r.status)))
+            return{label:'OFF',tone:'off',detail:
+                'Direct CrewSense records show full leave/deployment on BOTH tour days. No PPE tour check required.'};
+        if(statuses.some(r=>
+            r.sourceQuality==='good_direct_capture'&&r.status==='work_evidence'))
+            return{label:'NOT VERIFIED',tone:'unknown',
+                detail:'CrewSense has unit-work evidence on this tour. No dated native PPE Item Log was collected for this person; completion remains UNKNOWN, not a failure.'};
+        return nativeCell||{label:'UNKNOWN',tone:'unknown',
+            detail:'No trustworthy native PPE record or two-day absence evidence.'};
+    }
+
     function showBcDepartmentCheck(){
         const {overlay,box}=makeOverlayBox('1320px');
         box.style.maxWidth='96vw';
@@ -17416,6 +17437,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const current=windows.tours.slice();
         const months=windows.months.slice();
         let historyLoadId=0;
+        let attendance=new Map(),attendanceMessage='';
         const stamp=raw=>{
             const t=Date.parse(raw||'');
             return Number.isFinite(t)?new Date(t).toLocaleString():'unavailable';
@@ -17431,7 +17453,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 (manual?.confirmedAt?' · BC-confirmed':' · schedule/confirmed candidates')+
                 ' · CrewSense captured '+stamp(schedule?.capturedAt)+
                 (schedule?.stale?' (STALE: review needed)':'')+
-                '. Schedule is not roll call; unverified PPE is not a failed inspection.';
+                '. Scheduled is not confirmed present; inspection Unknown is not FAILED.'+
+                (attendanceMessage?' '+attendanceMessage:'');
             table.replaceChildren();
             table.style.minWidth=(610+current.length*132)+'px';
             const monthRow=document.createElement('tr');
@@ -17481,6 +17504,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const station=bcDepartmentStationName(person);
                 const boundary=station!==lastStation;
                 lastStation=station;
+                if(boundary){
+                    const group=document.createElement('tr');
+                    group.setAttribute('data-bc-station-group',station);
+                    const label=document.createElement('td');
+                    label.colSpan=fixed.length+current.length;
+                    label.textContent=station;
+                    label.style.cssText='background:#d6e7f1;color:#163f5d;'+
+                        'font:800 12px Arial;padding:6px 10px;'+
+                        'border-top:2px solid #8daec1;text-align:left;';
+                    group.appendChild(label);
+                    table.appendChild(group);
+                }
                 if(reviewing){
                     const td=document.createElement('td');
                     const chk=document.createElement('input');
@@ -17495,14 +17530,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const history=current.map(t=>
                     t.startDate>date?
                         {label:'NOT DUE',detail:'Future C-shift tour',tone:'future'}:
-                        bcCShiftHistoryCell(report,person.name,t.startDate,
-                            historyBoards.get(t.startDate)||
-                            (t.startDate===pilot?.tourStart?pilot:null)));
+                        bcDepartmentAttendanceCell(attendance,person.name,t,
+                            bcCShiftHistoryCell(report,person.name,t.startDate,
+                                historyBoards.get(t.startDate)||
+                                (t.startDate===pilot?.tourStart?pilot:null))));
                 const active=current.find(t=>t.startDate<=date&&t.endDate>=date);
                 const today=person.duty==='off'?
                     {label:'OFF',detail:'Confirmed off today',tone:'off'}:
-                    active?bcCShiftHistoryCell(report,person.name,active.startDate,
-                        historyBoards.get(active.startDate)||pilot):
+                    active?bcDepartmentAttendanceCell(attendance,person.name,active,
+                        bcCShiftHistoryCell(report,person.name,active.startDate,
+                            historyBoards.get(active.startDate)||pilot)):
                     {label:'UNKNOWN',detail:'No native tour record for this date',tone:'unknown'};
                 const duty=person.duty==='off'?
                     {label:'OFF',tone:'off',detail:'Captain/BC explicitly confirmed off today'}:
@@ -17520,7 +17557,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     const td=document.createElement('td');
                     td.textContent=field.text;td.title=field.title||'';
                     td.style.cssText='padding:8px;border-bottom:1px solid #dbe8ef;'+
-                        (i===0?'font-weight:700;':'')+
+                        (i===0?'font-weight:700;position:sticky;left:0;'+
+                            'z-index:2;background:'+(index%2?'#f5f9fb':'#fff')+';':'')+
                         (field.tone?(toneStyle[field.tone]||toneStyle.unknown):'')+
                         (field.tone?'font-weight:700;text-align:center;white-space:nowrap;':'')+
                         (boundary?'border-top:2px solid #a7c0ce;':'');
@@ -17557,6 +17595,46 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     clean(error?.message||error);
             }
             render();
+            // Request the already-existing read-only CrewSense attendance
+            // evidence for each visible firefighter and completed C tour.
+            // This can mark verified full-tour OFF without inventing PPE.
+            // Never submit inspection forms or change CrewSense.
+            attendance=new Map();attendanceMessage='';
+            const auditDates=[...new Set(current.flatMap(t=>[t.startDate,t.endDate])
+                .filter(d=>d<=date))].sort();
+            const names=[...new Set((schedule?.people||[]).map(p=>clean(p.name))
+                .filter(Boolean))];
+            const attendanceToken=historyLoadId+1;
+            if(auditDates.length&&names.length){
+                void (async()=>{
+                    let loaded=0,failed=0;
+                    for(let i=0;i<names.length;i+=14){
+                        if(!overlay.isConnected||historyLoadId!==attendanceToken)return;
+                        try{
+                            const subset=names.slice(i,i+14);
+                            const result=await cPilotBridge('GET',
+                                'vr-captain-attendance',null,
+                                {dates:auditDates.join(','),
+                                    people:JSON.stringify(subset)});
+                            if(result.scope!=='captain-attendance-evidence'||
+                                result.readOnly!==true||!Array.isArray(result.records))
+                                throw Error('Attendance response incomplete');
+                            for(const rec of result.records){
+                                if(!subset.some(n=>masterNameKey(n)===masterNameKey(rec.name))||
+                                    !auditDates.includes(rec.date))continue;
+                                attendance.set(masterNameKey(rec.name)+'|'+rec.date,rec);
+                                loaded++;
+                            }
+                        }catch{failed++;}
+                        if(historyLoadId!==attendanceToken||!overlay.isConnected)return;
+                        attendanceMessage=loaded?
+                            'Read-only attendance days loaded: '+loaded+
+                                (failed?' (some unavailable)':''):
+                            failed?'Historical attendance could not be verified.':'';
+                        render();
+                    }
+                })();
+            }
             // The current citywide schedule appears immediately. Native
             // C-shift tour history fills from older read-only RC boards.
             // Read two full calendar months, limited to tours already started.
