@@ -63,15 +63,15 @@ test('Master Check for Update gives immediate, visible result for current, newer
     '\nreturn {checkManagedInterfaceRelease,get:()=>({availableRelease,releaseCheckError,lastManualUpdateCheck})};')(
       req=>{network.push(req);const call=calls.shift();if(call.kind==='timeout')req.ontimeout();
         else req.onload({status:call.code,responseText:call.body});},
-      URL,'3.2.91',
+      URL,'3.2.92',
       (a,b)=>{const x=a.split('.').map(Number),y=b.split('.').map(Number);
         for(let i=0;i<3;i++){if(x[i]!==y[i])return x[i]>y[i]?1:-1;}return 0;},
       ()=>{},(msg)=>messages.push(msg)
     );
-  calls.push({code:200,body:'// ==UserScript==\n// @version      3.2.91\n// ==/UserScript=='});
+  calls.push({code:200,body:'// ==UserScript==\n// @version      3.2.92\n// ==/UserScript=='});
   assert.equal(await api.checkManagedInterfaceRelease({manual:true}),true);
   assert.ok(messages.some(x=>x.includes('No newer release is available')));
-  assert.equal(api.get().lastManualUpdateCheck.published,'3.2.91');
+  assert.equal(api.get().lastManualUpdateCheck.published,'3.2.92');
   calls.push({code:200,body:'// @version      3.2.92'});
   assert.equal(await api.checkManagedInterfaceRelease({manual:true}),true);
   assert.equal(api.get().availableRelease,'3.2.92');
