@@ -25,6 +25,7 @@ function renderMock({master=false,owner=false}={}){
   'const showPpeCleanRepairForm=()=>{},launchCaptainDailyCheckFromAnywhere=()=>calls.push(\'full\'),'+
   'getCaptainDailyReport=()=>null,showCaptainDailyReport=()=>calls.push(\'cached\'),'+
   'cPilotEligible=()=>true,showCShiftPilotBoard=(b,m)=>calls.push([\'quick\',b,m||\'bc\']),'+
+  'showBcDepartmentCheck=()=>calls.push([\'department-bc\']),'+
   'showSharedMasterList=()=>{},showStation4ScbaAirpackCheck=()=>{},'+
   'showApparatusCheck=()=>{},showMasterErrorInbox=()=>{},'+
   'showProblemReport=()=>{},showSettings=()=>{},checkManagedInterfaceRelease=()=>{};\n'+
@@ -62,7 +63,7 @@ test('Master BC Check remains distinct from original Daily Captain Check',()=>{
  const click=(v,label)=>v.buttons.find(x=>x.textContent===label).onclick();
  click(master,'BC Check');
  click(master,'Daily Captain Check');
- assert.deepEqual(master.calls,[['quick',true,'bc'],'full'],
+ assert.deepEqual(master.calls,[['department-bc'],'full'],
   'Daily Captain Check must never open the unpopulated pilot instead of native history');
  const user=renderMock({master:false,owner:false});
  click(user,'Daily Captain Check');

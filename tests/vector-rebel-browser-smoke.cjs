@@ -44,7 +44,8 @@ const js=String.raw`
  const showCaptainDailyReport=()=>{cachedShown++;};
  const launchCaptainDailyCheckFromAnywhere=()=>{nativeStarted++;};
  const showApparatusCheck=noop,showProblemReport=noop;
- const showCShiftPilotBoard=()=>{pilotShown++;},cPilotEligible=()=>true,
+ const showCShiftPilotBoard=()=>{pilotShown++;},
+   showBcDepartmentCheck=()=>{pilotShown++;},cPilotEligible=()=>true,
    cPilotRefreshSummary=async()=>{},cPilotFlushReceipts=async()=>{},
    cPilotScheduleBoardPoll=()=>{};
  const showSettings=noop,checkManagedInterfaceRelease=noop;
@@ -88,12 +89,12 @@ const js=String.raw`
       '[data-vector-ppe-actions] button')]
        .find(button=>button.textContent==='Daily Captain Check');
    cached=true;masterDaily.click();
-   if(cachedShown!==1||nativeStarted||pilotShown)
-     throw Error('Master Daily Captain Check did not open original saved history');
+   if(cachedShown!==0||nativeStarted!==1||pilotShown)
+     throw Error('Master Captain bypassed today crew confirmation with stale cached history');
    cached=false;masterDaily.click();
-   if(nativeStarted!==1||pilotShown)
-     throw Error('Master Daily Captain Check opened empty pilot rather than original audit');
-   result.masterDailyOriginal=true;
+   if(nativeStarted!==2||pilotShown)
+     throw Error('Master Captain did not request current crew confirmation');
+   result.masterTodayConfirmGate=true;
    setStatus('SCBA handoff stopped: unexpected form',false);
    updateMinimizedPanelBadge();
    if(miniBadge.textContent!=='!')throw Error('Local failure badge not visible');
@@ -135,8 +136,8 @@ const js=String.raw`
    const ordinaryDaily=[...document.querySelectorAll('[data-vector-ppe-actions] button')]
      .find(b=>b.textContent==='Daily Captain Check');
    ordinaryDaily.click();
-   if(nativeStarted!==2||pilotShown)
-      throw Error('Ordinary firefighter did not receive original Captain check');
+   if(nativeStarted!==3||pilotShown)
+      throw Error('Ordinary firefighter did not receive current crew confirmation');
    result.captainOriginalBothModes=true;
    result.nonAdminSwitchHidden=true;result.panelCount=document.querySelectorAll('#'+PANEL_ID).length;
    if(result.panelCount!==1)throw Error('Duplicate panel');

@@ -67,7 +67,7 @@ test('non-confirmed fallback and other-shift users never emit a completion recei
 });
 test('one pilot board in User, owner shift-level Master view, five core buttons preserved',()=>{
  const menu=src.slice(src.indexOf('    function renderPanelInterface(){'),src.indexOf('    function installPanel() {'));
- assert.match(menu,/make\('BC Check',\(\)=>showCShiftPilotBoard\(true\),true\)/);
+ assert.match(menu,/make\('BC Check',showBcDepartmentCheck,true\)/);
  assert.match(menu,/make\('Daily Captain Check',\(\)=>\{/);
  assert.match(src,/Rebuild original history \(all items\)/);
  assert.match(src,/check\.pilotRecheck\?'BC Check':'Full PPE History Audit'/);

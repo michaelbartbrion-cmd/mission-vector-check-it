@@ -39,7 +39,7 @@ test('All four visible action buttons have the expected entrypoint',()=>{
  assert.match(script,/make\('Daily Captain Check',\(\)=>\{/);
  assert.doesNotMatch(script,/showCShiftPilotBoard\(true,'captain'\)/);
  assert.match(script,/void launchCaptainDailyCheckFromAnywhere\(\)/);
- assert.match(script,/make\('BC Check',\(\)=>showCShiftPilotBoard\(true\),true\)/);
+ assert.match(script,/make\('BC Check',showBcDepartmentCheck,true\)/);
 });
 test('No inspection/audit button can reach a full department PPE crawl',()=>{
  for(const [label,entry] of actions){

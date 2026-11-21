@@ -1,14 +1,14 @@
 {
-    "schemaVersion":  1,
-    "project":  "Mission Vector Check It",
-    "channel":  "beta",
-    "latestVersion":  "3.2.86",
-    "minimumSupportedVersion":  "2.3.1",
-    "status":  "current",
-    "message":  "Vector Rebel 3.2.86: Original Daily Captain Check restored; live C-shift pilot is not an inspection history substitute.",
-    "releaseNotes":  "Restore the original Daily Captain Check after the C-shift pilot displayed no PPE data. Open the saved native two-month item report if present, otherwise launch the original read-only Captain Set and Vector Item Log audit. For today's C-shift tour, previously Captain-confirmed Rebel Command duty is preselected when shift, identity and tour match, without overwriting manual changes. Owner-specific PPE inventory discovery can preserve other owners' verified rows. BC pilot remains separate and its empty inventory must not be treated as proof of no missing inspections. No official inspections or CrewSense edits are made by the history reader. Live authenticated field acceptance is still required.",
-    "installUrl":  "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js",
-    "legacyUpdateUrl":  "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
-    "repoUrl":  "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
-    "publishedAt":  "2026-11-21"
+  "schemaVersion": 1,
+  "project": "Mission Vector Check It",
+  "channel": "beta",
+  "latestVersion": "3.2.87",
+  "minimumSupportedVersion": "2.3.1",
+  "status": "current",
+  "message": "Vector Rebel 3.2.87: Confirm today?s Captain roster, show pending native checks and view department-wide BC staffing with short C-shift history.",
+  "releaseNotes": "Daily Captain Check ALWAYS opens current-tour crew confirmation before rendering any saved history. Prior-tour overtime is excluded unless added to today?s selected crew. Confirm Crew & View Check immediately projects saved real native Item Log results onto today?s roster and clearly distinguishes checked items, pending native verification and missing PPE mappings. Refresh Native Item Logs performs a new read-only audit on the confirmed crew. Today?s incomplete tour is not marked with failed red X based on an early or stale read. BC Check now opens a full department-wide daily staffing view from the latest trusted Rebel Scout direct ListView snapshot instead of showing Station 4 only. The source capture date and any staleness are explicit; the BC can review, correct and confirm today?s lineup locally without writing CrewSense or official inspections. BC presents a compact, Captain-style table, current PPE evidence, and last three C-shift tour results from native saved history or Rebel Command receipts. Unsupported/uncollected PPE always remains UNKNOWN. Background monitor stays collapsed under Master details. Backend department-roster read endpoint requires an owner-linked authenticated Vector Rebel and returns read-only data.",
+  "installUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js",
+  "legacyUpdateUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
+  "repoUrl": "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
+  "publishedAt": "2026-11-21"
 }

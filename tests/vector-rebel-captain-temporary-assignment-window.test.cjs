@@ -106,7 +106,8 @@ test('report reads updated assignment windows from saved Captain Set without res
  '    function showCaptainDailySetPicker(');
  assert.match(view,/savedWindows=savedSet\?\.assignmentWindows/);
  assert.match(view,/captainRebuildStoredDailyReport\(report\)/);
- assert.doesNotMatch(view,/startCaptainDailyCheck\(/);
+ assert.doesNotMatch(view.slice(0,view.indexOf('const rerunV4')),
+   /startCaptainDailyCheck\(/);
  assert.match(src,/assignmentWindows:set\.assignmentWindows\|\|\{\}/);
 });
 test('date selection is inspector-controlled and no native inspection is added',()=>{
