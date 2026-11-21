@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.91
+// @version      3.2.92
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -34,7 +34,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.91',
+        version: '3.2.92',
         startedAt: Date.now()
     };
 
@@ -42,7 +42,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.91';
+    const VERSION = '3.2.92';
     // Shared, bounded async delay for bulk issue review and Captain cancellation.
     function wait(ms){return new Promise(resolve=>setTimeout(resolve,Math.max(0,Number(ms)||0)));}
     const PANEL_ID = 'vector-ppe-helper-v23';
