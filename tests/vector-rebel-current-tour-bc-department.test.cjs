@@ -67,20 +67,30 @@ test('current shift clearly reports verified native checks, pending and unmapped
  const report={generatedAt:'2026-11-15T16:00:00Z',
   sourceNativeReadAt:'2026-11-15T16:00:00Z',
   tourRoster:{startDate:'2026-11-21',endDate:'2026-11-22',
+    basePrefixes:['A','B','WEEMS'],
     onByDate:{'2026-11-21':['A'],'2026-11-22':['A','B']}},
   owners:[{name:'A',prefix:'A',items:[
    {inspectionModeKey:'tour',status:'ok',
-     tourChecks:[{startDate:'2026-11-21',ok:true}]},
+     tourChecks:[{startDate:'2026-11-21',ok:true,date:'2026-11-21'}]},
    {inspectionModeKey:'tour',status:'ok',
      tourChecks:[{startDate:'2026-11-21',ok:false}]},
    {inspectionModeKey:'scbaTour',status:'ok',
      tourChecks:[{startDate:'2026-11-21',ok:false}]}
-  ]},{name:'B',prefix:'B',items:[]}]};
+  ]},{name:'B',prefix:'B',items:[]},
+   {name:'Jerry Weems',prefix:'WEEMS',items:[
+    {inspectionModeKey:'tour',status:'ok',
+     tourChecks:[{startDate:'2026-11-21',due:false,ok:false}]}
+   ]}]};
  const v=current(report,'2026-11-21');
  assert.equal(v.workingToday,1);
  assert.equal(v.verified,1);
  assert.equal(v.pending,2);
  assert.equal(v.unknownMapping,19);
+ assert.equal(v.offBoth,1);
+ assert.equal(v.people.find(x=>x.name==='Jerry Weems').offBoth,true);
+ assert.equal(v.people.find(x=>x.name==='Jerry Weems').pending,0);
+ assert.equal(v.itemsPending.length,2);
+ assert.ok(v.itemsPending.every(x=>x.kind==='not_recorded'));
  assert.equal(v.people.find(x=>x.name==='A').day2,true);
  assert.equal(v.people.find(x=>x.name==='B').day1,false);
  assert.equal(current(report,'2026-11-27'),null);
