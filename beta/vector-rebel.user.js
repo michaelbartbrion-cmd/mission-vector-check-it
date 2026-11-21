@@ -17575,6 +17575,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
         };
         const fetch=async()=>{
+            const token=++historyLoadId;
             source.textContent='Refreshing department-wide scheduling evidence…';
             try{
                 const outcomes=await Promise.allSettled([
@@ -17604,7 +17605,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 .filter(d=>d<=date))].sort();
             const names=[...new Set((schedule?.people||[]).map(p=>clean(p.name))
                 .filter(Boolean))];
-            const attendanceToken=historyLoadId+1;
+            const attendanceToken=token;
             if(auditDates.length&&names.length){
                 void (async()=>{
                     let loaded=0,failed=0;
@@ -17640,7 +17641,6 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             // Read two full calendar months, limited to tours already started.
             // Bounded pairs keep the interface responsive and preserve the
             // authenticated browser; no native PPE forms are submitted.
-            const token=++historyLoadId;
             const older=current.filter(t=>
                 t.startDate<=date&&t.startDate!==pilot?.tourStart);
             void (async()=>{
