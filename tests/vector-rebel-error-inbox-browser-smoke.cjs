@@ -55,14 +55,19 @@ await new Promise(r=>setTimeout(r,80));
 const overlay=document.querySelector('.test-overlay');
 const summary=overlay.querySelector('[role=status]');
 const reviewAll=[...overlay.querySelectorAll('button')]
- .find(b=>b.textContent.startsWith('Mark All '));
+ .find(b=>b.textContent.startsWith('Clear ')&&
+   b.textContent.includes('Notifications'));
 let output={pass:false};
 try{
- if(!summary.textContent.includes('21 unreviewed diagnostic reports')||
-    !summary.textContent.includes('Vector Rebel: 16')||
-    !summary.textContent.includes('Rebel IQ: 5')||
-    !summary.textContent.includes('NOT failed PPE inspections'))
-  throw Error('Report count and source summary inaccurate');
+ if(!summary.textContent.includes('21 previous software reports')||
+    !summary.textContent.includes('NOT failed PPE inspections')||
+    !overlay.textContent.includes('Rebel IQ form errors')||
+    !overlay.textContent.includes('Rebel IQ form errors · 5')||
+    !overlay.textContent.includes('Technical reports (optional)'))
+  throw Error('Simplified report count and source summary inaccurate');
+ const hidden=overlay.querySelector('details');
+ if(!hidden||hidden.open||!hidden.textContent.includes('Automatic error report'))
+  throw Error('Technical details were not safely collapsed');
  if(!reviewAll)throw Error('Bulk review option not visible');
  await reviewAll.onclick();
  if(acknowledged.length!==0)throw Error('Unconfirmed bulk acknowledgement modified reports');
