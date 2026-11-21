@@ -173,7 +173,7 @@ test('minimized owner panel surfaces received errors without overriding active r
  const active=section.indexOf("if (run?.items?.length");
  const alert=section.indexOf('if(isMasterOwnerInstallation() && errorInbox.count>0)');
  assert.ok(stop>=0&&active>stop&&alert>active);
- assert.match(section,/new error reports/);
+ assert.match(section,/new diagnostic error reports/);
 });
 
 test('midnight checks run once per local date, and repeat on the next date only',async()=>{

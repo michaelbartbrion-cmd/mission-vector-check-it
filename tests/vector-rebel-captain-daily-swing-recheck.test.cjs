@@ -126,10 +126,10 @@ test('picker has day-specific OFF/Here controls, Add Swing, and no permanent Cap
  assert.match(body,/await startCaptainDailyCheck\(selectedSet,\s*auditAsOfDate\)/);
  assert.doesNotMatch(body,/saveConfig\(/,'no permanent Captain Set modifications');
 });
-test('results show OFF and offer Recheck Missing based on due missing assets only',()=>{
+test('results show OFF and offer native-only unresolved item log verification',()=>{
  const body=block('    function showCaptainDailyReport(', '    function showCaptainDailySetPicker()');
  assert.match(body,/mark\.textContent=ok\?'✓':off\?/);
- assert.match(body,/Recheck Missing \('/);
+ assert.match(body,/Verify Unresolved Item Logs \('/);
  assert.match(body,/await startCaptainDailyMissingRecheck\(report\)/);
  assert.match(body,/const due = tour\.due === true/);
 });
