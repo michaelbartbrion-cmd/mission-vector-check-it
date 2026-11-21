@@ -67,5 +67,5 @@ test('visible update controls bind to a controller-scope function and HTTPS inst
  assert.match(source,/\/\/ @connect\s+raw\.githubusercontent\.com/);
  assert.doesNotMatch(source,/chrome-extension:\/\/dhdgffkkebhmkfjojejmpbldmpobfkfo/);
  assert.doesNotMatch(source,/onclick=openManagedUpdate/);
- assert.match(source,/\/\/ @version\s+1\.1\.50/);
+ assert.match(source,/\/\/ @version\s+1\.1\.53/);
 });

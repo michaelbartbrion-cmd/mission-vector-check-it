@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.87
+// @version      3.2.88
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -17,6 +17,7 @@
 // @grant        GM_setClipboard
 // @connect      base44.app
 // @connect      raw.githubusercontent.com
+// @connect      127.0.0.1
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -33,7 +34,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.87',
+        version: '3.2.88',
         startedAt: Date.now()
     };
 
@@ -41,7 +42,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.87';
+    const VERSION = '3.2.88';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -7438,6 +7439,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     if(auto&&auto.tourStart===check.tourStart)
                         cPilotAutoSave({...auto,lastPassAt:Date.now(),
                             nextAt:Date.now()+cPilotNextLocalBoundaryMs()});
+                    // A local worker lease may span several same-tab
+                    // navigations. Keep a truthful source-read outcome for
+                    // the broker; never infer a native completion date.
+                    try{
+                        if(sessionStorage.getItem('mvciEnterprisePpeLeaseV1'))
+                            sessionStorage.setItem('mvciEnterprisePpeOutcomeV1',
+                                JSON.stringify({at:Date.now(),queued:outcome.queued,
+                                    unreadable:outcome.unreadable,
+                                    delivered:outcome.delivered===true,
+                                    tourStart:check.tourStart}));
+                    }catch{}
                     clearCaptainDailyCheck();
                     setStatus('C-shift native read-only recheck complete: '+
                         outcome.queued+' verified Item Log reads queued; '+
@@ -16119,7 +16131,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             method,url:REBEL_COMMAND_ENDPOINT+'?action='+encodeURIComponent(action)+
                 (query?.tourStart?'&tourStart='+encodeURIComponent(query.tourStart):'')+
                 (query?.dates?'&dates='+encodeURIComponent(query.dates):'')+
-                (query?.people?'&people='+encodeURIComponent(query.people):''),
+                (query?.people?'&people='+encodeURIComponent(query.people):'')+
+                (query?.date?'&date='+encodeURIComponent(query.date):''),
             headers:{Authorization:'Bearer '+pair.token,
                 'X-Rebel-Device-ID':pair.deviceId,
                 ...(data?{'Content-Type':'application/json'}:{})},
@@ -16242,11 +16255,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }catch{return '';}
     }
     function cPilotDirectTarget(row){
-        const path=clean(row?.nextItemPath);
+        const path=clean(row?.nextRequiredPath||row?.nextItemPath);
+        const assetId=clean(row?.nextRequiredItem||row?.nextItem);
+        const mode=row?.nextRequiredMode==='scbaTour'?'scbaTour':'tour';
         const match=path.match(/^\/app\/equipment\/PPE\/pool\/([0-9]+)\/([0-9]+)\/item$/);
-        if(!match||!row?.nextItem||row?.attendance!=='working')return null;
-        return{assetId:row.nextItem,ownerName:row.name,
-            ownerPrefix:row.prefix,inspectionModeKey:'tour',
+        if(!match||!assetId||row?.attendance!=='working')return null;
+        if(mode==='scbaTour'&&match[1]!=='299947')return null;
+        if(mode==='tour'&&match[1]==='299947')return null;
+        return{assetId,ownerName:row.name,
+            ownerPrefix:row.prefix,inspectionModeKey:mode,
             type:'PPE',pool:match[1],itemId:match[2],
             url:location.origin+path+'?source=assetManager&sourceTab=PPE'};
     }
@@ -16268,11 +16285,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 clean(p.name).toLowerCase()===name.toLowerCase()&&
                 clean(p.prefix).toUpperCase()===clean(entry.prefix).toUpperCase());
             if(!person?.prefix)continue;
-            const gear=(entry.items||[]).filter(item=>
-                item.inspectionModeKey!=='scbaTour'&&
-                !/scba|airpack|face mask/i.test(clean(item.type||'')+' '+clean(item.pool||'')))
-                .map(item=>({assetId:clean(item.assetId),type:clean(item.type||''),
-                    assetPath:cPilotNativePath(item.url)}));
+            const gear=(entry.items||[]).filter(item=>{
+                const mode=item.inspectionModeKey==='scbaTour'?'scbaTour':'tour';
+                const pool=clean(item.pool||'');
+                return mode==='scbaTour'?
+                    pool==='299947':
+                    !/scba|airpack|face mask/i.test(
+                        clean(item.type||'')+' '+pool);
+            }).map(item=>({assetId:clean(item.assetId),
+                type:clean(item.type||''),
+                inspectionMode:item.inspectionModeKey==='scbaTour'?
+                    'scbaTour':'tour',
+                assetPath:cPilotNativePath(item.url)}));
             if(!gear.length||gear.length>25||
                 gear.some(item=>!/^[A-Za-z0-9._-]{2,75}$/.test(item.assetId))||
                 new Set(gear.map(item=>item.assetId.toUpperCase())).size!==gear.length)
@@ -16510,18 +16534,28 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             data=await cPilotFetch(true,dedicated?'':selectedTourStart);
             if(!data.activeTour&&!(data.historicalEligible&&!dedicated))
                 throw Error('C-shift rechecks require an active tour or a selected completed C tour.');
-            const candidates=data.people.filter(p=>
-                p.attendance==='working'&&p.nextItem&&p.outstandingItems>0);
+            const eligible=data.people.filter(p=>
+                p.attendance==='working'&&
+                (p.nextRequiredItem||p.nextItem)&&
+                (Number(p.outstandingItems||0)+
+                    Number(p.maskOutstandingItems||0)>0));
+            // Enterprise/Server mode reads ONE person per slow work lease,
+            // rather than opening up to seven native Item Logs at once.
+            // A durable round-robin cursor prevents persistent starvation.
+            const cursorKey='vectorRebelEnterprisePpeCursorV1';
+            const oldCursor=Number(persistentGetRaw(cursorKey)||0);
+            const cursor=Number.isFinite(oldCursor)&&oldCursor>=0?oldCursor:0;
+            const candidates=dedicated&&eligible.length?
+                [eligible[cursor%eligible.length]]:eligible;
             if(!candidates.length){
                 setStatus('No confirmed-working C-shift firefighter has a mapped outstanding PPE item. Confirm duty and collect verified inventories first.');
                 return false;
             }
             const directItems=candidates.map(cPilotDirectTarget);
             const directReady=directItems.every(Boolean);
-            if(dedicated&&!directReady){
-                setStatus('BC Check monitor is paused: the current outstanding items need direct links. Use Map Working Crew PPE ONCE in the Master board. Automatic monitoring will not repeatedly crawl crew equipment.',false);
-                return false;
-            }
+            // If a native direct link is missing, map exactly the one
+            // selected owner's gear once. No full-department crawl.
+            // Later passes use the saved path.
             if(!dedicated&&!confirm('Run one read-only PPE Item Log check per '+
                 candidates.length+' confirmed-working firefighter(s)? '+
                 (directReady?'The saved direct asset links avoid repeating the crew inventory scan.':
@@ -16542,12 +16576,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     message=>setStatus('BC gear link map: '+message));
                 items=candidates.map(row=>{
                     const matches=inventory.items.filter(item=>
-                        item.ownerName===row.name&&item.assetId===row.nextItem);
+                        item.ownerName===row.name&&
+                        item.assetId===(row.nextRequiredItem||row.nextItem));
                     if(matches.length!==1||!matches[0]?.url)
                         throw Error(row.name+': cannot uniquely locate '+row.nextItem+
                             ' in Vector PPE. No inspection result was accepted.');
-                    if(matches[0].inspectionModeKey==='scbaTour')
-                        throw Error('SCBA is excluded from the ordinary PPE BC Check.');
+                    if(matches[0].inspectionModeKey==='scbaTour'&&
+                        clean(matches[0].pool)!=='299947')
+                        throw Error('Only the verified native SCBA face mask pool is allowed.');
                     if(!cPilotNativePath(matches[0].url))
                         throw Error(row.name+': native PPE detail route is unsupported for direct verification.');
                     return {...matches[0],ownerName:row.name,ownerPrefix:row.prefix};
@@ -16576,6 +16612,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             saveCaptainDailyCheck(check);
             setStatus('C shift read-only PPE recheck: item 1/'+items.length+' ('+
                 items[0].assetId+').');
+            if(dedicated)
+                persistentSetRaw(cursorKey,String((cursor+1)%1000000));
             navigateCaptainDailyToItem(check,items[0]);
             return true;
         }catch(error){
@@ -17652,4 +17690,87 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         childList: true,
         subtree: true
     });
+    // Enterprise worker bridge runs ONLY in a dedicated ?mvci_worker=ppe
+    // Vector tab. No new UI controls, no official inspection submissions.
+    // Other firefighters' Vector tabs never connect to Enterprise localhost.
+    (function attachEnterpriseSlowBackground(){
+        const role='ppe',base='http://127.0.0.1:18764',
+            key='mvciEnterpriseDedicatedRoleV1',
+            leaseKey='mvciEnterprisePpeLeaseV1',
+            resultKey='mvciEnterprisePpeOutcomeV1';
+        try{
+            if(new URLSearchParams(location.search).get('mvci_worker')===role)
+                sessionStorage.setItem(key,role);
+            if(sessionStorage.getItem(key)!==role)return;
+        }catch{return;}
+        const tabId=TAB_ID;
+        let polling=false;
+        const readLease=()=>{try{return JSON.parse(
+            sessionStorage.getItem(leaseKey)||'null');}catch{return null;}};
+        const putLease=x=>{try{
+            if(x)sessionStorage.setItem(leaseKey,JSON.stringify(x));
+            else sessionStorage.removeItem(leaseKey);
+        }catch{}};
+        const takeResult=()=>{try{
+            return JSON.parse(sessionStorage.getItem(resultKey)||'null');
+        }catch{return null;}};
+        const clearResult=()=>{try{sessionStorage.removeItem(resultKey);}catch{}};
+        const broker=(action,body)=>new Promise((resolve,reject)=>
+            GM_xmlhttpRequest({method:'POST',url:base+'/v1/'+action,
+                headers:{'Content-Type':'application/json',
+                    'X-MVCI-Collector':'v1'},
+                data:JSON.stringify({role,tabId,...body}),timeout:9000,
+                onload:r=>{
+                    let x={};try{x=JSON.parse(r.responseText||'{}');}catch{}
+                    if(r.status===200&&x.ok===true)resolve(x);
+                    else reject(Error('Local arbiter HTTP '+r.status));
+                },
+                onerror:()=>reject(Error('Enterprise worker offline')),
+                ontimeout:()=>reject(Error('Enterprise worker timed out'))
+            }));
+        async function poll(){
+            if(polling)return;polling=true;
+            try{
+                const auth=isMasterOwnerInstallation()&&rebelCommandPaired();
+                const busy=!!getRun()||!!getCaptainDailyCheck()||
+                    captainDailyBusy;
+                await broker('heartbeat',{dedicated:true,
+                    ready:auth,busy});
+                const lease=readLease();
+                if(lease){
+                    if(busy)return; // Existing native read is not complete.
+                    const result=takeResult();
+                    if(!result||result.at<lease.claimedAt){
+                        if(Date.now()-lease.claimedAt<60000)return;
+                        // Stopped/aborted item read is an error, NOT PASS.
+                        try{await broker('complete',{id:lease.id,
+                            outcome:'error'});}finally{
+                            clearResult();putLease(null);
+                        }
+                        return;
+                    }
+                    const outcome=result.queued>0&&result.delivered===true?
+                        'success':result.unreadable>0?'error':'no_work';
+                    try{await broker('complete',{id:lease.id,outcome});}
+                    finally{clearResult();putLease(null);}
+                    return;
+                }
+                if(!auth||busy)return;
+                const answer=await broker('claim',{});
+                if(!answer.granted)return;
+                putLease({id:answer.id,workDate:answer.workDate,
+                    claimedAt:Date.now()});
+                clearResult();
+                const started=await startCShiftPilotNativeRecheck(true);
+                if(!started){
+                    try{await broker('complete',{id:answer.id,
+                        outcome:'no_work'});}finally{putLease(null);}
+                }
+            }catch{
+                // Broker exposes offline health; no crew-facing error spam.
+            }finally{polling=false;}
+        }
+        setTimeout(()=>void poll(),6500);
+        setInterval(()=>void poll(),25000);
+    })();
 })();
