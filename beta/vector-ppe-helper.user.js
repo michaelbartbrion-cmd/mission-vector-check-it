@@ -43,6 +43,8 @@
     // ============================================================
 
     const VERSION = '3.2.91';
+    // Shared, bounded async delay for bulk issue review and Captain cancellation.
+    function wait(ms){return new Promise(resolve=>setTimeout(resolve,Math.max(0,Number(ms)||0)));}
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -16178,7 +16180,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
         return 0;
     }
-    async function checkManagedInterfaceRelease(){
+    let lastManualUpdateCheck=null;
+    async function checkManagedInterfaceRelease({manual=false}={}){
+        if(manual)setStatus('Checking Vector Rebel release...');
         return new Promise(resolve=>{
             GM_xmlhttpRequest({
                 method:'GET',url:MANAGED_UPDATE_URL+'?check='+Date.now(),
@@ -16189,12 +16193,24 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     if(verified){
                         availableRelease=compareReleaseVersions(m[1],VERSION)>0?m[1]:'';
                         releaseCheckError='';
-                    }else releaseCheckError='Unable to verify the currently published version.';
+                        if(manual){
+                            lastManualUpdateCheck={installed:VERSION,published:m[1],
+                                checkedAt:new Date().toISOString()};
+                            setStatus(availableRelease?
+                                'Vector Rebel v'+VERSION+' installed; update v'+availableRelease+
+                                    ' available. Select Install Update below to open Tampermonkey.':
+                                'Vector Rebel v'+VERSION+' is current (published v'+m[1]+
+                                    '). No newer release is available.');
+                        }
+                    }else{
+                        releaseCheckError='Unable to verify the currently published version.';
+                        if(manual)setStatus('Update check failed: '+releaseCheckError,false);
+                    }
                     refreshInterfaceNotice();
                     resolve(verified);
                 },
-                onerror:()=>{releaseCheckError='Update server unavailable.';refreshInterfaceNotice();resolve(false);},
-                ontimeout:()=>{releaseCheckError='Update check timed out.';refreshInterfaceNotice();resolve(false);}
+                onerror:()=>{releaseCheckError='Update server unavailable.';if(manual)setStatus('Update check failed: '+releaseCheckError,false);refreshInterfaceNotice();resolve(false);},
+                ontimeout:()=>{releaseCheckError='Update check timed out.';if(manual)setStatus('Update check failed: '+releaseCheckError,false);refreshInterfaceNotice();resolve(false);}
             });
         });
     }
@@ -16206,8 +16222,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const nightly=loadJSON(MIDNIGHT_CHECK_KEY,{})||{};
         note.textContent=availableRelease?
             'New version '+availableRelease+' available. Install with Tampermonkey.':
-            (releaseCheckError?'Midnight update check: '+releaseCheckError:
-             'Automatic midnight checks active. Tampermonkey manages script installation.');
+            (releaseCheckError?'Update check: '+releaseCheckError:
+             lastManualUpdateCheck?
+                'Checked '+new Date(lastManualUpdateCheck.checkedAt).toLocaleTimeString()+
+                ': installed v'+lastManualUpdateCheck.installed+
+                ', published v'+lastManualUpdateCheck.published+'. Up to date.':
+                'Automatic midnight checks active. Tampermonkey manages script installation.');
         if(nightly.status==='partial')
             note.textContent+=' Daily sync incomplete ('+
                 (Array.isArray(nightly.failed)?nightly.failed.join(', '):'unknown')+
@@ -16342,6 +16362,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const notify=makeButton('Enable Desktop Alerts');
         const reviewAll=makeButton('Clear New Badge (Mark Reviewed)',
             {background:'#176b8e',color:'#fff'});
+        const reviewProgress=document.createElement('div');
+        reviewProgress.setAttribute('role','status');
+        reviewProgress.setAttribute('aria-live','polite');
+        reviewProgress.style.cssText='font:700 12px/1.5 Arial;color:#245371;margin:8px 0;';
         reviewAll.title='Hides previously reported problems from the NEW badge but keeps the records. Does not fix the underlying software or change PPE inspections.';
         const close=makeButton('Close');
         buttons.append(reviewAll,refresh,close);
@@ -16446,33 +16470,56 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
             reviewAll.disabled=!!errorInbox.error||
                 !!errorInbox.truncated||!errorInbox.pending.length;
-            reviewAll.textContent='Clear '+errorInbox.pending.length+
-                ' Notifications (Keep Reports)';
+            reviewAll.textContent='Review All '+errorInbox.pending.length+
+                ' Errors (Keep Reports)';
+            if(errorInbox.truncated)
+                reviewProgress.textContent='Too many reports in this page. Refresh the inbox to verify coverage before bulk review.';
+            else if(errorInbox.error)
+                reviewProgress.textContent='Review unavailable: '+errorInbox.error;
+            else if(!errorInbox.pending.length&&!reviewProgress.textContent)
+                reviewProgress.textContent='No new reports to review.';
         };
         reviewAll.onclick=async()=>{
             const pending=errorInbox.pending.slice();
-            if(errorInbox.error||errorInbox.truncated||!pending.length)return;
-            if(!confirm('Clear '+pending.length+' old software notifications? '+
-                'Each detailed report stays saved for engineering. '+
-                'This does NOT mark any equipment as passed and does not fix the original software errors.'))return;
+            if(errorInbox.error||errorInbox.truncated||!pending.length){
+                reviewProgress.textContent=errorInbox.error?
+                    'Unable to review errors: '+errorInbox.error:
+                    errorInbox.truncated?'Refresh to load all error records first.':
+                    'No unreviewed errors remain.';
+                return;
+            }
+            if(!confirm('Mark '+pending.length+' software error reports as REVIEWING? '+
+                'Every report stays stored for engineering. '+
+                'This does not fix the software or pass any physical inspection.'))return;
             reviewAll.disabled=true;refresh.disabled=true;
             let reviewed=0,failed=0;
+            const failedIds=[];
+            reviewProgress.textContent='Reviewing 0 / '+pending.length+' errors...';
             for(const [i,alert] of pending.entries()){
                 reviewAll.textContent='Reviewing '+(i+1)+' / '+pending.length;
                 if(alert.id && await markMasterErrorReviewed(alert.id))
                     reviewed++;
-                else failed++;
-                // Keep this one small, deliberate administrative batch.
+                else{
+                    failed++;
+                    failedIds.push(alert.id||'Unknown report');
+                }
+                reviewProgress.textContent='Reviewed '+reviewed+' / '+pending.length+
+                    (failed?' · '+failed+' could not be confirmed':'')+
+                    '. Original reports remain saved.';
+                // Do not flood Rebel Command with back-to-back writes.
                 if(i<pending.length-1)await wait(120);
             }
-            await refreshMasterErrorInbox();
+            const refreshed=await refreshMasterErrorInbox();
             refresh.disabled=false;draw();
-            setStatus(reviewed+' report(s) marked REVIEWING; '+
-                failed+' could not be acknowledged. No native PPE inspection or diagnosis was modified.'+
-                (failed?' Remaining new reports still need review.':''));
+            reviewProgress.textContent='Reviewed '+reviewed+' of '+pending.length+
+                ' software reports.'+
+                (failed?' '+failed+' could not be confirmed; retry only those still NEW.':'')+
+                (!refreshed?' Unable to reload the current inbox; use Refresh Error Inbox.':'')+
+                ' No official PPE inspections were changed.';
+            setStatus(reviewProgress.textContent,failed===0&&refreshed);
         };
         refresh.onclick=async()=>{refresh.disabled=true;await refreshMasterErrorInbox();refresh.disabled=false;draw();};
-        box.append(heading,summary,groups,buttons,list);
+        box.append(heading,summary,groups,buttons,reviewProgress,list);
         draw();void refresh.onclick();
     }
     function localCalendarDate(){
@@ -17943,7 +17990,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             make('BC Check',showBcDepartmentCheck,true);
             make('Errors & Alerts',showMasterErrorInbox);
             make('Report Problem',showProblemReport);
-            make('Check for Update',()=>{void checkManagedInterfaceRelease();});
+            make('Check for Update',()=>{void checkManagedInterfaceRelease({manual:true});});
         }
         const pilotPane=panel.querySelector('[data-vector-ppe-cshift-panel]');
         if(pilotPane){
