@@ -17392,14 +17392,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     function showBcDepartmentCheck(){
-        const {overlay,box}=makeOverlayBox('1320px');
-        box.style.maxWidth='96vw';
+        const {overlay,box}=makeOverlayBox('97vw');
+        box.style.maxWidth='98vw';
+        box.style.width='97vw';
+        box.style.boxSizing='border-box';
+        box.style.padding='12px 14px';
         const heading=document.createElement('h2');
         heading.textContent='BC Check';
         heading.style.cssText='font:700 22px Arial;color:#143e5a;margin:0 0 5px;';
         const note=document.createElement('div');
         note.style.cssText='font:12px/1.5 Arial;color:#45687a;margin-bottom:10px;';
-        note.textContent='Previous and current month C-shift tour history, plus department-wide duty and PPE status for today. Read only.';
+        note.textContent='Previous month + current month · all stations · read-only native PPE history.';
         const source=document.createElement('div');
         source.setAttribute('role','status');
         source.style.cssText='background:#f1f7fa;border:1px solid #c2dae6;'+
@@ -17413,11 +17416,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         close.onclick=()=>overlay.remove();
         actions.append(refresh,review,close);
         const tableWrap=document.createElement('div');
-        tableWrap.style.cssText='overflow:auto;max-height:68vh;'+
+        tableWrap.style.cssText='overflow-y:auto;overflow-x:auto;max-height:70vh;'+
             'border:1px solid #c7dce6;border-radius:9px;';
         const table=document.createElement('table');
-        table.style.cssText='width:100%;min-width:850px;border-collapse:collapse;'+
-            'font:11px Arial;color:#173e56;';
+        table.style.cssText='width:100%;min-width:0;table-layout:fixed;'+
+            'border-collapse:collapse;font:10px Arial;color:#173e56;';
         tableWrap.appendChild(table);
         const details=document.createElement('details');
         details.style.cssText='margin-top:9px;font:11px Arial;color:#426478;';
@@ -17426,7 +17429,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const pilotButton=makeButton('Open existing C-shift background monitor');
         pilotButton.onclick=()=>showCShiftPilotBoard(true);
         details.append(summary,pilotButton);
-        box.append(heading,note,source,actions,tableWrap,details);
+        const legend=document.createElement('div');
+        legend.style.cssText='font:10px/1.3 Arial;color:#45687a;'+
+            'margin:-2px 0 7px;';
+        legend.textContent='DONE = all recorded · PART = partly recorded · '+
+            'NONE = no record after a complete post-tour read · '+
+            'OFF = away · ? = not verified · – = not due. '+
+            'Hover over a cell for the full result.';
+        box.append(heading,note,source,actions,legend,tableWrap,details);
         let schedule=null,pilot=null,report=null,rows=[],reviewing=false;
         const historyBoards=new Map();
         const date=localTodayKey();
@@ -17472,16 +17482,30 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 ' Schedule is not roll call; Unknown is not FAILED.'+
                 (attendanceMessage?' '+attendanceMessage:'');
             table.replaceChildren();
-            table.style.minWidth=(610+current.length*132)+'px';
+            table.style.minWidth='0';
+            table.style.width='100%';
+            table.style.tableLayout='fixed';
             const monthRow=document.createElement('tr');
             const dayRow=document.createElement('tr');
-            const fixed=['FIREFIGHTER','UNIT','TODAY\'S DUTY','TODAY PPE'];
+            const fixed=['FIREFIGHTER','UNIT','DUTY','TODAY PPE'];
+            const widths=reviewing?[3,14,11,8,9]:[15,12,9,9];
             if(reviewing)fixed.unshift('HERE');
+            const colGroup=document.createElement('colgroup');
+            const totalFixed=widths.reduce((sum,w)=>sum+w,0);
+            const historicalWidth=current.length?
+                (100-totalFixed)/current.length:0;
+            for(const pct of [...widths,...current.map(()=>historicalWidth)]){
+                const col=document.createElement('col');
+                col.style.width=pct.toFixed(3)+'%';
+                colGroup.appendChild(col);
+            }
+            table.appendChild(colGroup);
             for(const label of fixed){
                 const th=document.createElement('th');
                 th.textContent=label;th.rowSpan=2;
                 th.style.cssText='padding:9px;text-align:left;position:sticky;top:0;'+
-                    'background:#173e63;color:white;border-bottom:1px solid #aec8d6;';
+                    'background:#173e63;color:white;border-bottom:1px solid #aec8d6;'+
+                    'font-size:10px;overflow:hidden;white-space:nowrap;';
                 monthRow.appendChild(th);
             }
             for(const month of months){
@@ -17495,10 +17519,12 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 monthRow.appendChild(th);
                 for(const tour of matching){
                     const sub=document.createElement('th');
-                    sub.textContent=tour.startDate.slice(5)+' / '+tour.endDate.slice(5);
+                    sub.textContent=Number(tour.startDate.slice(8))+
+                        '–'+Number(tour.endDate.slice(8));
                     sub.title='C-shift tour '+tour.startDate+' through '+tour.endDate;
-                    sub.style.cssText='padding:6px 3px;text-align:center;position:sticky;top:30px;'+
-                        'background:#e2edf4;color:#153b56;white-space:nowrap;border-bottom:1px solid #aec8d6;';
+                    sub.style.cssText='padding:5px 1px;text-align:center;position:sticky;top:30px;'+
+                        'background:#e2edf4;color:#153b56;white-space:nowrap;'+
+                        'font-size:9px;border-bottom:1px solid #aec8d6;';
                     dayRow.appendChild(sub);
                 }
             }
@@ -17569,14 +17595,30 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     {text:today.label,title:today.detail,tone:today.tone},
                     ...history.map(h=>({text:h.label,title:h.detail,tone:h.tone}))
                 ];
+                const historicalStart=reviewing?5:4;
                 for(const [i,field] of data.entries()){
                     const td=document.createElement('td');
-                    td.textContent=field.text;td.title=field.title||'';
-                    td.style.cssText='padding:8px;border-bottom:1px solid #dbe8ef;'+
+                    const fullLabel=String(field.text||'');
+                    const isHistory=i>=historicalStart;
+                    const shortLabel=!isHistory?fullLabel:
+                        fullLabel.startsWith('ALL COMPLETED · ISSUE')?'ISSUE':
+                        fullLabel.startsWith('ALL COMPLETED')?'DONE':
+                        fullLabel.startsWith('PARTIAL ')?'PART '+fullLabel.slice(8):
+                        fullLabel==='NOT COMPLETED'?'NONE':
+                        fullLabel==='NOT DUE'?'–':
+                        ['NOT VERIFIED','UNKNOWN'].includes(fullLabel)?'?':
+                        fullLabel;
+                    td.textContent=shortLabel;
+                    td.title=fullLabel+(field.title?': '+field.title:'');
+                    td.setAttribute('aria-label',fullLabel);
+                    td.style.cssText=(isHistory?'padding:7px 1px;':'padding:7px 4px;')+
+                        'border-bottom:1px solid #dbe8ef;'+
+                        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'+
                         (i===0?'font-weight:700;position:sticky;left:0;'+
                             'z-index:2;background:'+(index%2?'#f5f9fb':'#fff')+';':'')+
                         (field.tone?(toneStyle[field.tone]||toneStyle.unknown):'')+
-                        (field.tone?'font-weight:700;text-align:center;white-space:nowrap;':'')+
+                        (field.tone?'font-weight:700;text-align:center;':'')+
+                        (isHistory?'font-size:9px;':'')+
                         (boundary?'border-top:2px solid #a7c0ce;':'');
                     tr.appendChild(td);
                 }
