@@ -245,6 +245,25 @@ const cShiftMasterOwner=()=>true,
     throw Error('BC summary unexpectedly expanded into the full gear audit');
   if([...master.querySelectorAll('button')].filter(b=>b.parentElement?.parentElement===master.querySelector('section')).length>4)
     throw Error('Too many primary buttons in battalion view');
+  // Reproduce actual Nov 21: confirmed working roster, zero PPE Item
+  // Log rows from the collector. The BC screen must say UNCOLLECTED,
+  // not falsely imply no outstanding checks.
+  FIXTURE.totals.knownItems=0;
+  FIXTURE.totals.verifiedItems=0;
+  FIXTURE.totals.outstandingItems=0;
+  FIXTURE.outstandingOnDuty=0;
+  for(const row of FIXTURE.people){
+    row.knownItems=0;row.verifiedItems=0;row.outstandingItems=0;
+    row.gear=[];row.nextItem='';
+  }
+  showCShiftPilotBoard(true);
+  await new Promise(r=>setTimeout(r,120));
+  const uncollected=[...document.querySelectorAll('.pilot-overlay')].at(-1);
+  const status=uncollected.querySelector('[role=status]')?.textContent||'';
+  if(!status.includes('PPE inspection records NOT COLLECTED')||
+     !status.includes('UNKNOWN, not an all-clear')||
+     !status.includes('original detailed native history'))
+    throw Error('Empty Nov 21 inventory misleadingly rendered as zero missing checks: '+status);
   document.body.dataset.cshiftSmoke='PASS';
  }catch(error){document.body.dataset.cshiftSmoke='FAIL';document.body.dataset.reason=error.message;}
  },60);

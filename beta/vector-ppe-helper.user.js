@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.85
+// @version      3.2.86
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -33,7 +33,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.85',
+        version: '3.2.86',
         startedAt: Date.now()
     };
 
@@ -41,7 +41,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.85';
+    const VERSION = '3.2.86';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -6461,6 +6461,28 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const tbody = document.createElement('tbody');
         (report.owners || []).forEach((owner, ownerIndex) => {
             const ownerItems = owner.items || [];
+            if (!ownerItems.length) {
+                // Preserve the entire Captain Set in the visible grid, even
+                // when Vector could not uniquely confirm one person's PPE.
+                // No native green pass or red missed check may be inferred.
+                const placeholder=document.createElement('tr');
+                const person=document.createElement('td');
+                person.textContent=owner.name||owner.prefix||'Unknown';
+                person.style.cssText='position:sticky;left:0;z-index:2;padding:8px;'+
+                    'background:#fff6df;color:#815800;font-weight:800;border-top:3px solid #6f8ea1;';
+                const item=document.createElement('td');
+                item.textContent='PPE INVENTORY UNVERIFIED';
+                item.title=owner.discoveryError||'No mapped native PPE items';
+                item.style.cssText='position:sticky;left:155px;z-index:2;padding:8px;'+
+                    'background:#fff6df;color:#815800;font-weight:800;border-top:3px solid #6f8ea1;';
+                const monthsUnknown=document.createElement('td');
+                monthsUnknown.colSpan=Math.max(1,months.length);
+                monthsUnknown.textContent='? NO VERIFIED EQUIPMENT LIST. INSPECTION HISTORY UNKNOWN.';
+                monthsUnknown.style.cssText='background:#fff6df;color:#815800;'+
+                    'font-weight:700;padding:8px;border-top:3px solid #6f8ea1;';
+                placeholder.append(person,item,monthsUnknown);
+                tbody.appendChild(placeholder);
+            }
             ownerItems.forEach((item, itemIndex) => {
                 const itemHasMissing = (item.tourChecks || []).some(check => check.due &&
                     (item.status!=='ok' || !check.ok));
@@ -6531,6 +6553,34 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return;
     }
 
+    // Reuse only today's explicitly Captain-confirmed C-shift duty.
+    // This fills the ORIGINAL Captain roster checkboxes, without changing
+    // the saved Captain Set, CrewSense, or official PPE inspections.
+    function captainApplyConfirmedPilotDuty(entries,board,days) {
+        if(!entries||board?.shift!=='C'||board?.activeTour!==true||
+            board.tourStart!==days?.[0]||board.tourEnd!==days?.[1]||
+            !Array.isArray(board.people))return 0;
+        let updated=0;
+        for(const entry of entries.values()){
+            const matches=board.people.filter(row=>
+                row.prefix===entry.person.prefix&&
+                masterNameKey(row.name)===masterNameKey(entry.person.name));
+            if(matches.length!==1)continue;
+            const row=matches[0];
+            if(!row.lastDutyConfirmedAt)continue;
+            for(let i=0;i<2;i++){
+                const status=i===0?row.dutyDay1:row.dutyDay2;
+                if(!['working','off'].includes(status))continue;
+                const key=i===0?'day1':'day2';
+                if(entry[key]!==(status==='working')){
+                    entry[key]=status==='working';
+                    updated++;
+                }
+            }
+        }
+        return updated;
+    }
+
     function showCaptainDailySetPicker() {
         const config = getConfig();
         const usableSets = (config.captainSets || [])
@@ -6540,6 +6590,28 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 memberCount: (set.memberPrefixes || []).length
             }))
             .filter(set => set.people.length && set.people.length === set.memberCount);
+        // No setup hurdle for the active C tour when the seven-person
+        // published shared roster exists. This is a TEMPORARY Captain Set,
+        // never a claim of attendance or a modification to saved settings.
+        const onCurrentCShift=inferRegularTourWindow(
+            new Date(localTodayKey()+'T12:00:00'),'C').isActiveTour;
+        if(onCurrentCShift&&
+            !usableSets.some(set=>captainShiftLabel(set.shift)==='C')&&
+            getMasterRosterState().source==='shared-command'){
+            const regular=getActiveMasterRoster().filter(person=>
+                person.active!==false&&
+                C_PILOT_NAMES.has(masterNameKey(person.name)));
+            if(regular.length===7&&
+               new Set(regular.map(person=>person.prefix)).size===7&&
+               new Set(regular.map(person=>masterNameKey(person.name))).size===7){
+                usableSets.unshift({
+                    id:'current-c-shift-published-roster',
+                    name:'C Shift · Published Master Roster',
+                    shift:'C',memberPrefixes:regular.map(person=>person.prefix),
+                    memberCount:7,people:regular
+                });
+            }
+        }
         if (!usableSets.length) {
             setStatus('No Captain Sets are ready. Open Settings → Captain Sets and add crew members by exact Vector Responsible Party name and save the set.', false);
             showSettings('captain');
@@ -6567,7 +6639,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             select.appendChild(option);
         });
         const last = persistentGetRaw(CAPTAIN_LAST_SET_KEY) || '';
-        if (usableSets.some(set => set.id === last)) select.value = last;
+        const priorSet=usableSets.find(set=>set.id===last);
+        const todayDate=new Date(localTodayKey()+'T12:00:00');
+        const workingShiftSets=usableSets.filter(set=>
+            inferRegularTourWindow(todayDate,captainShiftLabel(set.shift))
+                .isActiveTour);
+        // Honor the last set when it matches today's shift. Otherwise,
+        // prefer the known current-shift Captain Set, never silently pick
+        // a crew from yesterday's shift.
+        const chosen=(priorSet&&workingShiftSets.includes(priorSet)?
+            priorSet:workingShiftSets[0]||priorSet||usableSets[0]);
+        select.value=chosen.id;
         const selectedCaptainShift=()=>captainShiftLabel(
             (usableSets.find(set=>set.id===select.value)||usableSets[0]).shift);
         box.append(selectLabel, select);
@@ -6622,6 +6704,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         box.appendChild(rosterPanel);
 
         let tourEntries=new Map(),tourKeys=['',''],lastRosterScope='';
+        let rosterAdjusted=false;
         const activeCaptainSet=()=>usableSets.find(x=>x.id===select.value)||usableSets[0];
         const currentTourKeys=()=>{
             const date=validDateKey(auditInput.value)||localTodayKey();
@@ -6682,6 +6765,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     cb.disabled=!!outside;
                     cb.setAttribute('aria-label',(i?'Day 2':'Day 1')+' '+entry.person.name+' on duty');
                     cb.onchange=()=>{
+                        rosterAdjusted=true;
                         if(i)entry.day2=cb.checked;
                         else entry.day1=cb.checked;
                         label.lastChild.textContent=cb.checked?'Here':'Off';
@@ -6764,13 +6848,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 setStatus('That swing person is unavailable or already on this tour.',false);return;
             }
             const choice=swingDate.value;
+            rosterAdjusted=true;
             tourEntries.set(person.prefix,{person,base:false,
                 day1:choice==='0'||choice==='both',day2:choice==='1'||choice==='both'});
             renderCaptainTourRoster();
             setStatus(person.name+' added as a swing for this tour only. Saved Captain Set unchanged.');
         };
-        select.onchange=()=>{updateHint();renderCaptainTourRoster();};
-        auditInput.onchange=()=>{updateHint();renderCaptainTourRoster();};
+        select.onchange=()=>{rosterAdjusted=true;updateHint();renderCaptainTourRoster();};
+        auditInput.onchange=()=>{rosterAdjusted=true;updateHint();renderCaptainTourRoster();};
         renderCaptainTourRoster();
 
         const run = makeButton('Run Read-Only Check', { background: '#176b8e', color: '#fff' });
@@ -6820,6 +6905,37 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const close = makeButton('Cancel');
         close.onclick = () => overlay.remove();
         box.appendChild(close);
+
+        // Today's C-shift captain already confirmed duty in Rebel Command.
+        // Preselect that EXISTING evidence in the original Captain screen.
+        // Never infer work from membership, change CrewSense, or overwrite
+        // the officer's own checkbox changes while the request is running.
+        const initialDays=currentTourKeys();
+        if(cPilotEligible()&&selectedCaptainShift()==='C'&&
+            initialDays.includes(localTodayKey())){
+            const scope=lastRosterScope;
+            rosterInfo.textContent='Checking previously Captain-confirmed C-shift duty… Review the crew before running.';
+            void cPilotFetch(true,initialDays[0]).then(board=>{
+                if(!overlay.isConnected||rosterAdjusted||
+                    lastRosterScope!==scope)return;
+                const count=captainApplyConfirmedPilotDuty(
+                    tourEntries,board,initialDays);
+                const confirmed=board.people.filter(row=>
+                    row.lastDutyConfirmedAt&&
+                    [row.dutyDay1,row.dutyDay2]
+                        .some(status=>['working','off'].includes(status)));
+                if(confirmed.length){
+                    if(count)renderCaptainTourRoster();
+                    rosterInfo.textContent='Loaded '+confirmed.length+
+                        ' previously Captain-confirmed C-shift duty records from Rebel Command. Review each day and any swings. This does not change CrewSense.';
+                }else{
+                    rosterInfo.textContent='Current crew assignments are not confirmed in Rebel Command. Review each day before running.';
+                }
+            }).catch(()=>{
+                if(overlay.isConnected&&!rosterAdjusted)
+                    rosterInfo.textContent='Current crew assignments could not be retrieved. Review each day before running.';
+            });
+        }
     }
 
     // Recheck only previously due, missing or unreadable PPE. The previous
@@ -7026,9 +7142,19 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 .map(({ setOrder, ...owner }) => owner);
             const items = [];
             const discovery = [];
-            const freshInventory = await scanPpeCrewOwners(owners, message => setStatus(message));
+            const freshInventory = await scanPpeCrewOwners(owners,
+                message => setStatus(message), {readOnlyAllowUnresolved:true});
             for (const owner of owners) {
                 setStatus(`Daily Captain Check — preparing verified PPE for ${owner.name}…`);
+                const unresolved=(freshInventory.ownerErrors||[]).find(row=>
+                    masterNameKey(row.name)===masterNameKey(owner.name));
+                if (unresolved) {
+                    // Keep the person's row but never count absent native
+                    // equipment as checked, passed or confirmed absent.
+                    discovery.push({name:owner.name,prefix:owner.prefix,
+                        unknown:[],error:'Native PPE ownership unverified: '+unresolved.error});
+                    continue;
+                }
                 try {
                     const found = await discoverOwnerGear(owner, 'tour', freshInventory);
                     discovery.push({
@@ -9752,11 +9878,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             '. Configure the person gear prefix; department-wide discovery is disabled for this check.');
     }
 
-    // Read-only scoped crew discovery: one bounded Vector search per selected
-    // person. Never invoke scanPpeOwnerInventory(), follow general inventory
-    // pagination, or claim that PERSON-* keys identify gear. A missing member
-    // blocks the audit or monthly preview rather than producing false compliance.
-    async function scanPpeCrewOwners(owners, progress = null) {
+    // Scoped crew discovery: one bounded Vector Responsible Party search per
+    // selected person. Inspection previews remain strict. The optional
+    // historical-only read path retains confirmed gear while explicitly
+    // labeling an unresolved person's PPE as UNKNOWN, never as complete.
+    async function scanPpeCrewOwners(owners, progress = null, options = {}) {
         const config = getConfig();
         if (!Array.isArray(owners) || !owners.length) {
             throw new Error('Choose at least one crew member.');
@@ -9764,6 +9890,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const uniqueNames = new Set();
         const byItem = new Map();
         const searches = [];
+        const ownerErrors = [];
+        const partialHistory = options?.readOnlyAllowUnresolved===true;
         let pageCount = 0;
         let rowCount = 0;
         for (let i = 0; i < owners.length; i++) {
@@ -9779,12 +9907,28 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             try {
                 scoped = await scanPpeByResponsibleParty(owner.name, progress);
             } catch (error) {
-                throw new Error(owner.name + ': ' +
-                    (error?.message || String(error)) +
-                    '. Crew check stopped; no incomplete roster was accepted.');
+                const reason = clean(error?.message || String(error));
+                // Only a confirmed lack of a unique matching Responsible
+                // Party may be represented as an unknown historical person.
+                // Identity conflicts, loading failures and other errors still
+                // stop the entire read, rather than risk wrong-owner evidence.
+                const unresolved = /Responsible Party.+not confirmed as the ONE selected owner|no PPE ownership confirmed|no PPE assigned/i.test(reason);
+                if (!partialHistory || !unresolved)
+                    throw new Error(owner.name + ': ' + reason +
+                        '. Crew check stopped; no incomplete roster was accepted.');
+                ownerErrors.push({ name: owner.name, error: reason });
+                if (progress) progress(owner.name +
+                    ': no uniquely confirmed PPE ownership; marked UNKNOWN in history.');
+                continue;
             }
-            if (!scoped.items.length) throw new Error(owner.name +
-                ': no PPE ownership confirmed. Crew check stopped.');
+            if (!scoped.items.length) {
+                if (!partialHistory) throw new Error(owner.name +
+                    ': no PPE ownership confirmed. Crew check stopped.');
+                ownerErrors.push({name:owner.name,error:'No PPE ownership confirmed'});
+                if (progress) progress(owner.name +
+                    ': no PPE ownership confirmed; marked UNKNOWN in history.');
+                continue;
+            }
             searches.push({
                 name: owner.name, filter: 'Responsible Party',
                 source: 'Vector PPE', assetCount: scoped.items.length
@@ -9807,12 +9951,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
         }
         if (progress) progress('Verified ' + byItem.size + ' assigned PPE item(s) for ' +
-            owners.length + ' crew members using targeted searches.');
+            searches.length + '/' + owners.length + ' crew members using targeted searches.' +
+            (ownerErrors.length ? ' ' + ownerErrors.length +
+                ' owner(s) remain UNKNOWN in this read-only historical report.' : ''));
         return {
             items: [...byItem.values()],
             pageCount,
             rowCount,
             searches,
+            ownerErrors,
             source: 'Vector PPE Responsible Party column',
             scope: 'verified-crew-search',
             capturedAt: new Date().toISOString()
@@ -16415,6 +16562,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const directLinks=data.people.reduce((sum,row)=>sum+Number(row.mappedPaths||0),0);
                 if(directLinks<data.totals.knownItems)
                     status.textContent+='\\nNative direct item links: '+directLinks+' / '+data.totals.knownItems+' mapped.';
+                if(data.workingCrew>0&&
+                    Number(data.totals.knownItems||0)+
+                    Number(data.totals.maskKnownItems||0)===0){
+                    // Confirmed duty can exist before the collector stores
+                    // even one Item Log. Zero data is UNKNOWN, not a pass.
+                    status.textContent='C shift '+data.tourStart+' / '+
+                        data.tourEnd+' · '+data.workingCrew+' working / '+
+                        data.offCrew+' off'+
+                        '\nPPE inspection records NOT COLLECTED for this tour.'+
+                        ' This is UNKNOWN, not an all-clear.'+
+                        '\nDaily Captain Check opens the original detailed native history.';
+                }
                 table.replaceChildren();
                 const captainView=viewMode==='captain'&&battalion;
                 table.style.cssText='width:100%;border-collapse:separate;border-spacing:0;'+
@@ -16622,8 +16781,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         make('After Fire',()=>launchMyInspectionFromAnywhere('afterFire'),true);
         make('PPE Form',showPpeCleanRepairForm);
         make('Daily Captain Check',()=>{
-            if(master&&authorized&&cPilotEligible())showCShiftPilotBoard(true,'captain');
-            else void launchCaptainDailyCheckFromAnywhere();
+            // Keep the original Captain check separate from BC's rotating
+            // collector. An unfilled pilot ledger does not mean the crew's
+            // native PPE inspection records are absent.
+            const report=getCaptainDailyReport();
+            if(report&&Number(report.schemaVersion)>=7&&
+               Array.isArray(report.owners)&&report.owners.length){
+                showCaptainDailyReport(report);
+                return;
+            }
+            void launchCaptainDailyCheckFromAnywhere();
         });
         make('Settings',()=>showSettings('profile'));
         if(master){
