@@ -17215,37 +17215,74 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return result.map(row=>({...row,
             cShifter:C_PILOT_NAMES.has(masterNameKey(row.name))}));
     }
+    // A native completion date does not establish a passing answer verdict.
+    // No Item Log read means UNKNOWN, not a missed or failed inspection.
     function bcCShiftHistoryCell(report,name,tourStart,board=null){
+        if(!tourStart)return{label:'UNKNOWN',detail:'No dated tour selected',tone:'unknown'};
+        const boardRow=(board?.people||[]).find(p=>
+            masterNameKey(p.name)===masterNameKey(name));
+        if(boardRow?.lastDutyConfirmedAt&&
+            boardRow.dutyDay1==='off'&&boardRow.dutyDay2==='off')
+            return{label:'OFF',detail:'Captain confirmed off both tour days',tone:'off'};
         const owner=(report?.owners||[]).find(p=>
             masterNameKey(p.name)===masterNameKey(name));
-        const items=(owner?.items||[]).filter(item=>
-            (item.tourChecks||[]).some(t=>t.startDate===tourStart));
-        if(items.length){
-            const checked=items.filter(item=>item.status==='ok'&&
-                (item.tourChecks||[]).some(t=>t.startDate===tourStart&&
-                    t.ok===true)).length;
-            return{label:checked+' / '+items.length,
-                detail:checked+' native checks confirmed of '+
-                    items.length+' known items. Remaining are unverified, not proven missed.'};
+        const pairs=(owner?.items||[]).flatMap(item=>
+            (item.tourChecks||[]).filter(t=>t.startDate===tourStart)
+                .map(check=>({item,check})));
+        if(pairs.length){
+            if(pairs.every(p=>p.check.off===true))
+                return{label:'OFF',detail:'Recorded off for this tour. No tour PPE check required.',tone:'off'};
+            const required=pairs.filter(p=>p.check.due===true);
+            if(!required.length)
+                return{label:'UNKNOWN',detail:'Tour attendance or check requirement not confirmed',tone:'unknown'};
+            const total=required.length;
+            const complete=required.filter(p=>
+                p.item.status==='ok'&&
+                (p.check.complete===true||p.check.ok===true));
+            const checked=complete.length;
+            const failed=complete.filter(p=>p.check.resultStatus==='failed').length;
+            const unknown=complete.filter(p=>
+                p.check.resultStatus!=='passed'&&p.check.resultStatus!=='failed').length;
+            const count=checked+' / '+total;
+            const detail=count+' completed native inspections'+
+                (failed?'; '+failed+' known failed answer(s)':'')+
+                (unknown?'; '+unknown+' answer outcome(s) UNKNOWN':'')+
+                '. Completion is not automatically a safety PASS.';
+            if(checked===total)
+                return{label:failed?'ALL COMPLETED · ISSUE':'ALL COMPLETED',
+                    detail,tone:failed?'issue':unknown?'recorded':'complete'};
+            if(checked>0)
+                return{label:'PARTIAL '+count,detail,tone:failed?'issue':'partial'};
+            // Only native readable histories examined after the full tour can
+            // prove that a required inspection was not recorded.
+            const readAt=Date.parse(report?.sourceNativeReadAt||report?.generatedAt||'');
+            const end=required[0]?.check.endDate||addDateKeyDays(tourStart,1);
+            const afterTour=Date.parse(addDateKeyDays(end,1)+'T07:00:00');
+            if(required.every(p=>p.item.status==='ok')&&
+                Number.isFinite(readAt)&&Number.isFinite(afterTour)&&
+                readAt>=afterTour)
+                return{label:'NOT COMPLETED',detail:count+
+                    ' recorded after a complete native history review following this tour.',tone:'missing'};
+            return{label:'NOT VERIFIED',
+                detail:'No native completed dates confirmed. Pending Item Log verification is not proof of a missed check.',tone:'unknown'};
         }
-        // Another C-shift member may have native Item Log evidence in
-        // Rebel Command, even when they were not in this Captain's saved
-        // PPE history. This is a read-only fallback, never a new check.
-        const row=(board?.people||[]).find(p=>
-            masterNameKey(p.name)===masterNameKey(name));
-        if(row){
-            const gear=[...(row.gear||[]),...(row.maskGear||[])];
+        // Fallback reads only dated receipts from existing C-shift records.
+        if(boardRow){
+            const gear=[...(boardRow.gear||[]),...(boardRow.maskGear||[])];
             if(gear.length){
                 const next=addDateKeyDays(tourStart,1);
-                const verified=gear.filter(item=>
+                const checked=gear.filter(item=>
                     item.status==='verified'&&
                     [tourStart,next].includes(item.nativeCompletionDate)).length;
-                return{label:verified+' / '+gear.length,
-                    detail:verified+' native-dated Item Log receipts of '+
-                        gear.length+' scoped known PPE items. Unknown/missing dates are pending, not failures.'};
+                const count=checked+' / '+gear.length;
+                const detail=count+' native-dated receipts. Inspection answer outcomes remain unknown.';
+                return checked===gear.length?
+                    {label:'ALL COMPLETED',detail,tone:'recorded'}:
+                    checked>0?{label:'PARTIAL '+count,detail,tone:'partial'}:
+                    {label:'NOT VERIFIED',detail:'No completed native dates confirmed; actual inspection state unknown.',tone:'unknown'};
             }
         }
-        return{label:'?',detail:'No native PPE results mapped for this C-shift tour'};
+        return{label:'UNKNOWN',detail:'No mapped native PPE history for this person and tour',tone:'unknown'};
     }
     function showBcDepartmentCheck(){
         const {overlay,box}=makeOverlayBox('1320px');
