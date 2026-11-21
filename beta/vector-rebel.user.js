@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.89
+// @version      3.2.90
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -34,7 +34,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.89',
+        version: '3.2.90',
         startedAt: Date.now()
     };
 
@@ -42,7 +42,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.89';
+    const VERSION = '3.2.90';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -5271,10 +5271,63 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             overrun,samples:prediction.samples,
             completedPercent:Math.round(100*index/check.items.length)};
     }
+    // Pause at the next safe Item Log boundary. A current asynchronous
+    // read may finish; no further navigation takes place while paused.
+    // Unlike stopping, pausing preserves the results already collected.
+    function captainDailyPause(check=getCaptainDailyCheck()){
+        if(!check||!['running','returning'].includes(check.status)||
+            check.pilotRecheck===true)return false;
+        check.resumeStatus=check.status;
+        check.status='paused';
+        check.pausedAt=new Date().toISOString();
+        saveCaptainDailyCheck(check);
+        setStatus('Daily Captain Check PAUSED. Previously read history is saved. Resume to continue from the next unread item.');
+        captainDailyProgressPulse();
+        return true;
+    }
+    function captainDailyResume(check=getCaptainDailyCheck()){
+        if(!check||check.status!=='paused'||
+            check.pilotRecheck===true)return false;
+        if(getRun()){
+            setStatus('Finish the active official inspection before resuming the read-only Captain Check.',false);
+            return false;
+        }
+        check.status=check.resumeStatus==='returning'?'returning':'running';
+        delete check.pausedAt;
+        delete check.resumeStatus;
+        check.ownerTabId=TAB_ID;
+        saveCaptainDailyCheck(check);
+        setStatus('Daily Captain Check RESUMED at item '+
+            (Math.min(Number(check.index||0)+1,check.items?.length||0))+
+            '/'+(check.items?.length||0)+'.');
+        captainDailyProgressPulse();
+        void resumeCaptainDailyCheck();
+        return true;
+    }
+    function captainDailyStop({confirmed=false}={}){
+        const check=getCaptainDailyCheck();
+        if(!check||check.pilotRecheck===true)return false;
+        if(!confirmed&&!confirm('Stop the Daily Captain Check? '+
+            'Completed Item Log reads from this unfinished run will not be presented as a completed report. '+
+            'Your previous saved report and official inspections will remain untouched.'))return false;
+        captainDailyCancelSerial++;
+        const processed=Number(check.index||0),total=check.items?.length||0;
+        clearCaptainDailyCheck();
+        setStatus('Daily Captain Check STOPPED by the Captain after '+
+            processed+'/'+total+' read-only items. No inspection was submitted and no incomplete scan was marked complete.');
+        rebelCommandEvent('scan_check_stopped',{
+            success:true,workflowMode:'captainDaily',
+            action:'daily_captain_check',
+            description:'Captain stopped read-only PPE Item Log audit.',
+            metadata:{stage:'user_stop',itemCount:total,readCount:processed}
+        });
+        captainDailyProgressPulse();
+        return true;
+    }
     function captainDailyProgressPulse(){
         const old=document.getElementById('vector-captain-daily-progress-v1');
         const check=getCaptainDailyCheck();
-        if(!check||!['running','returning'].includes(check.status)){
+        if(!check||!['running','returning','paused'].includes(check.status)){
             if(old)old.remove();
             return;
         }
@@ -5286,7 +5339,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             el.id='vector-captain-daily-progress-v1';
             el.setAttribute('role','status');
             el.setAttribute('aria-live','off');
-            el.style.cssText='position:fixed;right:12px;bottom:12px;z-index:2147483000;max-width:min(340px,calc(100vw - 24px));padding:8px 10px;border-radius:8px;background:#16374a;color:#fff;box-shadow:0 3px 13px #0004;font:600 11px/1.45 Arial;pointer-events:none;';
+            el.style.cssText='position:fixed;right:12px;bottom:12px;z-index:2147483000;max-width:min(370px,calc(100vw - 24px));padding:9px 11px;border-radius:8px;background:#16374a;color:#fff;box-shadow:0 3px 13px #0004;font:600 11px/1.45 Arial;pointer-events:auto;';
             document.body.appendChild(el);
         }
         const left=estimate.remainingMs==null?
@@ -5296,10 +5349,33 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const label=check.pilotRecheck?'BC Check · one item per working firefighter':
             'Full PPE History Audit';
         const text=label+' · '+estimate.index+'/'+estimate.total+
-            ' items · '+captainDailyFormatDuration(estimate.elapsedMs)+' elapsed · '+left;
+            ' items · '+(check.status==='paused'?'PAUSED · ':'' )+
+            captainDailyFormatDuration(estimate.elapsedMs)+' elapsed · '+left;
         if(el.dataset.status!==text){
             el.dataset.status=text;
-            el.textContent=text;
+            el.replaceChildren();
+            const message=document.createElement('div');
+            message.textContent=text;
+            el.appendChild(message);
+            if(!check.pilotRecheck){
+                const actions=document.createElement('div');
+                actions.style.cssText='display:flex;gap:8px;margin-top:7px;';
+                const pause=makeButton(check.status==='paused'?'▶ Resume':'Ⅱ Pause',
+                    {background:check.status==='paused'?'#9ee3ac':'#f4d18a',
+                        color:'#172f42'});
+                pause.setAttribute('aria-label',check.status==='paused'?
+                    'Resume Daily Captain Check':'Pause Daily Captain Check');
+                pause.style.cssText+='font:700 12px Arial;padding:7px 12px;';
+                pause.onclick=()=>check.status==='paused'?
+                    captainDailyResume():captainDailyPause();
+                const stop=makeButton('■ Stop',
+                    {background:'#ffe0de',color:'#762c27'});
+                stop.setAttribute('aria-label','Stop Daily Captain Check');
+                stop.style.cssText+='font:700 12px Arial;padding:7px 12px;';
+                stop.onclick=()=>captainDailyStop();
+                actions.append(pause,stop);
+                el.appendChild(actions);
+            }
         }
     }
     // The userscript is reloaded on each native asset navigation. An epoch
@@ -5501,6 +5577,50 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return dates;
     }
 
+    // A dated native Item Log entry proves a CHECK WAS COMPLETED, not that
+    // all its question answers passed. Treat native row status as a verdict
+    // only if a distinct result field explicitly says Passed/Failed, or a
+    // labeled Result/Outcome value is unambiguous. Completion alone is
+    // always COMPLETED / RESULT UNKNOWN.
+    function nativeItemLogRowOutcome(row){
+        const audit=historyRowAudit(row,0);
+        const cells=(audit.cells||[]).slice(1)
+            .map(value=>clean(value).replace(/\s+/g,' ').trim());
+        const codes=[];
+        for(const cell of cells){
+            if(/^(?:failed|fail|failure|non[- ]?compliant|needs repair|action required)$/i.test(cell))
+                codes.push('failed');
+            else if(/^(?:passed|pass|passing)$/i.test(cell))
+                codes.push('passed');
+            const labeled=cell.match(/^(?:overall\s+)?(?:result|outcome|inspection result)\s*:\s*(passed|pass|failed|fail)$/i);
+            if(labeled)codes.push(/^fail/i.test(labeled[1])?'failed':'passed');
+        }
+        const unique=[...new Set(codes)];
+        return unique.length===1?unique[0]:'unknown';
+    }
+    function nativeCompletedVerdictsFromSource(source){
+        const observations=[];
+        for(const row of source?.rows||[]){
+            const audit=historyRowAudit(row,0);
+            const raw=itemLogRowText(row);
+            const parsedAt=Number.isFinite(audit.parsedAt)?
+                audit.parsedAt:parseVectorHistoryDate(raw);
+            const date=localHistoryDateKey(parsedAt);
+            if(date)observations.push({date,
+                outcome:nativeItemLogRowOutcome(row)});
+        }
+        const verdicts={};
+        // Conflicting same-date statuses never silently imply PASS. A
+        // detected failure remains visible even when later rows are ambiguous.
+        for(const {date,outcome} of observations){
+            const prior=verdicts[date];
+            verdicts[date]=prior==='failed'||outcome==='failed'?
+                'failed':prior==='unknown'||outcome==='unknown'?
+                'unknown':outcome;
+        }
+        return verdicts;
+    }
+
     async function readModeCompletionHistory(item, modeKey) {
         const mode = getMode(modeKey);
         if (!mode) throw new Error(`${modeKey}: inspection mode is unavailable.`);
@@ -5509,12 +5629,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const source = itemLogCompletedRowSource(item, mode.title);
         if (!source) throw new Error(`${item.assetId}: ${mode.short} Item Log history could not be read.`);
         const dates = historyEntriesFromSource(source);
+        const verdicts=nativeCompletedVerdictsFromSource(source);
         return {
             title: mode.title,
             short: mode.short,
             parserPath: source.parserPath,
             dates,
             latestDate: dates[0] || '',
+            verdicts,
             completedRowCount: source.rows.length
         };
     }
@@ -5781,7 +5903,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return (report?.owners||[]).flatMap(owner=>(owner.items||[]).map(item=>({
             ownerName:owner.name,ownerPrefix:owner.prefix,
             assetId:item.assetId,type:item.type,status:item.status||'error',
-            tour:{dates:[...(item.tourDates||[])],latestDate:item.latestTourDate||''},
+            tour:{dates:[...(item.tourDates||[])],
+                latestDate:item.latestTourDate||'',
+                verdicts:item.tourVerdicts||{}},
             error:item.error||''
         })));
     }
@@ -5801,12 +5925,24 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const itemRows = items.map(item => {
                 const result = byAsset.get(item.assetId);
                 const tourDates = Array.isArray(result?.tour?.dates) ? result.tour.dates : [];
+                const verdicts=result?.tour?.verdicts&&
+                    typeof result.tour.verdicts==='object'?
+                    result.tour.verdicts:{};
                 const readable = result?.status === 'ok';
                 const tourChecks = window.tours.map(tourWindow => {
                     const duty=captainOwnerTourDuty(owner,tourWindow,window,check.tourRoster,
                         historicalOff,scoutRecords);
                     const eligible = new Set(tourWindow.eligibleDates || []);
-                    const date = tourDates.find(value => eligible.has(value)) || '';
+                    const relevantDates=tourDates.filter(value=>
+                        eligible.has(value));
+                    const date=relevantDates[0]||'';
+                    // Question-result certainty is separate from actual
+                    // completion. Legacy date-only reports are UNKNOWN.
+                    const observed=relevantDates.map(key=>verdicts[key]||'unknown');
+                    const resultStatus=!readable||!date?'not_completed':
+                        observed.includes('failed')?'failed':
+                        observed.length&&observed.every(x=>x==='passed')?
+                        'passed':'unknown';
                     return {
                         month: tourWindow.month || tourWindow.startDate.slice(0, 7),
                         startDate: tourWindow.startDate,
@@ -5825,21 +5961,25 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         offRecordedBy:duty.offRecordedBy||'',
                         dutyDates:duty.dutyDates||[],
                         date,
-                        ok: readable && !!date
+                        ok: readable && !!date,
+                        complete: readable && !!date,
+                        resultStatus
                     };
                 });
                 const required=tourChecks.filter(row=>row.due);
                 const toursOk=(!required.length||readable)&&required.every(row=>row.ok);
+                const allPassed=(!required.length||readable)&&
+                    required.every(row=>row.ok&&row.resultStatus==='passed');
                 return {
                     assetId: item.assetId,
                     type: item.type,
                     inspectionModeKey: item.inspectionModeKey || 'tour',
                     status: result?.status || 'missing',
                     latestTourDate: result?.tour?.latestDate || '',
-                    tourDates,
+                    tourDates,tourVerdicts:verdicts,
                     tourChecks,
-                    tourCheckOk: toursOk,
-                    compliant: toursOk,
+                    tourCheckOk: toursOk, // complete, not necessarily PASS
+                    compliant: allPassed,
                     error: result?.error || ''
                 };
             });
@@ -5850,18 +5990,30 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 !(discovery.unknown || []).length && !discovery.error;
             const tourRequirementCount = itemRows.reduce((sum,row)=>
                 sum+row.tourChecks.filter(check=>check.due).length,0);
-            const tourPassedCount = itemRows.reduce((sum, row) =>
-                sum + row.tourChecks.filter(x => x.due && x.ok).length, 0);
-            const tourCheckOk = allReadable && tourPassedCount === tourRequirementCount;
+            const tourCompletedCount=itemRows.reduce((sum,row)=>
+                sum+row.tourChecks.filter(x=>x.due&&x.ok).length,0);
+            const tourPassedCount=itemRows.reduce((sum,row)=>
+                sum+row.tourChecks.filter(x=>x.due&&x.ok&&
+                    x.resultStatus==='passed').length,0);
+            const tourFailedCount=itemRows.reduce((sum,row)=>
+                sum+row.tourChecks.filter(x=>x.due&&x.ok&&
+                    x.resultStatus==='failed').length,0);
+            const tourResultUnknownCount=itemRows.reduce((sum,row)=>
+                sum+row.tourChecks.filter(x=>x.due&&x.ok&&
+                    x.resultStatus!=='passed'&&x.resultStatus!=='failed').length,0);
+            const tourCheckOk=allReadable&&
+                tourCompletedCount===tourRequirementCount;
             return {
                 name: owner.name,
                 prefix: owner.prefix,
                 gearCount: itemRows.length,
                 allReadable,
                 tourCheckOk,
-                compliant: tourCheckOk,
-                tourPassedCount,
-                tourRequirementCount,
+                compliant:tourCheckOk&&tourFailedCount===0&&
+                    tourResultUnknownCount===0&&
+                    tourPassedCount===tourRequirementCount,
+                tourCompletedCount,tourPassedCount,tourFailedCount,
+                tourResultUnknownCount,tourRequirementCount,
                 discoveryError: discovery.error || '',
                 unknownAssets: discovery.unknown || [],
                 items: itemRows
@@ -6240,7 +6392,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const day1Set=new Set(roster.onByDate?.[roster.startDate]||[]);
         const day2Set=new Set(roster.onByDate?.[roster.endDate]||[]);
         const sourceReadAt=report.sourceNativeReadAt||report.generatedAt||'';
-        const itemsPending=[];
+        const itemsPending=[],itemsFailed=[];
         const people=(report.owners||[]).filter(p=>included.has(p.prefix))
             .map(owner=>{
                 const day1=day1Set.has(owner.prefix),
@@ -6253,12 +6405,20 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     item.inspectionModeKey==='scbaTour').length;
                 const missingMapping=assigned?
                     Math.max(0,10-structural)+Math.max(0,1-mask):0;
-                let verified=0,pending=0,unreadable=0;
+                let verified=0,passed=0,failed=0,resultUnknown=0,
+                    pending=0,unreadable=0;
                 for(const item of gear){
                     const tour=(item.tourChecks||[]).find(t=>
                         t.startDate===roster.startDate);
                     if(item.status==='ok'&&tour?.ok===true&&tour?.date){
-                        verified++;continue;
+                        verified++;
+                        if(tour.resultStatus==='passed')passed++;
+                        else if(tour.resultStatus==='failed'){
+                            failed++;
+                            itemsFailed.push({name:owner.name,type:item.type||'PPE',
+                                assetId:item.assetId||'unknown',date:tour.date});
+                        }else resultUnknown++;
+                        continue;
                     }
                     // A person entirely OFF is not missing a tour check.
                     // Someone who only starts tomorrow is not due today.
@@ -6279,17 +6439,21 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 return{
                     name:owner.name,prefix:owner.prefix,day1,day2,
                     offBoth:!day1&&!day2,
-                    verified,known:gear.length,pending,unreadable,
+                    verified,passed,failed,resultUnknown,
+                    known:gear.length,pending,unreadable,
                     unknownMapping:missingMapping,sourceReadAt
                 };
             });
         return{
             startDate:roster.startDate,endDate:roster.endDate,
-            people,itemsPending,
+            people,itemsPending,itemsFailed,
             workingToday:people.filter(p=>today===roster.startDate?
                 p.day1:p.day2).length,
             offBoth:people.filter(p=>p.offBoth).length,
             verified:people.reduce((s,p)=>s+p.verified,0),
+            passed:people.reduce((s,p)=>s+p.passed,0),
+            failed:people.reduce((s,p)=>s+p.failed,0),
+            resultUnknown:people.reduce((s,p)=>s+p.resultUnknown,0),
             pending:people.reduce((s,p)=>s+p.pending,0),
             unreadable:people.reduce((s,p)=>s+p.unreadable,0),
             unknownMapping:people.reduce((s,p)=>s+p.unknownMapping,0),
@@ -6376,7 +6540,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 pulse.offBoth+' OFF both days';
             const note=document.createElement('p');
             note.style.cssText='font:11px/1.45 Arial;margin:0 0 7px;color:#48677a;';
-            note.textContent='✓ '+pulse.verified+' native item checks confirmed · '+
+            note.textContent='COMPLETE '+pulse.verified+' native item checks ('+
+                pulse.passed+' explicit PASS, '+pulse.failed+
+                ' explicit FAILED, '+pulse.resultUnknown+
+                ' completed with answer outcome unknown) · '+
                 pulse.pending+' mapped items with no native completion found yet · '+
                 pulse.unreadable+' unreadable histories (UNKNOWN) · '+
                 pulse.unknownMapping+' required gear mappings not verified.'+
@@ -6391,7 +6558,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const grid=document.createElement('table');
             grid.style.cssText='width:100%;border-collapse:collapse;font:11px Arial;';
             const head=document.createElement('tr');
-            for(const label of ['FIREFIGHTER','DAY 1','DAY 2','✓ CHECKED',
+            for(const label of ['FIREFIGHTER','DAY 1','DAY 2','COMPLETED',
+                'FAILED ANSWERS','RESULT UNKNOWN',
                 'NO COMPLETION','UNREADABLE','NOT MAPPED']){
                 const cell=document.createElement('th');
                 cell.textContent=label;
@@ -6403,6 +6571,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const row=document.createElement('tr');
                 for(const value of [person.name,person.day1?'HERE':'OFF',
                     person.day2?'HERE':'OFF',String(person.verified),
+                    String(person.failed),String(person.resultUnknown),
                     String(person.pending),String(person.unreadable),
                     person.unknownMapping?'? '+person.unknownMapping:'0']){
                     const cell=document.createElement('td');cell.textContent=value;
@@ -6412,6 +6581,25 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 grid.appendChild(row);
             }
             panel.append(header,note,grid);
+            if(pulse.itemsFailed.length){
+                const failed=document.createElement('details');
+                failed.open=true;
+                failed.style.cssText='background:#fff1f1;border:1px solid #f2aaaa;'+
+                    'border-radius:6px;padding:8px;margin-top:8px;font:11px Arial;';
+                const heading=document.createElement('summary');
+                heading.textContent='COMPLETED with reported FAILED result ('+
+                    pulse.itemsFailed.length+')';
+                failed.appendChild(heading);
+                for(const issue of pulse.itemsFailed){
+                    const line=document.createElement('div');
+                    line.style.cssText='padding:5px;';
+                    line.textContent=issue.name+' · '+issue.type+' · '+
+                        issue.assetId+' · completed '+issue.date+
+                        ' · FAILED in native Item Log. Review original answers.';
+                    failed.appendChild(line);
+                }
+                panel.appendChild(failed);
+            }
             if(pulse.itemsPending.length){
                 const details=document.createElement('details');
                 details.style.cssText='font:11px/1.5 Arial;margin-top:8px;'+
@@ -6515,6 +6703,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 .map(check=>owner.prefix+'|'+check.startDate))));
         const unreadable = allItems.filter(row=>row.item.status!=='ok' &&
             (row.item.tourChecks||[]).some(check=>check.due)).length;
+        const completedTours=allItems.reduce((sum,row)=>
+            sum+(row.item.tourChecks||[]).filter(check=>
+                check.due&&check.ok).length,0);
+        const failedTours=allItems.reduce((sum,row)=>
+            sum+(row.item.tourChecks||[]).filter(check=>
+                check.due&&check.ok&&check.resultStatus==='failed').length,0);
+        const unknownResultTours=allItems.reduce((sum,row)=>
+            sum+(row.item.tourChecks||[]).filter(check=>
+                check.due&&check.ok&&
+                !['passed','failed'].includes(check.resultStatus)).length,0);
         const hasUnresolvedOwners=(report.owners||[]).some(owner=>
             !!owner.discoveryError||(owner.unknownAssets||[]).length>0);
         const hasProblems = missingTours > 0 || pendingTours>0 ||
@@ -6522,11 +6720,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         const summaryBar = document.createElement('div');
         summaryBar.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px;padding:9px 10px;border-radius:8px;border:1px solid ' +
-            (missingTours?'#e1a3a3':hasProblems?'#edc783':'#a9cfad') +
-            ';background:' + (missingTours?'#fff3f3':hasProblems?'#fff8e8':'#eef8ef') +
+            (failedTours||missingTours?'#e1a3a3':hasProblems?'#edc783':'#b5cddd') +
+            ';background:' + (failedTours||missingTours?'#fff3f3':hasProblems?'#fff8e8':'#f2f8fb') +
             ';font-size:11px;color:#304b5a;';
-        summaryBar.innerHTML = '<b>' + (missingTours?'PAST TOUR MISSING':
-            hasProblems?'PENDING VERIFICATION':'ALL VERIFIED DUE CHECKS COMPLETE') + '</b>' +
+        summaryBar.innerHTML = '<b>' + (failedTours?
+            'COMPLETED WITH FAILED ANSWERS':missingTours?'PAST TOUR MISSING':
+            hasProblems?'PENDING VERIFICATION':
+            unknownResultTours?'ALL REQUIRED CHECKS RECORDED, ANSWERS NOT VERIFIED':
+            'ALL REQUIRED INSPECTIONS RECORDED') + '</b>' +
+            '<span>Completed: <b>'+completedTours+'</b></span>'+
+            '<span>Failed answer result: <b style="color:#b42318">'+failedTours+'</b></span>'+
+            '<span>Completed, result unknown: <b style="color:#24557d">'+unknownResultTours+'</b></span>'+
             '<span>Tour missing: <b style="color:' + (missingTours ? '#b42318' : '#24713b') + '">' + missingTours + '</b></span>' +
             '<span>Pending native verification: <b style="color:#80570c">' + pendingTours + '</b></span>'+
             '<span>Unreadable: <b style="color:' + (unreadable ? '#b42318' : '#24713b') + '">' + unreadable + '</b></span>'+
@@ -6587,18 +6791,24 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 // someone normally on another shift. Never hide this green
                 // check behind today's Captain Set membership.
                 const ok=item.status==='ok' && tour.ok===true && !!tour.date;
+                const completedFailed=ok&&tour.resultStatus==='failed';
+                const completedPassed=ok&&tour.resultStatus==='passed';
+                const completedOutcomeUnknown=ok&&!completedFailed&&!completedPassed;
                 const missing=due&&!ok&&auditCoversTour(headerTour);
                 const pending=due&&!ok&&!missing;
                 const mark = document.createElement('div');
                 mark.style.cssText = 'height:27px;display:flex;align-items:center;justify-content:center;border-radius:5px;border:1px solid ' +
-                    (ok ? '#78b684' : missing ? '#dc7f7f' :
-                        pending||unknown?'#ecb55b':'#d8e1e6') + ';background:' +
-                    (ok ? '#e5f5e8' : missing ? '#ffe3e3' :
-                        pending||unknown?'#fff1d4':off ? '#e8edf0':'#fafcfd') + ';color:' +
-                    (ok ? '#176b32' : missing ? '#b42318' :
-                        pending||unknown?'#80570c':'#9aa8b0') +
+                    (completedFailed?'#dc7f7f':completedPassed?'#78b684':
+                     completedOutcomeUnknown?'#88b3d0':missing?'#dc7f7f':
+                     pending||unknown?'#ecb55b':'#d8e1e6') + ';background:' +
+                    (completedFailed?'#ffe3e3':completedPassed?'#e5f5e8':
+                     completedOutcomeUnknown?'#e8f3ff':missing?'#ffe3e3':
+                     pending||unknown?'#fff1d4':off?'#e8edf0':'#fafcfd') + ';color:' +
+                    (completedFailed?'#b42318':completedPassed?'#176b32':
+                     completedOutcomeUnknown?'#24557d':missing?'#b42318':
+                     pending||unknown?'#80570c':'#9aa8b0') +
                     ';font-size:'+(off&&!ok?'9px':'17px')+';font-weight:900;line-height:1;';
-                mark.textContent=ok?'✓':off?
+                mark.textContent=completedFailed?'⚠':ok?'✓':off?
                     (tour.offSource==='captain_manual'?'OFF*':'OFF'):
                     missing?'✕':pending?'…':unknown?'?':'';
                 const manualDifferentShift=notAssigned&&tour.offSource==='captain_manual';
@@ -6616,7 +6826,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     (offDetail||(unknown?
                         'Scout could not verify a unit assignment or both full days OFF/deployed; review required.':
                         otherShiftDetail)||(off?'Off/deployed this entire tour; PPE not due':due?
-                    (ok?'completed '+(tour.date||''):
+                    (ok?'COMPLETED '+(tour.date||'')+' · '+
+                        (completedFailed?'native result FAILED; check done, review the failed answer':
+                         completedPassed?'native result PASSED':
+                         'answer result not visible in Item Log; not a confirmed PASS'):
                      missing?'Native Item Log read covered this completed tour; inspection missing':
                      'Pending native Item Log verification. This is NOT a failed inspection.'):
                     'future/not yet due'));
@@ -6718,6 +6931,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 tbody.appendChild(placeholder);
             }
             ownerItems.forEach((item, itemIndex) => {
+                const itemHasFailed=(item.tourChecks||[]).some(check=>
+                    check.ok&&check.resultStatus==='failed');
                 const itemHasMissing=(item.tourChecks||[]).some(check=>
                     check.due&&(item.status!=='ok'||!check.ok)&&
                     auditCoversTour(check));
@@ -6725,7 +6940,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     check.due&&(item.status!=='ok'||!check.ok)&&
                     !auditCoversTour(check));
                 const baseBackground = ownerIndex % 2 ? '#f8fbfc' : '#ffffff';
-                const rowBackground = itemHasMissing?'#fff1f1':
+                const rowBackground=itemHasFailed||itemHasMissing?'#fff1f1':
                     itemHasPending?'#fff8e8':baseBackground;
                 const topBorder = itemIndex === 0 ? 'border-top:3px solid #6f8ea1;' : 'border-top:1px solid #dce5ea;';
                 const tr = document.createElement('tr');
@@ -6748,7 +6963,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const itemCell = document.createElement('td');
                 itemCell.style.cssText = 'position:sticky;left:155px;z-index:2;min-width:210px;padding:6px 8px;' + topBorder +
                     'background:' + rowBackground + ';box-shadow:' +
-                    (itemHasMissing?'inset 4px 0 0 #c83b3b,1px 0 0 #dce5ea':
+                    (itemHasFailed||itemHasMissing?
+                        'inset 4px 0 0 #c83b3b,1px 0 0 #dce5ea':
                      itemHasPending?'inset 4px 0 0 #e0a437,1px 0 0 #dce5ea':
                      '1px 0 0 #dce5ea') + ';white-space:nowrap;';
                 itemCell.innerHTML = '<b>' + escapeHtml(item.type || 'PPE') + '</b>' +
@@ -6771,8 +6987,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
 
         const footer = document.createElement('div');
         footer.style.cssText = 'font-size:10px;color:#6a7f8f;margin-top:8px;line-height:1.45;';
-        footer.textContent = 'Audit through ' + displayHistoryDateKey(auditWindow.asOfDate) +
-            '. Green means an actual native inspection including those by swing firefighters. Other-shift or unassigned tours stay blank if no completion is verified, not OFF or missed. OFF* is a manual entire-tour absence. Attendance corrections are not Vector inspection records or verified CrewSense absences. Use Edit Past Attendance to correct a historical assignment.';
+        footer.textContent='Audit through '+displayHistoryDateKey(auditWindow.asOfDate)+
+            '. Green ✓ = completed with explicit native PASS. Red ⚠ = completed with explicit FAILED result: the check IS DONE, but the equipment needs review. Blue ✓ = completed on a native date, but answers were not visible, so PASS/FAIL is UNKNOWN. Yellow … = no completion yet verified. Gray OFF = not due. Inspections completed by other Captains count equally. Attendance corrections never change an official Vector inspection.';
         box.appendChild(footer);
 
         const closeV4 = makeButton('Close');
@@ -7387,7 +7603,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const dates=[...new Set([...(previous.tour?.dates||[]),
             ...(current.tour?.dates||[])])].filter(validDateKey).sort().reverse();
         return {...current,tour:{...current.tour,dates,
-            latestDate:dates[0]||''}};
+            latestDate:dates[0]||'',
+            verdicts:{...(previous.tour?.verdicts||{}),
+                ...(current.tour?.verdicts||{})}}};
     }
 
     function consumeQueuedCaptainDailyAfterVerifiedRun(run, now = Date.now()) {
@@ -7417,6 +7635,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             return;
         }
         const active = getCaptainDailyCheck();
+        if (active?.status === 'paused'){
+            setStatus('Daily Captain Check is PAUSED at '+
+                (active.index||0)+'/'+(active.items?.length||0)+
+                '. Use Resume or Stop in the bottom-right progress panel.',false);
+            captainDailyProgressPulse();
+            return;
+        }
         if (active?.status === 'running' || active?.status === 'returning') {
             const updated = Date.parse(active.updatedAt || active.startedAt || '');
             const freshOtherTab = active.ownerTabId && active.ownerTabId !== TAB_ID && Number.isFinite(updated) && Date.now() - updated < 60 * 1000;
@@ -7570,6 +7795,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             saveCaptainDailyCheck(check);
         }
         if (captainDailyBusy) return true;
+        // Paused across page navigation or refresh: never auto-resume.
+        if(check.status==='paused'){
+            captainDailyProgressPulse();
+            return true;
+        }
 
         if (check.status === 'returning') {
             if(check.pilotRecheck===true){
@@ -7676,7 +7906,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     error: error.message
                 };
             }
-            if (cancelSerialAtStart !== captainDailyCancelSerial || getCaptainDailyCheck()?.checkId !== check.checkId) return true;
+            const liveCheck=getCaptainDailyCheck();
+            if (cancelSerialAtStart !== captainDailyCancelSerial ||
+                liveCheck?.checkId !== check.checkId)return true;
+            // Pause from the floating control may arrive during an Item
+            // Log read. Preserve the current item, then stop navigating.
+            const pauseAfterCurrent=liveCheck.status==='paused';
+            if(pauseAfterCurrent){
+                check.resumeStatus=liveCheck.resumeStatus||'running';
+                check.status='paused';
+                check.pausedAt=liveCheck.pausedAt||new Date().toISOString();
+            }
 
             const nativeReadSucceeded=result.status==='ok';
             const previous=(check.results||[]).find(x=>
@@ -7695,6 +7935,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 captainDailyRememberDuration(item,Date.now()-check.itemStartedAtMs);
             check.index += 1;
             check.itemStartedAtMs=Date.now();
+            if(pauseAfterCurrent){
+                if(check.index>=check.items.length)
+                    check.resumeStatus='returning';
+                saveCaptainDailyCheck(check);
+                setStatus('Daily Captain Check paused safely after item '+
+                    check.index+'/'+check.items.length+'. Resume to finish.');
+                captainDailyProgressPulse();
+                return true;
+            }
 
             if (check.index >= check.items.length) {
                 check.status = 'returning';
@@ -16071,21 +16320,32 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         }
         const {overlay,box}=makeOverlayBox('780px');
         const heading=document.createElement('h2');
-        heading.textContent='Errors & Alerts';
+        heading.textContent='Software Issues';
         heading.style.cssText='font:800 21px Arial;color:#153e5c;margin:0 0 8px;';
         const summary=document.createElement('p');
         summary.setAttribute('role','status');
         summary.style.cssText='font:12px Arial;color:#47677b;';
-        const list=document.createElement('div');
-        list.style.cssText='max-height:50vh;overflow:auto;border:1px solid #d6e4ed;border-radius:7px;';
+        const groups=document.createElement('div');
+        groups.style.cssText='display:grid;gap:8px;margin:10px 0 14px;';
+        const list=document.createElement('details');
+        list.style.cssText='border:1px solid #d6e4ed;border-radius:7px;'+
+            'padding:9px;background:#f8fbfd;color:#315269;';
+        const listSummary=document.createElement('summary');
+        listSummary.textContent='Technical reports (optional)';
+        listSummary.style.cssText='font:700 12px Arial;cursor:pointer;padding:4px;';
+        const reportList=document.createElement('div');
+        reportList.style.cssText='max-height:45vh;overflow:auto;margin-top:9px;';
+        list.append(listSummary,reportList);
         const buttons=document.createElement('div');
         buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;';
         const refresh=makeButton('Refresh Error Inbox',{background:'#176b8e',color:'#fff'});
         const notify=makeButton('Enable Desktop Alerts');
-        const reviewAll=makeButton('Mark All as Reviewed');
-        reviewAll.title='Acknowledges new server error reports without deleting them or claiming any inspection or software defect was fixed.';
+        const reviewAll=makeButton('Clear New Badge (Mark Reviewed)',
+            {background:'#176b8e',color:'#fff'});
+        reviewAll.title='Hides previously reported problems from the NEW badge but keeps the records. Does not fix the underlying software or change PPE inspections.';
         const close=makeButton('Close');
-        buttons.append(refresh,notify,reviewAll,close);
+        buttons.append(reviewAll,refresh,close);
+        list.appendChild(notify);
         close.onclick=()=>overlay.remove();
         notify.onclick=async()=>{
             if(typeof Notification!=='function'){setStatus('Desktop notifications are not supported here.',false);return;}
@@ -16093,19 +16353,51 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             notify.textContent=permission==='granted'?'Desktop Alerts Enabled':'Desktop Alerts Not Enabled';
         };
         const draw=()=>{
-            const bySource=errorInbox.pending.reduce((m,x)=>{
-                m[x.source||'Unknown']=(m[x.source||'Unknown']||0)+1;
-                return m;
-            },{});
             summary.textContent=errorInbox.error?
-                'Rebel Command error inbox unavailable: '+errorInbox.error:
-                (errorInbox.truncated?'Latest ':'')+errorInbox.count+
-                ' unreviewed diagnostic reports (NOT failed PPE inspections). '+
-                Object.entries(bySource).map(([source,n])=>
-                    source+': '+n).join(' · ')+
-                ' · Last checked '+(errorInbox.checkedAt||'not yet')+
-                '. Mark Reviewed only acknowledges a report; it does not fix the issue.';
-            list.innerHTML='';
+                'Cannot load earlier software reports: '+errorInbox.error:
+                errorInbox.count+' previous software report'+
+                (errorInbox.count===1?'':'s')+
+                '. These are NOT failed PPE inspections. You do not need to repair anything on this screen. Problems have been sent to Rebel Command for investigation. You can clear the notification badge while keeping every report.';
+            groups.replaceChildren();
+            const buckets=[
+                {id:'runtime',title:'Vector application errors',
+                    explain:'A firefighter encountered an application error. Engineering needs to investigate.'},
+                {id:'inspection',title:'Inspection screen did not open',
+                    explain:'Vector could not confirm the inspection window. Submission was stopped for safety.'},
+                {id:'roster',title:'Crew or equipment lookup',
+                    explain:'A firefighter or assigned equipment could not be matched reliably.'},
+                {id:'iq',title:'Rebel IQ form errors',
+                    explain:'An apparatus questionnaire did not match the expected form.'},
+                {id:'other',title:'Other technical reports',
+                    explain:'Saved for investigation.'}
+            ];
+            const classify=alert=>{
+                if(/rebel iq/i.test(alert.source||''))return 'iq';
+                const raw=clean(alert.description||'');
+                if(/cannot read properties of undefined|reading .props./i.test(raw))
+                    return 'runtime';
+                if(/start inspection.*clicked|chooser|inspection popup/i.test(raw))
+                    return 'inspection';
+                if(/responsible party|c.shift|mapping|roster|asset identity|crew/i.test(raw))
+                    return 'roster';
+                return 'other';
+            };
+            for(const bucket of buckets){
+                const count=errorInbox.pending.filter(alert=>
+                    classify(alert)===bucket.id).length;
+                if(!count)continue;
+                const card=document.createElement('div');
+                card.style.cssText='padding:11px 12px;border:1px solid #d4e3eb;'+
+                    'border-radius:9px;background:white;';
+                const heading=document.createElement('strong');
+                heading.style.cssText='display:block;font:800 13px Arial;color:#244a61;';
+                heading.textContent=bucket.title+' · '+count;
+                const explanation=document.createElement('div');
+                explanation.style.cssText='font:11px/1.5 Arial;color:#567484;margin-top:4px;';
+                explanation.textContent=bucket.explain;
+                card.append(heading,explanation);groups.appendChild(card);
+            }
+            reportList.replaceChildren();
             for(const alert of errorInbox.pending){
                 const item=document.createElement('div');
                 item.style.cssText='padding:9px 11px;border-bottom:1px solid #e3eaf0;font:12px/1.45 Arial;';
@@ -16144,21 +16436,25 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     };
                     item.append(review,reviewStatus);
                 }
-                list.appendChild(item);
+                reportList.appendChild(item);
             }
-            if(!errorInbox.pending.length&&!errorInbox.error)
-                list.textContent='No new reports returned.';
+            if(!errorInbox.pending.length&&!errorInbox.error){
+                const empty=document.createElement('p');
+                empty.textContent='No unreviewed reports. Original records are still saved.';
+                empty.style.cssText='font:12px Arial;color:#325b74;';
+                reportList.appendChild(empty);
+            }
             reviewAll.disabled=!!errorInbox.error||
                 !!errorInbox.truncated||!errorInbox.pending.length;
-            reviewAll.textContent='Mark All '+errorInbox.pending.length+
-                ' as Reviewed';
+            reviewAll.textContent='Clear '+errorInbox.pending.length+
+                ' Notifications (Keep Reports)';
         };
         reviewAll.onclick=async()=>{
             const pending=errorInbox.pending.slice();
             if(errorInbox.error||errorInbox.truncated||!pending.length)return;
-            if(!confirm('Mark '+pending.length+' existing error reports as REVIEWING? '+
-                'They will disappear from the NEW badge but remain stored in Rebel Command. '+
-                'This does NOT resolve any equipment inspection or software defect.'))return;
+            if(!confirm('Clear '+pending.length+' old software notifications? '+
+                'Each detailed report stays saved for engineering. '+
+                'This does NOT mark any equipment as passed and does not fix the original software errors.'))return;
             reviewAll.disabled=true;refresh.disabled=true;
             let reviewed=0,failed=0;
             for(const [i,alert] of pending.entries()){
@@ -16176,7 +16472,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 (failed?' Remaining new reports still need review.':''));
         };
         refresh.onclick=async()=>{refresh.disabled=true;await refreshMasterErrorInbox();refresh.disabled=false;draw();};
-        box.append(heading,summary,list,buttons);
+        box.append(heading,summary,groups,buttons,list);
         draw();void refresh.onclick();
     }
     function localCalendarDate(){

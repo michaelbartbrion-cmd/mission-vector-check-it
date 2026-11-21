@@ -107,8 +107,11 @@ test('Daily Captain report now checks only tour compliance including SCBA mask',
  assert.equal(report.schemaVersion,8);
  assert.equal(report.owners[0].items.length,2);
  assert.equal(report.owners[0].tourRequirementCount,2);
- assert.equal(report.owners[0].tourPassedCount,2);
- assert.ok(report.owners[0].compliant);
+ assert.equal(report.owners[0].tourCompletedCount,2);
+ assert.equal(report.owners[0].tourPassedCount,0,
+   'date-only native SCBA and tour PPE do not prove passing answers');
+ assert.equal(report.owners[0].tourResultUnknownCount,2);
+ assert.equal(report.owners[0].compliant,false);
  assert.ok(report.owners[0].items.every(row=>!('monthlyChecks' in row)));
 });
 test('SCBA failure in preview explicitly blocks auto-submission and requires manual Vector review',()=>{
