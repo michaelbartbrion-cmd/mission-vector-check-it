@@ -16135,68 +16135,1148 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const close=makeButton('Close');
         controls.append(refresh,close);close.onclick=()=>overlay.remove();
         const render=()=>{
+            const roster=sharedRosterFromCache();
+            const sync=sharedRosterSyncState();
+            rows.innerHTML='';
+            if(!roster){
+                state.textContent='No administrator-published Master List is available on this installation. '+(sync.error||'Select Refresh Master List to check again.');
+                return;
+            }
+            const stamp=sync.lastSuccess||roster.updatedAt||'not recorded';
+            state.textContent=roster.people.length+' published people · Version '+roster.version+' · Last verified: '+stamp+(sync.status==='unavailable'?' · OFFLINE CACHED COPY':'');
+            const q=clean(search.value).toLowerCase();
+            const visible=roster.people.filter(person=>clean(person.name).toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name));
+            for(const person of visible){
+                const row=document.createElement('div');
+                row.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid #e5edf2;font:13px Arial;';
+                const name=document.createElement('span');
+                name.textContent=person.name;
+                const status=document.createElement('small');
+                status.textContent=person.active===false?'Inactive':'Active';
+                status.style.color=person.active===false?'#9b5c25':'#176b42';
+                row.append(name,status);rows.appendChild(row);
+            }
+            if(!visible.length)rows.textContent='No matching people.';
+        };
+        const doRefresh=async()=>{
+            refresh.disabled=true;state.textContent='Checking the administrator-published Master List...';
+            await refreshSharedRebelRoster(true);
+            refresh.disabled=false;render();
+        };
+        refresh.onclick=()=>{void doRefresh();};
+        search.oninput=render;
+        box.append(heading,note,state,search,rows,controls);
+        render();
+        void doRefresh();
+    }
+    function compareReleaseVersions(a,b){
+        const x=String(a||'').split('.').map(Number);
+        const y=String(b||'').split('.').map(Number);
+        if(![...x,...y].every(Number.isFinite))return 0;
+        for(let i=0;i<Math.max(x.length,y.length);i++){
+            if((x[i]||0)!==(y[i]||0))return Math.sign((x[i]||0)-(y[i]||0));
+        }
+        return 0;
+    }
+    async function checkManagedInterfaceRelease(){
+        return new Promise(resolve=>{
+            GM_xmlhttpRequest({
+                method:'GET',url:MANAGED_UPDATE_URL+'?check='+Date.now(),
+                timeout:18000,
+                onload:r=>{
+                    const m=String(r.responseText||'').match(/^\/\/\s*@version\s+(\d+\.\d+\.\d+)\s*$/m);
+                    const verified=r.status>=200&&r.status<300&&!!m;
+                    if(verified){
+                        availableRelease=compareReleaseVersions(m[1],VERSION)>0?m[1]:'';
+                        releaseCheckError='';
+                    }else releaseCheckError='Unable to verify the currently published version.';
+                    refreshInterfaceNotice();
+                    resolve(verified);
+                },
+                onerror:()=>{releaseCheckError='Update server unavailable.';refreshInterfaceNotice();resolve(false);},
+                ontimeout:()=>{releaseCheckError='Update check timed out.';refreshInterfaceNotice();resolve(false);}
+            });
+        });
+    }
+    function refreshInterfaceNotice(){
+        const el=document.getElementById('vector-ppe-interface-updates-v1');
+        if(!el)return;
+        el.innerHTML='';
+        const note=document.createElement('span');
+        const nightly=loadJSON(MIDNIGHT_CHECK_KEY,{})||{};
+        note.textContent=availableRelease?
+            'New version '+availableRelease+' available. Install with Tampermonkey.':
+            (releaseCheckError?'Midnight update check: '+releaseCheckError:
+             'Automatic midnight checks active. Tampermonkey manages script installation.');
+        if(nightly.status==='partial')
+            note.textContent+=' Daily sync incomplete ('+
+                (Array.isArray(nightly.failed)?nightly.failed.join(', '):'unknown')+
+                '). Will retry when the Vector tab becomes active.';
+        el.appendChild(note);
+        if(availableRelease){
+            const btn=makeButton('Install Update');
+            btn.style.cssText+='margin-left:7px;padding:4px 7px;';
+            btn.onclick=openManagedUpdate;
+            el.appendChild(btn);
+        }
+    }
+    async function refreshMasterErrorInbox({notify=false}={}){
+        if(!isMasterOwnerInstallation()||errorInboxRequest)return errorInboxRequest||false;
+        errorInboxRequest=(async()=>{
+            try{
+                const pair=rebelCommandPairing();
+                const res=await new Promise(resolve=>GM_xmlhttpRequest({
+                    method:'GET',
+                    url:REBEL_COMMAND_ENDPOINT+'?action=vr-error-inbox',
+                    headers:{Authorization:'Bearer '+pair.token,
+                        'X-Rebel-Device-ID':pair.deviceId},
+                    timeout:16000,
+                    onload:r=>resolve({status:r.status,body:r.responseText||''}),
+                    onerror:()=>resolve({status:0,body:''}),
+                    ontimeout:()=>resolve({status:0,body:''})
+                }));
+                const body=JSON.parse(res.body||'{}');
+                if(res.status===401||res.status===403){
+                    masterServerVerified=false;
+                    renderPanelInterface();
+                }
+                if(res.status!==200||body.ok!==true||
+                    body.readOnly!==true||!Array.isArray(body.alerts))
+                    throw Error(clean(body.error||'Master error inbox unavailable.'));
+                const alerts=body.alerts.slice(0,50);
+                errorInbox={pending:alerts,count:Number(body.count)||alerts.length,
+                    truncated:body.truncated===true,error:'',checkedAt:new Date().toISOString()};
+                const newest=alerts[0];
+                const previous=loadJSON(LAST_ALERT_SEEN_KEY,null);
+                if(newest){
+                    const newestTime=Date.parse(newest.occurredAt||'');
+                    const seenTime=Date.parse(previous?.at||'');
+                    const genuinelyNew=Number.isFinite(newestTime)&&
+                        Number.isFinite(seenTime)&&newestTime>seenTime;
+                    if(previous?.id && previous.id!==newest.id && genuinelyNew && notify &&
+                        typeof Notification==='function'&&Notification.permission==='granted'){
+                        try{
+                            new Notification('Vector Rebel: new error received',{
+                                body:clean(newest.title||'Review the Master error inbox.').slice(0,130),
+                                tag:'vector-rebel-new-errors'
+                            });
+                        }catch{ /* Badge and inbox still work if OS notifications are blocked. */ }
+                    }
+                    // Do not move the cursor backwards when an older report
+                    // becomes the first result after a newer report is resolved.
+                    if(!previous?.id||genuinelyNew)
+                        saveJSON(LAST_ALERT_SEEN_KEY,{id:newest.id,at:newest.occurredAt});
+                }
+                refreshMasterAlertBadge();
+                return true;
+            }catch(error){
+                errorInbox={...errorInbox,error:clean(error?.message||String(error))};
+                refreshMasterAlertBadge();
+                return false;
+            }finally{errorInboxRequest=null;}
+        })();
+        return errorInboxRequest;
+    }
+    async function markMasterErrorReviewed(suggestionId){
+        // Explicit owner action. Server verifies the device pairing and
+        // updates the existing feedback record to REVIEWING, never deletes it.
+        if(!isMasterOwnerInstallation()||panelInterfaceMode()!=='master')
+            return false;
+        const id=clean(suggestionId);
+        if(!/^[A-Za-z0-9._:-]+$/.test(id))return false;
+        try{
+            const pair=rebelCommandPairing();
+            const res=await new Promise(resolve=>GM_xmlhttpRequest({
+                method:'POST',
+                url:REBEL_COMMAND_ENDPOINT+'?action=vr-review-error',
+                headers:{Authorization:'Bearer '+pair.token,
+                    'X-Rebel-Device-ID':pair.deviceId,
+                    'Content-Type':'application/json'},
+                data:JSON.stringify({suggestionId:id}),
+                timeout:16000,
+                onload:r=>resolve({status:r.status,body:r.responseText||''}),
+                onerror:()=>resolve({status:0,body:''}),
+                ontimeout:()=>resolve({status:0,body:''})
+            }));
+            let body={};try{body=JSON.parse(res.body||'{}');}catch{}
+            return res.status===200&&body.ok===true&&
+                body.suggestionId===id&&body.status==='reviewing';
+        }catch{return false;}
+    }
+    function refreshMasterAlertBadge(){
+        const el=document.getElementById('vector-ppe-master-alert-badge-v1');
+        if(el){
+            const visible=isMasterOwnerInstallation()&&panelInterfaceMode()==='master';
+            el.style.display=visible?'block':'none';
+            if(visible)el.textContent=errorInbox.error?
+                'Error inbox unavailable':(errorInbox.truncated?'Latest ':'')+errorInbox.count+' pending report'+(errorInbox.count===1?'':'s');
+        }
+        updateMinimizedPanelBadge();
+    }
+    function showMasterErrorInbox(){
+        if(!isMasterOwnerInstallation()||panelInterfaceMode()!=='master'){
+            setStatus('The error inbox is available only on the master installation.',false);
+            return;
+        }
+        const {overlay,box}=makeOverlayBox('780px');
+        const heading=document.createElement('h2');
+        heading.textContent='Software Issues';
+        heading.style.cssText='font:800 21px Arial;color:#153e5c;margin:0 0 8px;';
+        const summary=document.createElement('p');
+        summary.setAttribute('role','status');
+        summary.style.cssText='font:12px Arial;color:#47677b;';
+        const groups=document.createElement('div');
+        groups.style.cssText='display:grid;gap:8px;margin:10px 0 14px;';
+        const list=document.createElement('details');
+        list.style.cssText='border:1px solid #d6e4ed;border-radius:7px;'+
+            'padding:9px;background:#f8fbfd;color:#315269;';
+        const listSummary=document.createElement('summary');
+        listSummary.textContent='Technical reports (optional)';
+        listSummary.style.cssText='font:700 12px Arial;cursor:pointer;padding:4px;';
+        const reportList=document.createElement('div');
+        reportList.style.cssText='max-height:45vh;overflow:auto;margin-top:9px;';
+        list.append(listSummary,reportList);
+        const buttons=document.createElement('div');
+        buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;';
+        const refresh=makeButton('Refresh Error Inbox',{background:'#176b8e',color:'#fff'});
+        const notify=makeButton('Enable Desktop Alerts');
+        const reviewAll=makeButton('Clear New Badge (Mark Reviewed)',
+            {background:'#176b8e',color:'#fff'});
+        reviewAll.title='Hides previously reported problems from the NEW badge but keeps the records. Does not fix the underlying software or change PPE inspections.';
+        const close=makeButton('Close');
+        buttons.append(reviewAll,refresh,close);
+        list.appendChild(notify);
+        close.onclick=()=>overlay.remove();
+        notify.onclick=async()=>{
+            if(typeof Notification!=='function'){setStatus('Desktop notifications are not supported here.',false);return;}
+            const permission=await Notification.requestPermission();
+            notify.textContent=permission==='granted'?'Desktop Alerts Enabled':'Desktop Alerts Not Enabled';
+        };
+        const draw=()=>{
+            summary.textContent=errorInbox.error?
+                'Cannot load earlier software reports: '+errorInbox.error:
+                errorInbox.count+' previous software report'+
+                (errorInbox.count===1?'':'s')+
+                '. These are NOT failed PPE inspections. You do not need to repair anything on this screen. Problems have been sent to Rebel Command for investigation. You can clear the notification badge while keeping every report.';
+            groups.replaceChildren();
+            const buckets=[
+                {id:'runtime',title:'Vector application errors',
+                    explain:'A firefighter encountered an application error. Engineering needs to investigate.'},
+                {id:'inspection',title:'Inspection screen did not open',
+                    explain:'Vector could not confirm the inspection window. Submission was stopped for safety.'},
+                {id:'roster',title:'Crew or equipment lookup',
+                    explain:'A firefighter or assigned equipment could not be matched reliably.'},
+                {id:'iq',title:'Rebel IQ form errors',
+                    explain:'An apparatus questionnaire did not match the expected form.'},
+                {id:'other',title:'Other technical reports',
+                    explain:'Saved for investigation.'}
+            ];
+            const classify=alert=>{
+                if(/rebel iq/i.test(alert.source||''))return 'iq';
+                const raw=clean(alert.description||'');
+                if(/cannot read properties of undefined|reading .props./i.test(raw))
+                    return 'runtime';
+                if(/start inspection.*clicked|chooser|inspection popup/i.test(raw))
+                    return 'inspection';
+                if(/responsible party|c.shift|mapping|roster|asset identity|crew/i.test(raw))
+                    return 'roster';
+                return 'other';
+            };
+            for(const bucket of buckets){
+                const count=errorInbox.pending.filter(alert=>
+                    classify(alert)===bucket.id).length;
+                if(!count)continue;
+                const card=document.createElement('div');
+                card.style.cssText='padding:11px 12px;border:1px solid #d4e3eb;'+
+                    'border-radius:9px;background:white;';
+                const heading=document.createElement('strong');
+                heading.style.cssText='display:block;font:800 13px Arial;color:#244a61;';
+                heading.textContent=bucket.title+' · '+count;
+                const explanation=document.createElement('div');
+                explanation.style.cssText='font:11px/1.5 Arial;color:#567484;margin-top:4px;';
+                explanation.textContent=bucket.explain;
+                card.append(heading,explanation);groups.appendChild(card);
+            }
+            reportList.replaceChildren();
+            for(const alert of errorInbox.pending){
+                const item=document.createElement('div');
+                item.style.cssText='padding:9px 11px;border-bottom:1px solid #e3eaf0;font:12px/1.45 Arial;';
+                const title=document.createElement('strong');
+                title.textContent=clean(alert.title||'Vector Rebel issue').slice(0,150);
+                const meta=document.createElement('div');
+                meta.textContent=clean(alert.occurredAt||'')+' · '+
+                    clean(alert.deviceName||'Unknown reporting device')+
+                    ' · '+clean(alert.source||'Vector Rebel')+
+                    (alert.sourceVersion?' v'+clean(alert.sourceVersion):'')+
+                    ' · '+clean(alert.priority||'high');
+                meta.style.cssText='font-size:10px;color:#6a7d8b;margin:3px 0;';
+                const details=document.createElement('div');
+                details.textContent=clean(alert.description||'').slice(0,3900);
+                details.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;';
+                item.append(title,meta,details);
+                if(alert.id){
+                    const review=makeButton('Mark Reviewed');
+                    review.style.cssText+='margin-top:7px;padding:6px 9px;';
+                    const reviewStatus=document.createElement('span');
+                    reviewStatus.setAttribute('role','status');
+                    reviewStatus.style.cssText='font:11px Arial;color:#8a312b;margin-left:7px;';
+                    review.onclick=async()=>{
+                        review.disabled=true;
+                        reviewStatus.textContent='Confirming with Rebel Command...';
+                        const success=await markMasterErrorReviewed(alert.id);
+                        if(success){
+                            // No local optimistic removal: reread the exact
+                            // newly reviewed status through the server inbox.
+                            await refreshMasterErrorInbox();
+                            draw();
+                        }else{
+                            reviewStatus.textContent='Could not confirm reviewed. Report remains new.';
+                            review.disabled=false;
+                        }
+                    };
+                    item.append(review,reviewStatus);
+                }
+                reportList.appendChild(item);
+            }
+            if(!errorInbox.pending.length&&!errorInbox.error){
+                const empty=document.createElement('p');
+                empty.textContent='No unreviewed reports. Original records are still saved.';
+                empty.style.cssText='font:12px Arial;color:#325b74;';
+                reportList.appendChild(empty);
+            }
+            reviewAll.disabled=!!errorInbox.error||
+                !!errorInbox.truncated||!errorInbox.pending.length;
+            reviewAll.textContent='Clear '+errorInbox.pending.length+
+                ' Notifications (Keep Reports)';
+        };
+        reviewAll.onclick=async()=>{
+            const pending=errorInbox.pending.slice();
+            if(errorInbox.error||errorInbox.truncated||!pending.length)return;
+            if(!confirm('Clear '+pending.length+' old software notifications? '+
+                'Each detailed report stays saved for engineering. '+
+                'This does NOT mark any equipment as passed and does not fix the original software errors.'))return;
+            reviewAll.disabled=true;refresh.disabled=true;
+            let reviewed=0,failed=0;
+            for(const [i,alert] of pending.entries()){
+                reviewAll.textContent='Reviewing '+(i+1)+' / '+pending.length;
+                if(alert.id && await markMasterErrorReviewed(alert.id))
+                    reviewed++;
+                else failed++;
+                // Keep this one small, deliberate administrative batch.
+                if(i<pending.length-1)await wait(120);
+            }
+            await refreshMasterErrorInbox();
+            refresh.disabled=false;draw();
+            setStatus(reviewed+' report(s) marked REVIEWING; '+
+                failed+' could not be acknowledged. No native PPE inspection or diagnosis was modified.'+
+                (failed?' Remaining new reports still need review.':''));
+        };
+        refresh.onclick=async()=>{refresh.disabled=true;await refreshMasterErrorInbox();refresh.disabled=false;draw();};
+        box.append(heading,summary,groups,buttons,list);
+        draw();void refresh.onclick();
+    }
+    function localCalendarDate(){
+        const d=new Date();
+        return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+
+            '-'+String(d.getDate()).padStart(2,'0');
+    }
+    async function runMidnightInterfaceReview(){
+        // A midnight check must not be marked complete while the update
+        // server, roster or error delivery failed. Recheck on tab return
+        // rather than suppressing retries for the rest of the calendar day.
+        if(midnightReviewRequest)return midnightReviewRequest;
+        const today=localCalendarDate();
+        const previous=loadJSON(MIDNIGHT_CHECK_KEY,{})||{};
+        if(previous.date===today&&previous.status==='checked')return false;
+        midnightReviewRequest=(async()=>{
+            saveJSON(MIDNIGHT_CHECK_KEY,{date:today,at:new Date().toISOString(),status:'checking'});
+            const jobs=[
+                ['release',checkManagedInterfaceRelease],
+                ['roster',()=>refreshSharedRebelRoster(true)],
+                ['errors',flushPendingErrorReports]
+            ];
+            if(isMasterOwnerInstallation())
+                jobs.push(['inbox',()=>refreshMasterErrorInbox({notify:true})]);
+            const results=await Promise.allSettled(jobs.map(([,run])=>run()));
+            const failed=jobs.filter((job,i)=>
+                results[i].status!=='fulfilled'||results[i].value!==true
+            ).map(([name])=>name);
+            const status=failed.length?'partial':'checked';
+            saveJSON(MIDNIGHT_CHECK_KEY,{
+                date:today,at:new Date().toISOString(),status,failed,
+                latest:availableRelease||VERSION,releaseCheckError
+            });
+            renderPanelInterface();
+            return status==='checked';
+        })().finally(()=>{midnightReviewRequest=null;});
+        return midnightReviewRequest;
+    }
+    function scheduleMidnightInterfaceReview(){
+        if(midnightTimer)clearTimeout(midnightTimer);
+        const now=new Date(),next=new Date(now);
+        next.setHours(24,0,2,0); // 00:00:02 local, following calendar day
+        midnightTimer=setTimeout(async()=>{
+            try{await runMidnightInterfaceReview();}
+            finally{scheduleMidnightInterfaceReview();}
+        },Math.max(1000,next.getTime()-now.getTime()));
+    }
+
+    // C-shift PPE pilot: read-only shared board. A GET reads Rebel Command only.
+    // It never scans Vector Item Logs or presumes a completed safety check.
+    const C_PILOT_NAMES=new Set(['michael baldree','michael brion',
+        'jerry weems','jared weston','robert brooks',
+        'matthew cashman','morgan bowland']);
+    const C_PILOT_PENDING_KEY='vectorRebelCShiftVerifiedReceiptQueueV1';
+    let cPilotSummaryTimer=null,cPilotCache=null,cPilotFetchInProgress=null;
+    let cPilotSending=false;
+    const C_PILOT_AUTO_KEY='vectorRebelCShiftDedicatedRecheckerV1';
+    function cPilotAutoState(){
+        try{
+            const v=JSON.parse(sessionStorage.getItem(C_PILOT_AUTO_KEY)||'null');
+            return v?.enabled===true&&v.tabId===TAB_ID&&
+                /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(v.tourStart||'')?
+                v:null;
+        }catch{return null;}
+    }
+    function cPilotAutoSave(state){
+        try{
+            if(state)sessionStorage.setItem(C_PILOT_AUTO_KEY,JSON.stringify(state));
+            else sessionStorage.removeItem(C_PILOT_AUTO_KEY);
+        }catch{}
+    }
+    function cPilotNextLocalBoundaryMs(now=new Date()){
+        const hour=now.getHours();
+        const next=new Date(now);
+        if(hour>=7&&hour<12)next.setHours(12,0,0,0);
+        else if(hour>=12){
+            next.setDate(next.getDate()+1);
+            next.setHours(7,0,0,0);
+        }
+        else next.setHours(7,0,0,0);
+        const minutes=hour>=7&&hour<12?2:60;
+        return Math.max(1000,Math.min(minutes*60000,next.getTime()-now.getTime()));
+    }
+    async function cPilotAutoTick(){
+        const state=cPilotAutoState();
+        if(!state||!isMasterOwnerInstallation()||getRun()||
+           getCaptainDailyCheck()||captainDailyBusy)return false;
+        if(Date.now()<Number(state.nextAt||0))return false;
+        try{
+            const data=await cPilotFetch(true);
+            if(!data.activeTour){
+                // Preserve a one-time operator designation across C tours while
+                // this dedicated, signed-in tab remains alive. Do no Vector
+                // navigation off-shift. Server-side receipt reads still continue.
+                cPilotAutoSave({...state,tourStart:data.nextTourStart,
+                    nextAt:Date.now()+cPilotNextLocalBoundaryMs()});
+                return false;
+            }
+            if(data.tourStart!==state.tourStart){
+                cPilotAutoSave({...state,tourStart:data.tourStart,
+                    nextAt:Date.now()});
+            }
+            // Never navigate an active inspection or another Captain Check;
+            // only this explicitly designated, owner-linked tab is eligible.
+            const started=await startCShiftPilotNativeRecheck(true);
+            if(!started)cPilotAutoSave({...state,
+                nextAt:Date.now()+cPilotNextLocalBoundaryMs()});
+            return started;
+        }catch{
+            cPilotAutoSave({...state,
+                nextAt:Date.now()+cPilotNextLocalBoundaryMs()});
+            return false;
+        }
+    }
+
+    function cPilotEligible(){
+        return isMasterOwnerInstallation() ||
+            C_PILOT_NAMES.has(clean(getConfig().inspectorName).toLowerCase());
+    }
+    function cPilotPending(){
+        const x=loadJSON(C_PILOT_PENDING_KEY,[]);
+        return Array.isArray(x)?x.filter(y=>y&&y.personPrefix&&
+            (y.assetId||(y.kind==='inventory'&&Array.isArray(y.items)&&y.items.length))).slice(-200):[];
+    }
+    async function cPilotBridge(method,action,data=null,query=null){
+        if(!rebelCommandPaired()&&!await ensureRebelCommandEnrollment(false))
+            throw Error('Vector Rebel is not connected to Rebel Command.');
+        const pair=rebelCommandPairing();
+        return new Promise((resolve,reject)=>GM_xmlhttpRequest({
+            method,url:REBEL_COMMAND_ENDPOINT+'?action='+encodeURIComponent(action)+
+                (query?.tourStart?'&tourStart='+encodeURIComponent(query.tourStart):'')+
+                (query?.dates?'&dates='+encodeURIComponent(query.dates):'')+
+                (query?.people?'&people='+encodeURIComponent(query.people):'')+
+                (query?.date?'&date='+encodeURIComponent(query.date):''),
+            headers:{Authorization:'Bearer '+pair.token,
+                'X-Rebel-Device-ID':pair.deviceId,
+                ...(data?{'Content-Type':'application/json'}:{})},
+            ...(data?{data:JSON.stringify(data)}:{}),
+            timeout:15000,
+            onload:r=>{
+                let payload={};
+                try{payload=JSON.parse(r.responseText||'{}');}catch{}
+                if(r.status!==200||payload.ok!==true)
+                    reject(Error(clean(payload.error||'Rebel Command HTTP '+r.status).slice(0,150)));
+                else resolve(payload);
+            },
+            onerror:()=>reject(Error('Rebel Command connection failed.')),
+            ontimeout:()=>reject(Error('Rebel Command timed out.'))
+        }));
+    }
+    async function cPilotFetch(force=false,tourStart=''){
+        const selected=clean(tourStart);
+        if(cPilotFetchInProgress){
+            try{await cPilotFetchInProgress;}catch{}
+        }
+        if(!force&&cPilotCache&&cPilotCache.tourStart===selected&&
+            Date.now()-cPilotCache.fetchedAt<45000)
+            return cPilotCache.data;
+        cPilotFetchInProgress=(async()=>{
+            const data=await cPilotBridge('GET','vr-ppe-pilot',null,
+                selected?{tourStart:selected}:null);
+            if(data.scope!=='c-shift-ppe-pilot'||data.readOnly!==true||
+                !Array.isArray(data.people)||data.people.length!==7||
+                !data.totals||data.shift!=='C'||
+                (selected&&data.tourStart!==selected))
+                throw Error('C-shift tour board response was incomplete or mismatched.');
+            cPilotCache={data,tourStart:selected,fetchedAt:Date.now()};
+            return data;
+        })().finally(()=>{cPilotFetchInProgress=null;});
+        return cPilotFetchInProgress;
+    }
+    // Reuse the existing owner-linked, read-only Rebel Scout attendance
+    // evidence service. Suggestions are NOT a captain confirmation:
+    // the captain reviews them before any duty record is saved to RC.
+    async function cPilotScoutSuggestions(board){
+        if(!isMasterOwnerInstallation())
+            return{ok:false,error:'Scout attendance preview requires the owner-linked Master Interface.'};
+        const dates=[board.tourStart,board.tourEnd];
+        const people=board.people.map(row=>clean(row.name));
+        if(dates.some(x=>!/^\d{4}-\d{2}-\d{2}$/.test(x))||
+            people.length!==7||new Set(people.map(masterNameKey)).size!==7)
+            return{ok:false,error:'The approved C-shift roster or tour dates are incomplete.'};
+        try{
+            const response=await cPilotBridge('GET','vr-captain-attendance',null,
+                {dates:dates.join(','),people:JSON.stringify(people)});
+            if(response.scope!=='captain-attendance-evidence'||
+                response.readOnly!==true||!Array.isArray(response.records)||
+                response.records.length!==14)
+                throw Error('Scout returned an incomplete attendance evidence set.');
+            const validDates=new Set(dates),validNames=new Set(people.map(masterNameKey));
+            const results=new Map();
+            for(const rec of response.records){
+                const personKey=masterNameKey(rec.name);
+                if(!validDates.has(rec.date)||!validNames.has(personKey)||
+                    !['work_evidence','full_leave_evidence',
+                      'deployment_evidence','partial_or_uncertain','unknown'].includes(rec.status))
+                    throw Error('Scout attendance response did not match the approved crew.');
+                const key=personKey+'|'+rec.date;
+                if(results.has(key))throw Error('Duplicate Scout attendance evidence record.');
+                const trusted=rec.sourceQuality==='good_direct_capture';
+                const suggested=!trusted?'unknown':
+                    rec.status==='work_evidence'?'working':
+                    ['full_leave_evidence','deployment_evidence'].includes(rec.status)?'off':
+                    'unknown';
+                results.set(key,{suggested,trusted,
+                    sourceStatus:rec.status,
+                    capturedAt:clean(rec.capturedAt||''),
+                    reason:clean(rec.reason||'').slice(0,240)});
+            }
+            if(results.size!==14)throw Error('Scout attendance evidence omitted C-shift people or days.');
+            return{ok:true,results};
+        }catch(error){
+            return{ok:false,error:clean(error?.message||error).slice(0,180)};
+        }
+    }
+    async function cPilotFlushReceipts(){
+        if(cPilotSending)return false;
+        cPilotSending=true;
+        try{
+            for(const receipt of cPilotPending()){
+                const recheck=receipt.kind==='recheck';
+                const inventory=receipt.kind==='inventory';
+                const action=inventory?'vr-ppe-pilot-inventory':
+                    recheck?'vr-ppe-pilot-recheck':'vr-ppe-pilot-completion';
+                const result=await cPilotBridge('POST',action,receipt);
+                const acknowledged=inventory?
+                    result.scope==='c-shift-ppe-pilot-inventory'&&result.readOnly===true&&
+                    result.personName===receipt.personName&&
+                    result.knownItems===receipt.items?.length:
+                    recheck?result.scope==='c-shift-ppe-pilot-recheck'&&
+                        result.assetId===receipt.assetId:
+                        result.scope==='c-shift-ppe-pilot'&&result.accepted===true&&
+                        result.assetId===receipt.assetId;
+                if(!acknowledged)
+                    throw Error('Pilot receipt was not acknowledged by Rebel Command.');
+                saveJSON(C_PILOT_PENDING_KEY,
+                    cPilotPending().filter(row=>row.id!==receipt.id));
+                cPilotCache=null;
+            }
+            return true;
+        }catch(error){
+            // Leave unacknowledged messages on this installation for next retry.
+            return false;
+        }finally{cPilotSending=false;}
+    }
+    function cPilotNativePath(raw){
+        const value=clean(raw);
+        if(!value)return '';
+        try{
+            const u=new URL(value,location.origin);
+            return u.origin===location.origin &&
+                /^\/app\/equipment\/PPE\/pool\/[0-9]+\/[0-9]+\/item$/.test(u.pathname)?
+                u.pathname:'';
+        }catch{return '';}
+    }
+    function cPilotDirectTarget(row){
+        const path=clean(row?.nextRequiredPath||row?.nextItemPath);
+        const assetId=clean(row?.nextRequiredItem||row?.nextItem);
+        const mode=row?.nextRequiredMode==='scbaTour'?'scbaTour':'tour';
+        const match=path.match(/^\/app\/equipment\/PPE\/pool\/([0-9]+)\/([0-9]+)\/item$/);
+        if(!match||!assetId||row?.attendance!=='working')return null;
+        if(mode==='scbaTour'&&match[1]!=='299947')return null;
+        if(mode==='tour'&&match[1]==='299947')return null;
+        return{assetId,ownerName:row.name,
+            ownerPrefix:row.prefix,inspectionModeKey:mode,
+            type:'PPE',pool:match[1],itemId:match[2],
+            url:location.origin+path+'?source=assetManager&sourceTab=PPE'};
+    }
+    function cPilotQueueScopedInventory(snapshots,scannedAt=new Date().toISOString(),selectedTourStart=''){
+        const operational=new Date(Date.now()-7*3600000);
+        const inferred=inferRegularTourWindow(operational,'C');
+        const tourStart=clean(selectedTourStart)||
+            (inferred.isActiveTour?inferred.startDate:'');
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(tourStart))return 0;
+        const approved=getActiveMasterRoster();
+        const inspector=clean(getConfig().inspectorName).toLowerCase();
+        const pending=cPilotPending();
+        let queued=0;
+        for(const entry of snapshots||[]){
+            const name=clean(entry.ownerName);
+            if(!C_PILOT_NAMES.has(name.toLowerCase()))continue;
+            if(!isMasterOwnerInstallation()&&name.toLowerCase()!==inspector)continue;
+            const person=approved.find(p=>
+                clean(p.name).toLowerCase()===name.toLowerCase()&&
+                clean(p.prefix).toUpperCase()===clean(entry.prefix).toUpperCase());
+            if(!person?.prefix)continue;
+            const gear=(entry.items||[]).filter(item=>{
+                const mode=item.inspectionModeKey==='scbaTour'?'scbaTour':'tour';
+                const pool=clean(item.pool||'');
+                return mode==='scbaTour'?
+                    pool==='299947':
+                    !/scba|airpack|face mask/i.test(
+                        clean(item.type||'')+' '+pool);
+            }).map(item=>({assetId:clean(item.assetId),
+                type:clean(item.type||''),
+                inspectionMode:item.inspectionModeKey==='scbaTour'?
+                    'scbaTour':'tour',
+                assetPath:cPilotNativePath(item.url)}));
+            if(!gear.length||gear.length>25||
+                gear.some(item=>!/^[A-Za-z0-9._-]{2,75}$/.test(item.assetId))||
+                new Set(gear.map(item=>item.assetId.toUpperCase())).size!==gear.length)
+                continue;
+            const id='cshift-inventory:'+tourStart+':'+person.prefix+':'+scannedAt;
+            if(pending.some(x=>x.id===id))continue;
+            pending.push({kind:'inventory',id,personName:person.name,
+                personPrefix:person.prefix,tourStart:tourStart,
+                source:'vector_responsible_party_scoped_read_only',
+                verifiedScoped:true,scannedAt,items:gear});
+            queued++;
+        }
+        if(queued){
+            if(pending.length>200)
+                throw Error('C-shift inventory receipt queue is full; reconnect Rebel Command.');
+            saveJSON(C_PILOT_PENDING_KEY,pending);
+            void cPilotFlushReceipts();
+        }
+        return queued;
+    }
+    function cPilotQueueInventoryFromRun(run){
+        if(run?.modeKey!=='tour'||!Array.isArray(run.discoverySnapshots))
+            return 0;
+        try{return cPilotQueueScopedInventory(run.discoverySnapshots,
+            run.startedAt||new Date().toISOString());}
+        catch(error){
+            saveDiagnostic('C-shift pilot inventory queue unavailable: '+
+                clean(error?.message||error));
+            return 0;
+        }
+    }
+    function cPilotQueueNativeCompletion(run,item,evidence){
+        if(run?.modeKey!=='tour'||item?.inspectionModeKey==='scbaTour'||
+            !/^itemlog-confirmed-plus-one-/.test(String(evidence||'')))return false;
+        const ownerName=clean(item?.ownerName||run?.ownerName||'');
+        if(!C_PILOT_NAMES.has(ownerName.toLowerCase()))return false;
+        const approved=getActiveMasterRoster().find(p=>
+            clean(p.name).toLowerCase()===ownerName.toLowerCase());
+        if(!approved?.prefix)return false;
+        const sourceSnapshot=(run.discoverySnapshots||[]).find(s=>
+            clean(s.ownerName).toLowerCase()===ownerName.toLowerCase()&&
+            clean(s.prefix).toUpperCase()===approved.prefix);
+        // Include unselected PPE discovered in the same Vector Responsible
+        // Party scan. A partially selected run must not masquerade as a fully
+        // inspected inventory. SCBA follows its separate inspection process.
+        const sourceItems=sourceSnapshot?.items?.length?
+            sourceSnapshot.items:(run.items||[]).filter(x=>
+                clean(x.ownerName||run.ownerName).toLowerCase()===ownerName.toLowerCase());
+        const gear=sourceItems.filter(x=>
+                x.inspectionModeKey!=='scbaTour'&&
+                !/scba|airpack|face mask/i.test(clean(x.type||'')+' '+clean(x.pool||'')))
+            .map(x=>({assetId:clean(x.assetId),type:clean(x.type||''),
+                assetPath:cPilotNativePath(x.url)}));
+        const valid=gear.length>0&&gear.length<=25&&
+            gear.every(x=>/^[A-Za-z0-9._-]{2,75}$/.test(x.assetId))&&
+            new Set(gear.map(x=>x.assetId.toUpperCase())).size===gear.length&&
+            gear.some(x=>x.assetId===item.assetId);
+        if(!valid)return false;
+        const receipt={
+            id:'ppepilot:'+clean(run.runId||run.checkId||'run')+':'+clean(item.assetId),
+            personName:approved.name,personPrefix:approved.prefix,
+            assetId:clean(item.assetId),items:gear,evidence:String(evidence),
+            verifiedAt:new Date().toISOString()
+        };
+        const pending=cPilotPending();
+        if(!pending.some(r=>r.id===receipt.id)){
+            pending.push(receipt);
+            saveJSON(C_PILOT_PENDING_KEY,pending.slice(-200));
+        }
+        void cPilotFlushReceipts();
+        return true;
+    }
+    function cPilotStamp(value){
+        const dt=Date.parse(value||'');
+        return Number.isFinite(dt)?new Date(dt).toLocaleString():'No verified receipts yet';
+    }
+    function cPilotSummaryText(data){
+        return 'C Shift · '+data.totals.verifiedItems+' native Item Log receipts · '+
+            data.outstandingOnDuty+' known outstanding on duty · '+
+            (data.historicalTour?'Reviewing completed C tour':
+                data.activeTour?'Current C tour':'C tour not in progress')+
+            '\\nLast ledger update: '+cPilotStamp(data.lastUpdateAt);
+    }
+    async function cPilotRefreshSummary(force=false){
+        const node=document.querySelector('[data-vector-ppe-cshift-summary]');
+        if(!node||!cPilotEligible())return;
+        try{
+            const data=await cPilotFetch(force);
+            node.textContent=cPilotSummaryText(data);
+        }catch(error){
+            node.textContent='C Shift pilot unavailable: '+clean(error?.message||error);
+        }
+    }
+    function cPilotScheduleBoardPoll(){
+        if(cPilotSummaryTimer)clearTimeout(cPilotSummaryTimer);
+        if(!cPilotEligible())return;
+        const hour=new Date().getHours();
+        // This refreshes Rebel Command data only. It is NOT an unattended
+        // native Vector inspection-history scanner.
+        cPilotSummaryTimer=setTimeout(()=>{
+            void cPilotRefreshSummary(true).finally(cPilotScheduleBoardPoll);
+            void cPilotFlushReceipts();
+            void cPilotAutoTick();
+        },cPilotNextLocalBoundaryMs());
+    }
+    async function cPilotMapWorkingGear(selectedTourStart=''){
+        if(!isMasterOwnerInstallation()||panelInterfaceMode()!=='master'){
+            setStatus('Only the C-shift Master can map working crew PPE.',false);
+            return false;
+        }
+        if(getRun()||getCaptainDailyCheck()||captainDailyBusy){
+            setStatus('Complete the active inspection or Captain Check before mapping gear.',false);
+            return false;
+        }
+        try{
+            let board=await cPilotFetch(true,selectedTourStart);
+            if(!board.activeTour&&!board.historicalEligible)
+                throw Error('Choose an active or completed C-shift tour before mapping PPE.');
+            let working=board.people.filter(p=>p.attendance==='working');
+            let combinedReviewConfirmed=false;
+            if(!working.length){
+                const reviewed=board.people.some(p=>
+                    ['working','off'].includes(p.dutyDay1)||
+                    ['working','off'].includes(p.dutyDay2));
+                const scout=await cPilotScoutSuggestions(board);
+                if(reviewed||!scout.ok){
+                    document.querySelector('[data-cshift-duty-editor]')?.scrollIntoView?.({block:'nearest'});
+                    throw Error('Working attendance was not confirmed. '+
+                        (scout.ok?'Review the prefilled Scout assignments':
+                            'Scout evidence is unavailable: '+scout.error)+
+                        ', then press Confirm C Shift Duty before mapping PPE.');
+                }
+                const people=board.people.map(row=>{
+                    const d1=scout.results.get(masterNameKey(row.name)+'|'+board.tourStart);
+                    const d2=scout.results.get(masterNameKey(row.name)+'|'+board.tourEnd);
+                    return{name:row.name,prefix:row.prefix,
+                        day1:d1?.suggested||'unknown',day2:d2?.suggested||'unknown'};
+                });
+                if(people.some(row=>!['working','off'].includes(row.day1)||
+                    !['working','off'].includes(row.day2))){
+                    document.querySelector('[data-cshift-duty-editor]')?.scrollIntoView?.({block:'nearest'});
+                    throw Error('Some Rebel Scout schedule entries are uncertain. Review the prefilled attendance and confirm the correct dates before mapping PPE.');
+                }
+                const work=people.filter(p=>p.day1==='working'||p.day2==='working');
+                const off=people.filter(p=>p.day1==='off'&&p.day2==='off');
+                const last=[...scout.results.values()].map(r=>r.capturedAt).filter(Boolean).sort().at(-1);
+                const text='Rebel Scout proposes WORKING: '+work.map(p=>p.name).join(', ')+
+                    '. OFF both days: '+off.map(p=>p.name).join(', ')+
+                    '. Source captured '+cPilotStamp(last)+
+                    '. These are historical schedule observations, not independently verified final attendance. '+
+                    'Do you confirm these assignments for the selected tour and authorize a read-only PPE equipment lookup?';
+                if(!confirm(text))return false;
+                const saved=await cPilotBridge('POST','vr-ppe-pilot-duty',
+                    {tourStart:board.tourStart,people});
+                if(saved.scope!=='c-shift-ppe-pilot-duty'||saved.crew!==7)
+                    throw Error('Attendance confirmation was not acknowledged by Rebel Command.');
+                cPilotCache=null;
+                board=await cPilotFetch(true,board.tourStart);
+                working=board.people.filter(p=>p.attendance==='working');
+                if(working.length!==work.length)
+                    throw Error('The saved C-shift attendance did not match the reviewed Scout working crew.');
+                combinedReviewConfirmed=true;
+                setStatus('C-shift attendance reviewed and saved for '+working.length+
+                    ' working firefighters. Starting read-only PPE equipment lookup...');
+            }
+            if(!combinedReviewConfirmed&&!confirm('Read the Vector Responsible Party PPE list for '+
+                working.length+' confirmed-working C-shift firefighter(s)? This is read-only and creates no inspection.'))return false;
+            const known=getActiveMasterRoster();
+            const owners=working.map(p=>{
+                const x=known.find(y=>y.prefix===p.prefix&&
+                    clean(y.name).toLowerCase()===clean(p.name).toLowerCase());
+                if(!x)throw Error('Approved PPE identity missing for '+p.name);
+                return{name:x.name,prefix:x.prefix};
+            });
+            await ensurePpeEquipmentPage(m=>setStatus('C pilot map: '+m),false);
+            const inventory=await scanPpeCrewOwners(owners,m=>setStatus('C pilot map: '+m));
+            const snapshots=owners.map(owner=>({
+                ownerName:owner.name,prefix:owner.prefix,
+                items:inventory.items.filter(x=>
+                    masterNameKey(x.ownerName)===masterNameKey(owner.name))
+            }));
+            const queued=cPilotQueueScopedInventory(snapshots,new Date().toISOString(),board.tourStart);
+            if(!queued)
+                throw Error('No valid PPE inventory manifests queued. Review the names and asset identifiers.');
+            setStatus('C shift '+board.tourStart+': mapped '+queued+
+                ' confirmed-working PPE owner(s). '+
+                (board.historicalTour?'These are current Vector ownership records used to reconstruct historical requirements, not proof of past ownership. ':'')+
+                'Inventory updates are queued for Rebel Command. No safety inspection was performed.');
+            return true;
+        }catch(error){
+            setStatus('C shift PPE mapping stopped: '+clean(error?.message||error),false);
+            return false;
+        }
+    }
+    async function cPilotQueueReadOnlyResults(check){
+        const listed=(check?.items||[]);
+        const now=new Date().toISOString();
+        let queued=0,unreadable=0;
+        const existing=cPilotPending();
+        for(const item of listed){
+            const result=(check.results||[]).find(x=>
+                x.assetId===item.assetId&&x.ownerPrefix===item.ownerPrefix);
+            const readable=result?.status==='ok'&&Array.isArray(result?.tour?.dates);
+            if(!readable)unreadable++;
+            const id='cshiftpilotread:'+check.checkId+':'+item.ownerPrefix+':'+item.assetId;
+            if(existing.some(x=>x.id===id))continue;
+            existing.push({kind:'recheck',id,inspectionMode:'tour',
+                tourStart:check.tourStart,personPrefix:item.ownerPrefix,
+                personName:item.ownerName,assetId:item.assetId,
+                source:'native_read_only_item_log',
+                nativeAssetIdentityVerified:readable,readResult:readable?'ok':'unreadable',
+                readError:readable?'':clean(result?.error||'Native Item Log unreadable').slice(0,160),
+                checkedAt:result?.readAt||now,
+                completedDates:readable?result.tour.dates.slice(0,12):[]});
+            queued++;
+        }
+        if(existing.length>200)
+            throw Error('C shift receipt queue is full. Reconnect Rebel Command before collecting more evidence.');
+        saveJSON(C_PILOT_PENDING_KEY,existing);
+        const delivered=await cPilotFlushReceipts();
+        cPilotCache=null;
+        return{queued,unreadable,delivered};
+    }
+    async function startCShiftPilotNativeRecheck(dedicated=false,selectedTourStart=''){
+        if(!isMasterOwnerInstallation()||(!dedicated&&panelInterfaceMode()!=='master')){
+            setStatus('Only the master-linked C-shift pilot captain can start read-only verification.',false);
+            return false;
+        }
+        if(getRun()||getCaptainDailyCheck()||captainDailyBusy){
+            setStatus('Another Vector Rebel inspection or Captain Check is active. Finish it before rechecking.',false);
+            return false;
+        }
+        let data;
+        try{
+            data=await cPilotFetch(true,dedicated?'':selectedTourStart);
+            if(!data.activeTour&&!(data.historicalEligible&&!dedicated))
+                throw Error('C-shift rechecks require an active tour or a selected completed C tour.');
+            const eligible=data.people.filter(p=>
+                p.attendance==='working'&&
+                (p.nextRequiredItem||p.nextItem)&&
+                (Number(p.outstandingItems||0)+
+                    Number(p.maskOutstandingItems||0)>0));
+            // Enterprise/Server mode reads ONE person per slow work lease,
+            // rather than opening up to seven native Item Logs at once.
+            // A durable round-robin cursor prevents persistent starvation.
+            const cursorKey='vectorRebelEnterprisePpeCursorV1';
+            const oldCursor=Number(persistentGetRaw(cursorKey)||0);
+            const cursor=Number.isFinite(oldCursor)&&oldCursor>=0?oldCursor:0;
+            const candidates=dedicated&&eligible.length?
+                [eligible[cursor%eligible.length]]:eligible;
+            if(!candidates.length){
+                setStatus('No confirmed-working C-shift firefighter has a mapped outstanding PPE item. Confirm duty and collect verified inventories first.');
+                return false;
+            }
+            const directItems=candidates.map(cPilotDirectTarget);
+            const directReady=directItems.every(Boolean);
+            // If a native direct link is missing, map exactly the one
+            // selected owner's gear once. No full-department crawl.
+            // Later passes use the saved path.
+            if(!dedicated&&!confirm('Run one read-only PPE Item Log check per '+
+                candidates.length+' confirmed-working firefighter(s)? '+
+                (directReady?'The saved direct asset links avoid repeating the crew inventory scan.':
+                    'A ONE-TIME gear-link mapping is needed first; later passes will open only the selected items.')+
+                ' No inspections will be submitted.'))return false;
+            const all=getActiveMasterRoster();
+            const owners=candidates.map(row=>{
+                const entry=all.find(p=>p.prefix===row.prefix&&
+                    clean(p.name).toLowerCase()===clean(row.name).toLowerCase());
+                if(!entry)throw Error('C-shift pilot roster is missing an approved Responsible Party: '+row.name);
+                return{name:entry.name,prefix:entry.prefix};
+            });
+            let items=directItems;
+            if(!directReady){
+                setStatus('BC Check: mapping missing native PPE links once; future passes will jump directly to one item per working firefighter.');
+                await ensurePpeEquipmentPage(message=>setStatus('BC gear link map: '+message),false);
+                const inventory=await scanPpeCrewOwners(owners,
+                    message=>setStatus('BC gear link map: '+message));
+                items=candidates.map(row=>{
+                    const matches=inventory.items.filter(item=>
+                        item.ownerName===row.name&&
+                        item.assetId===(row.nextRequiredItem||row.nextItem));
+                    if(matches.length!==1||!matches[0]?.url)
+                        throw Error(row.name+': cannot uniquely locate '+row.nextItem+
+                            ' in Vector PPE. No inspection result was accepted.');
+                    if(matches[0].inspectionModeKey==='scbaTour'&&
+                        clean(matches[0].pool)!=='299947')
+                        throw Error('Only the verified native SCBA face mask pool is allowed.');
+                    if(!cPilotNativePath(matches[0].url))
+                        throw Error(row.name+': native PPE detail route is unsupported for direct verification.');
+                    return {...matches[0],ownerName:row.name,ownerPrefix:row.prefix};
+                });
+                const snapshots=owners.map(owner=>({
+                    ownerName:owner.name,prefix:owner.prefix,
+                    items:inventory.items.filter(item=>
+                        masterNameKey(item.ownerName)===masterNameKey(owner.name))
+                }));
+                const mapped=cPilotQueueScopedInventory(snapshots,new Date().toISOString(),data.tourStart);
+                if(!mapped)throw Error('One-time direct PPE link mapping did not queue for Rebel Command.');
+                setStatus('BC Check: '+mapped+' PPE inventories queued for direct-link caching. Starting the one-item-per-person check.');
+            }else{
+                setStatus('BC Check: using '+items.length+' saved native PPE paths; no full crew inventory scan.');
+            }
+            const check={
+                schemaVersion:3,checkId:'cshift-pilot-native-recheck-'+Date.now()+'-'+
+                    Math.random().toString(36).slice(2,8),
+                pilotRecheck:true,status:'running',ownerTabId:TAB_ID,
+                startedAt:new Date().toISOString(),returnUrl:location.href,
+                tourStart:data.tourStart,auditAsOfDate:localTodayKey(),
+                shift:'C',setId:'cshift-pilot',setName:'C-shift read-only pilot',
+                owners,discovery:[],items,index:0,
+                itemStartedAtMs:Date.now(),results:[],navAttempts:{}
+            };
+            saveCaptainDailyCheck(check);
+            setStatus('C shift read-only PPE recheck: item 1/'+items.length+' ('+
+                items[0].assetId+').');
+            if(dedicated)
+                persistentSetRaw(cursorKey,String((cursor+1)%1000000));
+            navigateCaptainDailyToItem(check,items[0]);
+            return true;
+        }catch(error){
+            setStatus('C shift read-only recheck stopped: '+clean(error?.message||error),false);
+            return false;
+        }
+    }
+    const BC_DAILY_ROSTER_KEY='vectorRebelBcConfirmedDepartmentDay_v1';
+
+    // BC list is an exact-date, department-wide scheduling preview with
+    // captain-confirmed C duty taking precedence. A Scout snapshot is not
+    // a roll call, and yesterday's swing can NEVER populate today's roster.
+    function bcDepartmentDailyRows(schedule,pilot,report,date,manual=null){
+        const roster=new Map();
+        const put=(person,source)=>{
+            const name=clean(person?.name);
+            const key=masterNameKey(name);
+            if(!key)return;
+            const old=roster.get(key);
+            roster.set(key,{
+                name,prefix:clean(person.prefix||old?.prefix||''),
+                units:Array.isArray(person.units)?person.units:
+                    old?.units||[],
+                source,confirmed:source==='captain_confirmed'||
+                    source==='bc_confirmed'
+            });
+        };
+        for(const row of schedule?.people||[])
+            if(row.sourceStatus==='scheduled_work_evidence')
+                put(row,'schedule_preview');
+        const cActive=pilot?.activeTour===true&&
+            [pilot.tourStart,pilot.tourEnd].includes(date);
+        if(cActive){
+            for(const row of pilot.people||[]){
+                const status=date===pilot.tourStart?
+                    row.dutyDay1:row.dutyDay2;
+                if(!row.lastDutyConfirmedAt)continue;
+                if(status==='off')roster.delete(masterNameKey(row.name));
+                else if(status==='working')put({
+                    name:row.name,prefix:row.prefix},'captain_confirmed');
+            }
+        }
+        const current=report?.tourRoster;
+        if(current&&[current.startDate,current.endDate].includes(date)&&
+            !!report.currentTourCrewConfirmedAt){
+            const assigned=new Set(current.onByDate?.[date]||[]);
+            const reviewed=new Set([
+                ...(current.basePrefixes||[]),
+                ...(current.swingPrefixes||[])
+            ]);
+            for(const owner of report.owners||[]){
+                if(!reviewed.has(owner.prefix))continue;
+                if(assigned.has(owner.prefix))
+                    put(owner,'captain_confirmed');
+                else roster.delete(masterNameKey(owner.name));
+            }
+        }
+        const result=Array.from(roster.values());
+        if(manual?.date===date&&manual?.confirmedAt&&
+            Array.isArray(manual.people)){
+            const confirmed=new Map();
+            const allowed=new Map(getCaptainPersonOptions()
+                .map(p=>[masterNameKey(p.name),p]));
+            for(const raw of manual.people){
+                const key=masterNameKey(raw.name);
+                const known=roster.get(key)||allowed.get(key);
+                if(!known||confirmed.has(key))continue;
+                confirmed.set(key,{
+                    name:known.name,prefix:known.prefix||'',
+                    units:known.units||[],source:'bc_confirmed',confirmed:true
+                });
+            }
+            result.length=0;result.push(...confirmed.values());
+        }
+        result.sort((a,b)=>String(a.units[0]||'ZZ').localeCompare(
+            String(b.units[0]||'ZZ'))||a.name.localeCompare(b.name));
+        return result.map(row=>({...row,
+            cShifter:C_PILOT_NAMES.has(masterNameKey(row.name))}));
+    }
+    function bcCShiftHistoryCell(report,name,tourStart,board=null){
+        const owner=(report?.owners||[]).find(p=>
+            masterNameKey(p.name)===masterNameKey(name));
+        const items=(owner?.items||[]).filter(item=>
+            (item.tourChecks||[]).some(t=>t.startDate===tourStart));
+        if(items.length){
+            const checked=items.filter(item=>item.status==='ok'&&
+                (item.tourChecks||[]).some(t=>t.startDate===tourStart&&
+                    t.ok===true)).length;
+            return{label:checked+' / '+items.length,
+                detail:checked+' native checks confirmed of '+
+                    items.length+' known items. Remaining are unverified, not proven missed.'};
+        }
+        // Another C-shift member may have native Item Log evidence in
+        // Rebel Command, even when they were not in this Captain's saved
+        // PPE history. This is a read-only fallback, never a new check.
+        const row=(board?.people||[]).find(p=>
+            masterNameKey(p.name)===masterNameKey(name));
+        if(row){
+            const gear=[...(row.gear||[]),...(row.maskGear||[])];
+            if(gear.length){
+                const next=addDateKeyDays(tourStart,1);
+                const verified=gear.filter(item=>
+                    item.status==='verified'&&
+                    [tourStart,next].includes(item.nativeCompletionDate)).length;
+                return{label:verified+' / '+gear.length,
+                    detail:verified+' native-dated Item Log receipts of '+
+                        gear.length+' scoped known PPE items. Unknown/missing dates are pending, not failures.'};
+            }
+        }
+        return{label:'?',detail:'No native PPE results mapped for this C-shift tour'};
+    }
+    function showBcDepartmentCheck(){
+        const {overlay,box}=makeOverlayBox('1320px');
+        box.style.maxWidth='96vw';
+        const heading=document.createElement('h2');
+        heading.textContent='BC Check';
+        heading.style.cssText='font:700 22px Arial;color:#143e5a;margin:0 0 5px;';
+        const note=document.createElement('div');
+        note.style.cssText='font:12px/1.5 Arial;color:#45687a;margin-bottom:10px;';
+        note.textContent='Department-wide daily duty and PPE status. Short C-shift native history. No compliance checks are submitted.';
+        const source=document.createElement('div');
+        source.setAttribute('role','status');
+        source.style.cssText='background:#f1f7fa;border:1px solid #c2dae6;'+
+            'border-radius:7px;padding:8px 10px;color:#235371;font:11px/1.5 Arial;margin-bottom:9px;';
+        source.textContent='Loading department-wide CrewSense schedule snapshot…';
+        const actions=document.createElement('div');
+        actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;';
+        const refresh=makeButton('Refresh');
+        const review=makeButton('Review Today\'s Crew');
+        const close=makeButton('Close');
+        close.onclick=()=>overlay.remove();
+        actions.append(refresh,review,close);
+        const tableWrap=document.createElement('div');
+        tableWrap.style.cssText='overflow:auto;max-height:68vh;'+
+            'border:1px solid #c7dce6;border-radius:9px;';
+        const table=document.createElement('table');
+        table.style.cssText='width:100%;min-width:850px;border-collapse:collapse;'+
+            'font:11px Arial;color:#173e56;';
+        tableWrap.appendChild(table);
+        const details=document.createElement('details');
+        details.style.cssText='margin-top:9px;font:11px Arial;color:#426478;';
+        const summary=document.createElement('summary');
+        summary.textContent='Background collection details (Master)';
+        const pilotButton=makeButton('Open existing C-shift background monitor');
+        pilotButton.onclick=()=>showCShiftPilotBoard(true);
+        details.append(summary,pilotButton);
+        box.append(heading,note,source,actions,tableWrap,details);
+        let schedule=null,pilot=null,report=null,rows=[],reviewing=false;
+        const historyBoards=new Map();
+        const date=localTodayKey();
+        const manualAll=loadJSON(BC_DAILY_ROSTER_KEY,{})||{};
+        let manual=manualAll?.date===date?manualAll:null;
+        let choices=new Set();
+        const windows=captainAuditWindow(date,'C');
+        const current=windows.tours.filter(t=>t.startDate<=date)
+            .slice(-3).reverse();
+        const stamp=raw=>{
+            const t=Date.parse(raw||'');
+            return Number.isFinite(t)?new Date(t).toLocaleString():'unavailable';
+        };
+        const render=()=>{
             report=getCaptainDailyReport();
             rows=bcDepartmentDailyRows(schedule,pilot,report,date,manual);
             if(!reviewing)
-                choices=new Set(rows.filter(p=>p.duty!=='off')
-                    .map(p=>masterNameKey(p.name)));
-            const working=rows.filter(p=>p.duty!=='off').length;
-            const off=rows.length-working;
-            source.textContent='Daily roster '+date+' · '+working+' working / '+
-                off+' confirmed OFF'+
-                (manual?.confirmedAt?' · BC-confirmed':' · schedule/confirmed candidates')+
-                ' · CrewSense captured '+stamp(schedule?.capturedAt)+
+                choices=new Set(rows.map(p=>masterNameKey(p.name)));
+            source.textContent='Daily roster '+date+' · '+
+                rows.length+(manual?.confirmedAt?' BC-confirmed':' scheduled/confirmed candidates')+
+                ' · CrewSense capture '+stamp(schedule?.capturedAt)+
                 (schedule?.stale?' (STALE: review needed)':'')+
-                '. Schedule is not a roll call; UNKNOWN inspection means not verified, not failed.';
+                '. A scheduled person is NOT confirmed present until reviewed.'+
+                ' C-shift Captain-confirmed duty overrides older schedule.'+
+                ' Unknown PPE is not a failed inspection.';
             table.replaceChildren();
-            table.style.minWidth=(640+current.length*120)+'px';
-            const monthGroups=document.createElement('tr');
             const head=document.createElement('tr');
-            const fixed=['FIREFIGHTER','UNIT','TODAY\'S DUTY','TODAY PPE'];
-            if(reviewing)fixed.unshift('HERE');
-            for(const label of fixed){
-                const th=document.createElement('th');
-                th.textContent=label;th.rowSpan=2;
+            const columns=['FIREFIGHTER','UNIT','TODAY\'S DUTY',
+                'TODAY PPE',...current.map(t=>'C TOUR '+t.startDate.slice(5))];
+            if(reviewing)columns.unshift('HERE');
+            for(const label of columns){
+                const th=document.createElement('th');th.textContent=label;
                 th.style.cssText='padding:9px;text-align:left;position:sticky;top:0;'+
                     'background:#173e63;color:white;border-bottom:1px solid #aec8d6;';
-                monthGroups.appendChild(th);
+                head.appendChild(th);
             }
-            for(const month of months){
-                const matching=current.filter(t=>t.month===month);
-                if(!matching.length)continue;
-                const th=document.createElement('th');
-                th.colSpan=matching.length;
-                th.textContent=displayMonthKey(month);
-                th.style.cssText='padding:8px;text-align:center;position:sticky;top:0;'+
-                    'background:#244f70;color:#fff;border-left:2px solid #829dad;';
-                monthGroups.appendChild(th);
-                for(const tour of matching){
-                    const sub=document.createElement('th');
-                    sub.textContent=tour.startDate.slice(5)+' / '+tour.endDate.slice(5);
-                    sub.title='C-shift tour '+tour.startDate+' to '+tour.endDate;
-                    sub.style.cssText='padding:6px 3px;text-align:center;position:sticky;top:30px;'+
-                        'background:#e2edf4;color:#153b56;white-space:nowrap;border-bottom:1px solid #aec8d6;';
-                    head.appendChild(sub);
-                }
-            }
-            table.append(monthGroups,head);
-            const toneStyle={
-                complete:'background:#e2f5e8;color:#176437;',
-                recorded:'background:#e5eff9;color:#205479;',
-                issue:'background:#ffe2de;color:#9b2119;',
-                partial:'background:#fff0cb;color:#7f5100;',
-                missing:'background:#ffe3df;color:#9b2119;',
-                off:'background:#e7e9eb;color:#52616c;',
-                unknown:'background:#f2f5f7;color:#5a6b76;',
-                future:'background:#f6f7f8;color:#8a969d;'
-            };
-            let lastStation='';
+            table.appendChild(head);
+            const cPeople=new Map((pilot?.people||[]).map(p=>
+                [masterNameKey(p.name),p]));
             for(const [index,person] of rows.entries()){
                 const tr=document.createElement('tr');
                 tr.style.background=index%2?'#f5f9fb':'#fff';
-                const station=bcDepartmentStationName(person);
-                const stationBoundary=station!==lastStation;
-                lastStation=station;
                 if(reviewing){
                     const td=document.createElement('td');
                     const chk=document.createElement('input');
@@ -16208,46 +17288,47 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     };
                     td.appendChild(chk);tr.appendChild(td);
                 }
-                const history=current.map(t=>
-                    t.startDate>date?
-                        {label:'NOT DUE',detail:'Future C-shift tour',tone:'future'}:
-                        bcCShiftHistoryCell(report,person.name,t.startDate,
-                            historyBoards.get(t.startDate)||(
-                                t.startDate===pilot?.tourStart?pilot:null)));
-                const active=current.find(t=>t.startDate<=date&&t.endDate>=date);
-                const today=person.duty==='off'?
-                    {label:'OFF',detail:'Explicitly confirmed off for today',tone:'off'}:
-                    active?bcCShiftHistoryCell(report,person.name,active.startDate,
-                        historyBoards.get(active.startDate)||pilot):
-                    {label:'UNKNOWN',detail:'Today is not in a known C-shift tour',tone:'unknown'};
-                const duty=person.duty==='off'?
-                    {label:'OFF',tone:'off',detail:'Explicitly Captain/BC-confirmed OFF today'}:
-                    person.confirmed?
-                    {label:'WORKING',tone:'complete',detail:'Attendance confirmed for this date'}:
-                    {label:'SCHEDULED',tone:'unknown',detail:'CrewSense preview only. Confirm actual attendance.'};
+                const history=person.cShifter?current.map(t=>
+                    bcCShiftHistoryCell(report,person.name,t.startDate,
+                        historyBoards.get(t.startDate))):
+                    current.map(()=>({label:'',detail:'History shown for C-shift members only'}));
+                const owner=(report?.owners||[]).find(p=>
+                    masterNameKey(p.name)===masterNameKey(person.name));
+                const t=report?.tourRoster;
+                const todayItems=owner&&[t?.startDate,t?.endDate].includes(date)?
+                    bcCShiftHistoryCell(report,person.name,t.startDate):
+                    null;
+                const cRow=cPeople.get(masterNameKey(person.name));
+                const mapped=Number(cRow?.knownItems||0)+
+                    Number(cRow?.maskKnownItems||0);
+                const checked=Number(cRow?.verifiedItems||0)+
+                    Number(cRow?.maskVerifiedItems||0);
+                const ppe=todayItems&&todayItems.label!=='?'?
+                    todayItems.label+' native':
+                    mapped?checked+' / '+mapped+' dated native':'? Not collected';
                 const data=[
-                    {text:person.name},
+                    {text:person.name+(person.cShifter?' · C':''),
+                        title:person.cShifter?'C-shift regular':''},
                     {text:person.units.join(', ')||'Unit not confirmed'},
-                    {text:duty.label,title:duty.detail,tone:duty.tone},
-                    {text:today.label,title:today.detail,tone:today.tone},
-                    ...history.map(h=>({text:h.label,title:h.detail,tone:h.tone}))
+                    {text:person.confirmed?'✓ CONFIRMED':'SCHEDULE PREVIEW',
+                        title:person.source==='schedule_preview'?
+                            'CrewSense schedule, not a current-day roll call':
+                            'Explicit current-tour Captain/BC confirmation'},
+                    {text:ppe,title:'Pending means Item Log verification missing, not a failed inspection'},
+                    ...history.map(h=>({text:h.label,title:h.detail}))
                 ];
                 for(const [i,field] of data.entries()){
                     const td=document.createElement('td');
                     td.textContent=field.text;td.title=field.title||'';
                     td.style.cssText='padding:8px;border-bottom:1px solid #dbe8ef;'+
-                        (i===0?'font-weight:700;':'')+
-                        (field.tone?(toneStyle[field.tone]||toneStyle.unknown):'')+
-                        (field.tone?'font-weight:700;text-align:center;white-space:nowrap;':'')+
-                        (stationBoundary?'border-top:2px solid #a7c0ce;':'');
+                        (i===0?'font-weight:700;':'');
                     tr.appendChild(td);
                 }
                 table.appendChild(tr);
             }
             if(!rows.length){
                 const tr=document.createElement('tr'),td=document.createElement('td');
-                td.colSpan=fixed.length+current.length;
-                td.style.cssText='padding:18px;color:#80570c;';
+                td.colSpan=columns.length;td.style.cssText='padding:18px;color:#80570c;';
                 td.textContent='No trustworthy department-wide staffing list is available. Do not infer nobody is working.';
                 tr.appendChild(td);table.appendChild(tr);
             }
@@ -16275,26 +17356,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             render();
             // The current citywide schedule appears immediately. Native
             // C-shift tour history fills from older read-only RC boards.
-            // Read only two months of real tours, in bounded pairs. Display
-            // the complete calendar immediately; never trigger native forms.
-            const token=++historyLoadId;
-            const older=current.filter(t=>
-                t.startDate<=date&&t.startDate!==pilot?.tourStart);
-            void (async()=>{
-                for(let i=0;i<older.length;i+=2){
-                    if(!overlay.isConnected||token!==historyLoadId)return;
-                    const batch=older.slice(i,i+2);
-                    const results=await Promise.allSettled(batch.map(t=>
-                        cPilotFetch(true,t.startDate)));
-                    if(!overlay.isConnected||token!==historyLoadId)return;
-                    results.forEach((result,j)=>{
-                        if(result.status==='fulfilled'&&
-                            result.value?.tourStart===batch[j].startDate)
-                            historyBoards.set(batch[j].startDate,result.value);
-                    });
-                    render();
-                }
-            })();
+            const older=current.filter(t=>t.startDate!==pilot?.tourStart);
+            void Promise.allSettled(older.map(t=>
+                cPilotFetch(true,t.startDate))).then(results=>{
+                if(!overlay.isConnected)return;
+                results.forEach((result,i)=>{
+                    if(result.status==='fulfilled'&&
+                        result.value?.tourStart===older[i].startDate)
+                        historyBoards.set(older[i].startDate,result.value);
+                });
+                render();
+            });
         };
         refresh.onclick=()=>{void fetch();};
         review.onclick=()=>{
@@ -16332,8 +17404,6 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
             manual={date,confirmedAt:new Date().toISOString(),
                 people:rows.filter(p=>choices.has(masterNameKey(p.name)))
-                    .map(p=>({name:p.name,prefix:p.prefix})),
-                offPeople:rows.filter(p=>!choices.has(masterNameKey(p.name)))
                     .map(p=>({name:p.name,prefix:p.prefix}))};
             saveJSON(BC_DAILY_ROSTER_KEY,manual);
             reviewing=false;review.textContent='Review Today\'s Crew';
