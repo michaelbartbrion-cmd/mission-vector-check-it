@@ -17292,7 +17292,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         heading.style.cssText='font:700 22px Arial;color:#143e5a;margin:0 0 5px;';
         const note=document.createElement('div');
         note.style.cssText='font:12px/1.5 Arial;color:#45687a;margin-bottom:10px;';
-        note.textContent='Department-wide daily duty and PPE status. Short C-shift native history. No compliance checks are submitted.';
+        note.textContent='Previous and current month C-shift tour history, plus department-wide duty and PPE status for today. Read only.';
         const source=document.createElement('div');
         source.setAttribute('role','status');
         source.style.cssText='background:#f1f7fa;border:1px solid #c2dae6;'+
@@ -17327,8 +17327,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         let manual=manualAll?.date===date?manualAll:null;
         let choices=new Set();
         const windows=captainAuditWindow(date,'C');
-        const current=windows.tours.filter(t=>t.startDate<=date)
-            .slice(-3).reverse();
+        const current=windows.tours.slice();
+        const months=windows.months.slice();
+        let historyLoadId=0;
         const stamp=raw=>{
             const t=Date.parse(raw||'');
             return Number.isFinite(t)?new Date(t).toLocaleString():'unavailable';
@@ -17337,31 +17338,63 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             report=getCaptainDailyReport();
             rows=bcDepartmentDailyRows(schedule,pilot,report,date,manual);
             if(!reviewing)
-                choices=new Set(rows.map(p=>masterNameKey(p.name)));
-            source.textContent='Daily roster '+date+' · '+
-                rows.length+(manual?.confirmedAt?' BC-confirmed':' scheduled/confirmed candidates')+
-                ' · CrewSense capture '+stamp(schedule?.capturedAt)+
+                choices=new Set(rows.filter(p=>p.duty!=='off')
+                    .map(p=>masterNameKey(p.name)));
+            const working=rows.filter(p=>p.duty!=='off').length,off=rows.length-working;
+            source.textContent='Daily roster '+date+' · '+working+' working / '+off+' OFF'+
+                (manual?.confirmedAt?' · BC-confirmed':' · schedule/confirmed candidates')+
+                ' · CrewSense captured '+stamp(schedule?.capturedAt)+
                 (schedule?.stale?' (STALE: review needed)':'')+
-                '. A scheduled person is NOT confirmed present until reviewed.'+
-                ' C-shift Captain-confirmed duty overrides older schedule.'+
-                ' Unknown PPE is not a failed inspection.';
+                '. Schedule is not roll call; unverified PPE is not a failed inspection.';
             table.replaceChildren();
-            const head=document.createElement('tr');
-            const columns=['FIREFIGHTER','UNIT','TODAY\'S DUTY',
-                'TODAY PPE',...current.map(t=>'C TOUR '+t.startDate.slice(5))];
-            if(reviewing)columns.unshift('HERE');
-            for(const label of columns){
-                const th=document.createElement('th');th.textContent=label;
+            table.style.minWidth=(610+current.length*132)+'px';
+            const monthRow=document.createElement('tr');
+            const dayRow=document.createElement('tr');
+            const fixed=['FIREFIGHTER','UNIT','TODAY\'S DUTY','TODAY PPE'];
+            if(reviewing)fixed.unshift('HERE');
+            for(const label of fixed){
+                const th=document.createElement('th');
+                th.textContent=label;th.rowSpan=2;
                 th.style.cssText='padding:9px;text-align:left;position:sticky;top:0;'+
                     'background:#173e63;color:white;border-bottom:1px solid #aec8d6;';
-                head.appendChild(th);
+                monthRow.appendChild(th);
             }
-            table.appendChild(head);
-            const cPeople=new Map((pilot?.people||[]).map(p=>
-                [masterNameKey(p.name),p]));
+            for(const month of months){
+                const matching=current.filter(t=>t.month===month);
+                if(!matching.length)continue;
+                const th=document.createElement('th');
+                th.colSpan=matching.length;
+                th.textContent=displayMonthKey(month);
+                th.style.cssText='padding:8px;text-align:center;position:sticky;top:0;'+
+                    'background:#244f70;color:#fff;border-left:2px solid #829dad;';
+                monthRow.appendChild(th);
+                for(const tour of matching){
+                    const sub=document.createElement('th');
+                    sub.textContent=tour.startDate.slice(5)+' / '+tour.endDate.slice(5);
+                    sub.title='C-shift tour '+tour.startDate+' through '+tour.endDate;
+                    sub.style.cssText='padding:6px 3px;text-align:center;position:sticky;top:30px;'+
+                        'background:#e2edf4;color:#153b56;white-space:nowrap;border-bottom:1px solid #aec8d6;';
+                    dayRow.appendChild(sub);
+                }
+            }
+            table.append(monthRow,dayRow);
+            const toneStyle={
+                complete:'background:#e2f5e8;color:#176437;',
+                recorded:'background:#e5eff9;color:#205479;',
+                issue:'background:#ffe2de;color:#9b2119;',
+                partial:'background:#fff0cb;color:#7f5100;',
+                missing:'background:#ffe3df;color:#9b2119;',
+                off:'background:#e7e9eb;color:#52616c;',
+                unknown:'background:#f2f5f7;color:#5a6b76;',
+                future:'background:#f6f7f8;color:#8a969d;'
+            };
+            let lastStation='';
             for(const [index,person] of rows.entries()){
                 const tr=document.createElement('tr');
                 tr.style.background=index%2?'#f5f9fb':'#fff';
+                const station=bcDepartmentStationName(person);
+                const boundary=station!==lastStation;
+                lastStation=station;
                 if(reviewing){
                     const td=document.createElement('td');
                     const chk=document.createElement('input');
@@ -17373,48 +17406,47 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     };
                     td.appendChild(chk);tr.appendChild(td);
                 }
-                const history=person.cShifter?current.map(t=>
-                    bcCShiftHistoryCell(report,person.name,t.startDate,
-                        historyBoards.get(t.startDate))):
-                    current.map(()=>({label:'',detail:'History shown for C-shift members only'}));
-                const owner=(report?.owners||[]).find(p=>
-                    masterNameKey(p.name)===masterNameKey(person.name));
-                const t=report?.tourRoster;
-                const todayItems=owner&&[t?.startDate,t?.endDate].includes(date)?
-                    bcCShiftHistoryCell(report,person.name,t.startDate):
-                    null;
-                const cRow=cPeople.get(masterNameKey(person.name));
-                const mapped=Number(cRow?.knownItems||0)+
-                    Number(cRow?.maskKnownItems||0);
-                const checked=Number(cRow?.verifiedItems||0)+
-                    Number(cRow?.maskVerifiedItems||0);
-                const ppe=todayItems&&todayItems.label!=='?'?
-                    todayItems.label+' native':
-                    mapped?checked+' / '+mapped+' dated native':'? Not collected';
+                const history=current.map(t=>
+                    t.startDate>date?
+                        {label:'NOT DUE',detail:'Future C-shift tour',tone:'future'}:
+                        bcCShiftHistoryCell(report,person.name,t.startDate,
+                            historyBoards.get(t.startDate)||
+                            (t.startDate===pilot?.tourStart?pilot:null)));
+                const active=current.find(t=>t.startDate<=date&&t.endDate>=date);
+                const today=person.duty==='off'?
+                    {label:'OFF',detail:'Confirmed off today',tone:'off'}:
+                    active?bcCShiftHistoryCell(report,person.name,active.startDate,
+                        historyBoards.get(active.startDate)||pilot):
+                    {label:'UNKNOWN',detail:'No native tour record for this date',tone:'unknown'};
+                const duty=person.duty==='off'?
+                    {label:'OFF',tone:'off',detail:'Captain/BC explicitly confirmed off today'}:
+                    person.confirmed?
+                    {label:'WORKING',tone:'complete',detail:'Captain/BC confirmed working today'}:
+                    {label:'SCHEDULED',tone:'unknown',detail:'Schedule preview only; confirm actual attendance'};
                 const data=[
-                    {text:person.name+(person.cShifter?' · C':''),
-                        title:person.cShifter?'C-shift regular':''},
+                    {text:person.name},
                     {text:person.units.join(', ')||'Unit not confirmed'},
-                    {text:person.confirmed?'✓ CONFIRMED':'SCHEDULE PREVIEW',
-                        title:person.source==='schedule_preview'?
-                            'CrewSense schedule, not a current-day roll call':
-                            'Explicit current-tour Captain/BC confirmation'},
-                    {text:ppe,title:'Pending means Item Log verification missing, not a failed inspection'},
-                    ...history.map(h=>({text:h.label,title:h.detail}))
+                    {text:duty.label,title:duty.detail,tone:duty.tone},
+                    {text:today.label,title:today.detail,tone:today.tone},
+                    ...history.map(h=>({text:h.label,title:h.detail,tone:h.tone}))
                 ];
                 for(const [i,field] of data.entries()){
                     const td=document.createElement('td');
                     td.textContent=field.text;td.title=field.title||'';
                     td.style.cssText='padding:8px;border-bottom:1px solid #dbe8ef;'+
-                        (i===0?'font-weight:700;':'');
+                        (i===0?'font-weight:700;':'')+
+                        (field.tone?(toneStyle[field.tone]||toneStyle.unknown):'')+
+                        (field.tone?'font-weight:700;text-align:center;white-space:nowrap;':'')+
+                        (boundary?'border-top:2px solid #a7c0ce;':'');
                     tr.appendChild(td);
                 }
                 table.appendChild(tr);
             }
             if(!rows.length){
                 const tr=document.createElement('tr'),td=document.createElement('td');
-                td.colSpan=columns.length;td.style.cssText='padding:18px;color:#80570c;';
-                td.textContent='No trustworthy department-wide staffing list is available. Do not infer nobody is working.';
+                td.colSpan=fixed.length+current.length;
+                td.style.cssText='padding:18px;color:#80570c;';
+                td.textContent='No trustworthy department-wide staffing list available. Do not infer nobody is working.';
                 tr.appendChild(td);table.appendChild(tr);
             }
         };
@@ -17441,17 +17473,27 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             render();
             // The current citywide schedule appears immediately. Native
             // C-shift tour history fills from older read-only RC boards.
-            const older=current.filter(t=>t.startDate!==pilot?.tourStart);
-            void Promise.allSettled(older.map(t=>
-                cPilotFetch(true,t.startDate))).then(results=>{
-                if(!overlay.isConnected)return;
-                results.forEach((result,i)=>{
-                    if(result.status==='fulfilled'&&
-                        result.value?.tourStart===older[i].startDate)
-                        historyBoards.set(older[i].startDate,result.value);
-                });
-                render();
-            });
+            // Read two full calendar months, limited to tours already started.
+            // Bounded pairs keep the interface responsive and preserve the
+            // authenticated browser; no native PPE forms are submitted.
+            const token=++historyLoadId;
+            const older=current.filter(t=>
+                t.startDate<=date&&t.startDate!==pilot?.tourStart);
+            void (async()=>{
+                for(let i=0;i<older.length;i+=2){
+                    if(!overlay.isConnected||token!==historyLoadId)return;
+                    const batch=older.slice(i,i+2);
+                    const results=await Promise.allSettled(batch.map(t=>
+                        cPilotFetch(true,t.startDate)));
+                    if(!overlay.isConnected||token!==historyLoadId)return;
+                    results.forEach((result,j)=>{
+                        if(result.status==='fulfilled'&&
+                            result.value?.tourStart===batch[j].startDate)
+                            historyBoards.set(batch[j].startDate,result.value);
+                    });
+                    render();
+                }
+            })();
         };
         refresh.onclick=()=>{void fetch();};
         review.onclick=()=>{
@@ -17489,6 +17531,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
             manual={date,confirmedAt:new Date().toISOString(),
                 people:rows.filter(p=>choices.has(masterNameKey(p.name)))
+                    .map(p=>({name:p.name,prefix:p.prefix})),
+                offPeople:rows.filter(p=>!choices.has(masterNameKey(p.name)))
                     .map(p=>({name:p.name,prefix:p.prefix}))};
             saveJSON(BC_DAILY_ROSTER_KEY,manual);
             reviewing=false;review.textContent='Review Today\'s Crew';
