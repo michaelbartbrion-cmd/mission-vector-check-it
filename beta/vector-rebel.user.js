@@ -17449,11 +17449,27 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 choices=new Set(rows.filter(p=>p.duty!=='off')
                     .map(p=>masterNameKey(p.name)));
             const working=rows.filter(p=>p.duty!=='off').length,off=rows.length-working;
+            const hasDatedNative=person=>{
+                const owned=(report?.owners||[]).find(owner=>
+                    masterNameKey(owner.name)===masterNameKey(person.name));
+                if((owned?.items||[]).some(item=>
+                    (item.tourChecks||[]).some(c=>
+                        current.some(t=>t.startDate===c.startDate)&&
+                        (c.complete===true||c.ok===true))))return true;
+                return [...historyBoards.values()].some(board=>
+                    (board?.people||[]).some(p=>
+                        masterNameKey(p.name)===masterNameKey(person.name)&&
+                        [...(p.gear||[]),...(p.maskGear||[])].some(item=>
+                            !!item.nativeCompletionDate&&item.status==='verified')));
+            };
+            const withNative=rows.filter(hasDatedNative).length;
             source.textContent='Daily roster '+date+' · '+working+' working / '+off+' OFF'+
                 (manual?.confirmedAt?' · BC-confirmed':' · schedule/confirmed candidates')+
                 ' · CrewSense captured '+stamp(schedule?.capturedAt)+
                 (schedule?.stale?' (STALE: review needed)':'')+
-                '. Scheduled is not confirmed present; inspection Unknown is not FAILED.'+
+                '. Dated native PPE records: '+withNative+' of '+rows.length+
+                ' people; remaining people need authenticated background Item Log collection.'+
+                ' Schedule is not roll call; Unknown is not FAILED.'+
                 (attendanceMessage?' '+attendanceMessage:'');
             table.replaceChildren();
             table.style.minWidth=(610+current.length*132)+'px';
