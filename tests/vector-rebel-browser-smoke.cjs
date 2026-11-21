@@ -38,13 +38,13 @@ const js=String.raw`
  const getRun=()=>null;
  const noop=()=>{},showPpeCleanRepairForm=noop,showStation4ScbaAirpackCheck=noop;
  const launchMyInspectionFromAnywhere=noop;
- let cachedHistory=false,historyShown=0,nativeHistoryStarted=0;
+ let cachedHistory=false,historyShown=0,nativeHistoryStarted=0,pilotShown=0;
  const getCaptainDailyReport=()=>cachedHistory?{
    schemaVersion:8,owners:[{name:'Fixture Captain',items:[]}]}:null;
  const showCaptainDailyReport=()=>{historyShown++;};
  const launchCaptainDailyCheckFromAnywhere=()=>{nativeHistoryStarted++;};
  const showApparatusCheck=noop,showProblemReport=noop;
- const showCShiftPilotBoard=noop,cPilotEligible=()=>false,
+ const showCShiftPilotBoard=()=>{pilotShown++;},cPilotEligible=()=>true,
    cPilotRefreshSummary=async()=>{},cPilotFlushReceipts=async()=>{},
    cPilotScheduleBoardPoll=()=>{};
  const showSettings=noop,checkManagedInterfaceRelease=noop;
@@ -92,7 +92,12 @@ const js=String.raw`
    if(historyShown!==1||nativeHistoryStarted!==0)
       throw Error('Master Captain did not open the existing two-month history');
    cachedHistory=false;
+   masterCaptain.click();
+   if(nativeHistoryStarted!==1||pilotShown!==0)
+      throw Error('Master Daily Captain Check fell into empty C-shift pilot instead of original audit');
+   nativeHistoryStarted=0;
    result.masterCaptainHistory=true;
+   result.masterCaptainMissingHistoryOriginal=true;
    setStatus('SCBA handoff stopped: unexpected form',false);
    updateMinimizedPanelBadge();
    if(miniBadge.textContent!=='!')throw Error('Local failure badge not visible');

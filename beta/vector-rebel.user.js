@@ -17302,20 +17302,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         make('After Fire',()=>launchMyInspectionFromAnywhere('afterFire'),true);
         make('PPE Form',showPpeCleanRepairForm);
         make('Daily Captain Check',()=>{
-            // Both Captains and the owner open the same detailed two-month
-            // per-person/per-required-PPE report when it already exists.
-            // The current-tour board remains useful when the full source
-            // history has not yet been collected on this installation.
+            // Always use the original item-by-item Captain history.
+            // The C-shift pilot can legitimately have ZERO inventory rows
+            // before its native collector runs. It is NOT a replacement for
+            // the Captain's daily gear list, even for the Master owner.
             const history=getCaptainDailyReport();
             if(history&&Number(history.schemaVersion)>=7&&
                Array.isArray(history.owners)&&history.owners.length){
                 showCaptainDailyReport(history);
                 return;
             }
-            if(master&&authorized&&cPilotEligible()){
-                showCShiftPilotBoard(true,'captain');
-                return;
-            }
+            // No cached report: open the original read-only Captain Set
+            // selection and native Item Log audit, never an empty BC pilot.
             void launchCaptainDailyCheckFromAnywhere();
         });
         make('Settings',()=>showSettings('profile'));
