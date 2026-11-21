@@ -6987,6 +6987,45 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         tableWrap.appendChild(table);
         box.appendChild(tableWrap);
 
+        // Keep the actual per-person PPE history chart immediately visible.
+        // All former pre-chart notes and diagnostic tables are preserved
+        // underneath in one collapsed, optional detail section.
+        const extraDetails=document.createElement('details');
+        extraDetails.setAttribute('data-captain-audit-details','1');
+        extraDetails.style.cssText='border:1px solid #cbdbe4;border-radius:7px;'+
+            'background:#f7fafc;padding:8px 10px;margin-top:8px;';
+        const extraSummary=document.createElement('summary');
+        extraSummary.textContent='More details: current tour, attendance, audit statistics and exceptions';
+        extraSummary.style.cssText='font:700 12px Arial;color:#28536c;cursor:pointer;';
+        extraDetails.appendChild(extraSummary);
+        // Do not discard the Captain's previous screen, Scout evidence,
+        // historical attendance editor, or active asynchronous updates.
+        const bulky=[...box.children].filter(el=>
+            el!==title&&el!==tableWrap);
+        for(const el of bulky)extraDetails.appendChild(el);
+        const compact=document.createElement('div');
+        compact.setAttribute('data-captain-chart-summary','1');
+        compact.style.cssText='font:12px/1.4 Arial;color:#244b61;'+
+            'margin:6px 0 9px;padding:8px 10px;border-radius:7px;'+
+            'background:#eff6fa;border:1px solid #cfdee8;';
+        const summaryCounts=document.createElement('span');
+        summaryCounts.textContent=displayMonthKey(months[0])+' + '+
+            displayMonthKey(months[1])+' · '+completedTours+
+            ' recorded · '+failedTours+' failed answers · '+
+            missingTours+' past-tour missing · '+pendingTours+
+            ' awaiting native verification'+
+            (pulse?' · '+pulse.workingToday+' working today':'')+
+            '. Blue completed markers have UNKNOWN answer outcomes.';
+        compact.appendChild(summaryCounts);
+        if(pulse){
+            const editCrew=makeButton('Correct Today\'s Crew');
+            editCrew.style.cssText+='margin-left:10px;padding:5px 9px;';
+            editCrew.onclick=()=>{overlay.remove();showCaptainDailySetPicker();};
+            compact.appendChild(editCrew);
+        }
+        box.insertBefore(compact,tableWrap);
+        box.appendChild(extraDetails);
+
         const footer = document.createElement('div');
         footer.style.cssText = 'font-size:10px;color:#6a7f8f;margin-top:8px;line-height:1.45;';
         footer.textContent='Audit through '+displayHistoryDateKey(auditWindow.asOfDate)+
