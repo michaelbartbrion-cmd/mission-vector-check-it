@@ -144,7 +144,7 @@ test('master inbox remains owner-only, shows new server errors without mutating 
  assert.doesNotMatch(inbox,/deleteSuggestion|updateSuggestion|bulkCreate\(/);
 });
 test('release check uses official managed URL; silent code hot swap not allowed',()=>{
- const chk=part('    async function checkManagedInterfaceRelease(){',
+ const chk=part('    let lastManualUpdateCheck=null;',
   '    async function refreshMasterErrorInbox(');
  assert.match(chk,/MANAGED_UPDATE_URL/);
  assert.match(chk,/availableRelease/);
