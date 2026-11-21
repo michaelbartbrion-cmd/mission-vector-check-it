@@ -123,7 +123,7 @@ test('picker has day-specific OFF/Here controls, Add Swing, and no permanent Cap
  assert.match(body,/entry\.day1/);
  assert.match(body,/entry\.day2/);
  assert.match(body,/basePrefixes:set\.people\.map/);
- assert.match(body,/await startCaptainDailyCheck\(selectedSet, auditAsOfDate\)/);
+ assert.match(body,/await startCaptainDailyCheck\(selectedSet,\s*auditAsOfDate\)/);
  assert.doesNotMatch(body,/saveConfig\(/,'no permanent Captain Set modifications');
 });
 test('results show OFF and offer Recheck Missing based on due missing assets only',()=>{
