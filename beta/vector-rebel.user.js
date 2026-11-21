@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vector Rebel
 // @namespace    mission-vector-check-it-vector-rebel
-// @version      3.2.85
+// @version      3.2.86
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js
 // @homepageURL  https://github.com/michaelbartbrion-cmd/mission-vector-check-it
@@ -33,7 +33,7 @@
         return;
     }
     window.__vectorRebelInstance = {
-        version: '3.2.85',
+        version: '3.2.86',
         startedAt: Date.now()
     };
 
@@ -41,7 +41,7 @@
     // STORAGE / CONSTANTS
     // ============================================================
 
-    const VERSION = '3.2.85';
+    const VERSION = '3.2.86';
     const PANEL_ID = 'vector-ppe-helper-v23';
     const OVERLAY_ID = 'vector-ppe-overlay-v23';
 
@@ -6553,6 +6553,34 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         return;
     }
 
+    // Reuse only today's explicitly Captain-confirmed C-shift duty.
+    // This fills the ORIGINAL Captain roster checkboxes, without changing
+    // the saved Captain Set, CrewSense, or official PPE inspections.
+    function captainApplyConfirmedPilotDuty(entries,board,days) {
+        if(!entries||board?.shift!=='C'||board?.activeTour!==true||
+            board.tourStart!==days?.[0]||board.tourEnd!==days?.[1]||
+            !Array.isArray(board.people))return 0;
+        let updated=0;
+        for(const entry of entries.values()){
+            const matches=board.people.filter(row=>
+                row.prefix===entry.person.prefix&&
+                masterNameKey(row.name)===masterNameKey(entry.person.name));
+            if(matches.length!==1)continue;
+            const row=matches[0];
+            if(!row.lastDutyConfirmedAt)continue;
+            for(let i=0;i<2;i++){
+                const status=i===0?row.dutyDay1:row.dutyDay2;
+                if(!['working','off'].includes(status))continue;
+                const key=i===0?'day1':'day2';
+                if(entry[key]!==(status==='working')){
+                    entry[key]=status==='working';
+                    updated++;
+                }
+            }
+        }
+        return updated;
+    }
+
     function showCaptainDailySetPicker() {
         const config = getConfig();
         const usableSets = (config.captainSets || [])
@@ -6589,7 +6617,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             select.appendChild(option);
         });
         const last = persistentGetRaw(CAPTAIN_LAST_SET_KEY) || '';
-        if (usableSets.some(set => set.id === last)) select.value = last;
+        const priorSet=usableSets.find(set=>set.id===last);
+        const todayDate=new Date(localTodayKey()+'T12:00:00');
+        const workingShiftSets=usableSets.filter(set=>
+            inferRegularTourWindow(todayDate,captainShiftLabel(set.shift))
+                .isActiveTour);
+        // Honor the last set when it matches today's shift. Otherwise,
+        // prefer the known current-shift Captain Set, never silently pick
+        // a crew from yesterday's shift.
+        const chosen=(priorSet&&workingShiftSets.includes(priorSet)?
+            priorSet:workingShiftSets[0]||priorSet||usableSets[0]);
+        select.value=chosen.id;
         const selectedCaptainShift=()=>captainShiftLabel(
             (usableSets.find(set=>set.id===select.value)||usableSets[0]).shift);
         box.append(selectLabel, select);
@@ -6644,6 +6682,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         box.appendChild(rosterPanel);
 
         let tourEntries=new Map(),tourKeys=['',''],lastRosterScope='';
+        let rosterAdjusted=false;
         const activeCaptainSet=()=>usableSets.find(x=>x.id===select.value)||usableSets[0];
         const currentTourKeys=()=>{
             const date=validDateKey(auditInput.value)||localTodayKey();
@@ -6704,6 +6743,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     cb.disabled=!!outside;
                     cb.setAttribute('aria-label',(i?'Day 2':'Day 1')+' '+entry.person.name+' on duty');
                     cb.onchange=()=>{
+                        rosterAdjusted=true;
                         if(i)entry.day2=cb.checked;
                         else entry.day1=cb.checked;
                         label.lastChild.textContent=cb.checked?'Here':'Off';
@@ -6786,13 +6826,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 setStatus('That swing person is unavailable or already on this tour.',false);return;
             }
             const choice=swingDate.value;
+            rosterAdjusted=true;
             tourEntries.set(person.prefix,{person,base:false,
                 day1:choice==='0'||choice==='both',day2:choice==='1'||choice==='both'});
             renderCaptainTourRoster();
             setStatus(person.name+' added as a swing for this tour only. Saved Captain Set unchanged.');
         };
-        select.onchange=()=>{updateHint();renderCaptainTourRoster();};
-        auditInput.onchange=()=>{updateHint();renderCaptainTourRoster();};
+        select.onchange=()=>{rosterAdjusted=true;updateHint();renderCaptainTourRoster();};
+        auditInput.onchange=()=>{rosterAdjusted=true;updateHint();renderCaptainTourRoster();};
         renderCaptainTourRoster();
 
         const run = makeButton('Run Read-Only Check', { background: '#176b8e', color: '#fff' });
@@ -6842,6 +6883,37 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const close = makeButton('Cancel');
         close.onclick = () => overlay.remove();
         box.appendChild(close);
+
+        // Today's C-shift captain already confirmed duty in Rebel Command.
+        // Preselect that EXISTING evidence in the original Captain screen.
+        // Never infer work from membership, change CrewSense, or overwrite
+        // the officer's own checkbox changes while the request is running.
+        const initialDays=currentTourKeys();
+        if(cPilotEligible()&&selectedCaptainShift()==='C'&&
+            initialDays.includes(localTodayKey())){
+            const scope=lastRosterScope;
+            rosterInfo.textContent='Checking previously Captain-confirmed C-shift duty… Review the crew before running.';
+            void cPilotFetch(true,initialDays[0]).then(board=>{
+                if(!overlay.isConnected||rosterAdjusted||
+                    lastRosterScope!==scope)return;
+                const count=captainApplyConfirmedPilotDuty(
+                    tourEntries,board,initialDays);
+                const confirmed=board.people.filter(row=>
+                    row.lastDutyConfirmedAt&&
+                    [row.dutyDay1,row.dutyDay2]
+                        .some(status=>['working','off'].includes(status)));
+                if(confirmed.length){
+                    if(count)renderCaptainTourRoster();
+                    rosterInfo.textContent='Loaded '+confirmed.length+
+                        ' previously Captain-confirmed C-shift duty records from Rebel Command. Review each day and any swings. This does not change CrewSense.';
+                }else{
+                    rosterInfo.textContent='Current crew assignments are not confirmed in Rebel Command. Review each day before running.';
+                }
+            }).catch(()=>{
+                if(overlay.isConnected&&!rosterAdjusted)
+                    rosterInfo.textContent='Current crew assignments could not be retrieved. Review each day before running.';
+            });
+        }
     }
 
     // Recheck only previously due, missing or unreadable PPE. The previous
@@ -16468,6 +16540,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const directLinks=data.people.reduce((sum,row)=>sum+Number(row.mappedPaths||0),0);
                 if(directLinks<data.totals.knownItems)
                     status.textContent+='\\nNative direct item links: '+directLinks+' / '+data.totals.knownItems+' mapped.';
+                if(data.workingCrew>0&&
+                    Number(data.totals.knownItems||0)+
+                    Number(data.totals.maskKnownItems||0)===0){
+                    // Confirmed duty can exist before the collector stores
+                    // even one Item Log. Zero data is UNKNOWN, not a pass.
+                    status.textContent='C shift '+data.tourStart+' / '+
+                        data.tourEnd+' · '+data.workingCrew+' working / '+
+                        data.offCrew+' off'+
+                        '\nPPE inspection records NOT COLLECTED for this tour.'+
+                        ' This is UNKNOWN, not an all-clear.'+
+                        '\nDaily Captain Check opens the original detailed native history.';
+                }
                 table.replaceChildren();
                 const captainView=viewMode==='captain'&&battalion;
                 table.style.cssText='width:100%;border-collapse:separate;border-spacing:0;'+
@@ -16675,8 +16759,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         make('After Fire',()=>launchMyInspectionFromAnywhere('afterFire'),true);
         make('PPE Form',showPpeCleanRepairForm);
         make('Daily Captain Check',()=>{
-            if(master&&authorized&&cPilotEligible())showCShiftPilotBoard(true,'captain');
-            else void launchCaptainDailyCheckFromAnywhere();
+            // Keep the original Captain check separate from BC's rotating
+            // collector. An unfilled pilot ledger does not mean the crew's
+            // native PPE inspection records are absent.
+            const report=getCaptainDailyReport();
+            if(report&&Number(report.schemaVersion)>=7&&
+               Array.isArray(report.owners)&&report.owners.length){
+                showCaptainDailyReport(report);
+                return;
+            }
+            void launchCaptainDailyCheckFromAnywhere();
         });
         make('Settings',()=>showSettings('profile'));
         if(master){

@@ -2,13 +2,13 @@
     "schemaVersion":  1,
     "project":  "Mission Vector Check It",
     "channel":  "beta",
-    "latestVersion":  "3.2.85",
+    "latestVersion":  "3.2.86",
     "minimumSupportedVersion":  "2.3.1",
     "status":  "current",
-    "message":  "Vector Rebel 3.2.85: Simple Captain full-gear status and BC shift summary using shared background verification receipts.",
-    "releaseNotes":  "C-shift Master now has two simple report entrypoints: Daily Captain Check lists every known PPE item per firefighter with source-labeled native inspection status, and BC Check shows one summary row per firefighter. Both read the existing Rebel Command ledger on opening and do not automatically repeat a full all-item Vector history scan. Both expose a single Check outstanding action and a small collapsed Setup/troubleshooting section; historic Captain two-month reports are preserved through an optional archived view, with rebuild only by explicit selection. Correct staffing editor is collapsed. A dedicated authorized signed-in Vector tab may be armed once for rotating background rechecks across future C tours while that browser tab stays open; outside C tours it waits without scanning. Pending does not mean missed, and no CrewSense writes or official inspections occur automatically.",
+    "message":  "Vector Rebel 3.2.86: Original Daily Captain Check restored; live C-shift pilot is not an inspection history substitute.",
+    "releaseNotes":  "Restore the original Daily Captain Check after the C-shift pilot displayed no PPE data. Open the saved native two-month item report if present, otherwise launch the original read-only Captain Set and Vector Item Log audit. For today's C-shift tour, previously Captain-confirmed Rebel Command duty is preselected when shift, identity and tour match, without overwriting manual changes. Owner-specific PPE inventory discovery can preserve other owners' verified rows. BC pilot remains separate and its empty inventory must not be treated as proof of no missing inspections. No official inspections or CrewSense edits are made by the history reader. Live authenticated field acceptance is still required.",
     "installUrl":  "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js",
     "legacyUpdateUrl":  "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
     "repoUrl":  "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
-    "publishedAt":  "2026-11-17"
+    "publishedAt":  "2026-11-21"
 }

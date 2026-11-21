@@ -37,9 +37,14 @@ const js=String.raw`
  const refreshPanelInfo=()=>{},refreshMasterAlertBadge=()=>{},refreshInterfaceNotice=()=>{};
  const getRun=()=>null;
  const noop=()=>{},showPpeCleanRepairForm=noop,showStation4ScbaAirpackCheck=noop;
- const launchMyInspectionFromAnywhere=noop,launchCaptainDailyCheckFromAnywhere=noop;
+ const launchMyInspectionFromAnywhere=noop;
+ let cached=false,cachedShown=0,nativeStarted=0,pilotShown=0;
+ const getCaptainDailyReport=()=>cached?{schemaVersion:7,
+  owners:[{name:'Verified Captain',items:[]}]}:null;
+ const showCaptainDailyReport=()=>{cachedShown++;};
+ const launchCaptainDailyCheckFromAnywhere=()=>{nativeStarted++;};
  const showApparatusCheck=noop,showProblemReport=noop;
- const showCShiftPilotBoard=noop,cPilotEligible=()=>false,
+ const showCShiftPilotBoard=()=>{pilotShown++;},cPilotEligible=()=>true,
    cPilotRefreshSummary=async()=>{},cPilotFlushReceipts=async()=>{},
    cPilotScheduleBoardPoll=()=>{};
  const showSettings=noop,checkManagedInterfaceRelease=noop;
@@ -79,6 +84,16 @@ const js=String.raw`
    if(!miniBadge||miniBadge.textContent!=='1'||miniBadge.style.display!=='flex')
       throw Error('Master error count not visible in minimized badge');
    result.numericAlertBadge=true;
+   const masterDaily=[...document.querySelectorAll(
+      '[data-vector-ppe-actions] button')]
+       .find(button=>button.textContent==='Daily Captain Check');
+   cached=true;masterDaily.click();
+   if(cachedShown!==1||nativeStarted||pilotShown)
+     throw Error('Master Daily Captain Check did not open original saved history');
+   cached=false;masterDaily.click();
+   if(nativeStarted!==1||pilotShown)
+     throw Error('Master Daily Captain Check opened empty pilot rather than original audit');
+   result.masterDailyOriginal=true;
    setStatus('SCBA handoff stopped: unexpected form',false);
    updateMinimizedPanelBadge();
    if(miniBadge.textContent!=='!')throw Error('Local failure badge not visible');
@@ -117,6 +132,12 @@ const js=String.raw`
    owner=false;masterServerVerified=false;
    renderPanelInterface();assertLabels(actions(),user,'Non-admin user');
    if(switcher.style.display!=='none')throw Error('Non-admin can see Master toggle');
+   const ordinaryDaily=[...document.querySelectorAll('[data-vector-ppe-actions] button')]
+     .find(b=>b.textContent==='Daily Captain Check');
+   ordinaryDaily.click();
+   if(nativeStarted!==2||pilotShown)
+      throw Error('Ordinary firefighter did not receive original Captain check');
+   result.captainOriginalBothModes=true;
    result.nonAdminSwitchHidden=true;result.panelCount=document.querySelectorAll('#'+PANEL_ID).length;
    if(result.panelCount!==1)throw Error('Duplicate panel');
    result.pass=true;
