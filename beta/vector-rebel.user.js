@@ -17100,34 +17100,64 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // BC list is an exact-date, department-wide scheduling preview with
     // captain-confirmed C duty taking precedence. A Scout snapshot is not
     // a roll call, and yesterday's swing can NEVER populate today's roster.
+    // Battalion Chief first; the remaining crews sort by station number,
+    // then by apparatus type. Alphabetical "Engine/Medic/Truck" sorting is wrong.
+    function bcDepartmentStationRank(person){
+        const units=(person?.units||[]).map(x=>clean(x));
+        if(units.some(u=>/\b(?:battalion|b\.?c\.?|chief|command staff)\b/i.test(u)))
+            return[0,0,0];
+        const kind={engine:0,truck:1,ladder:1,quint:1,medic:2,
+            ambulance:2,squad:3,rescue:3,brush:4,tender:4,utility:5};
+        let best=[2,999,99];
+        for(const unit of units){
+            const station=unit.match(/\bstation\s*0?([1-9]\d?)\b/i);
+            const apparatus=unit.match(/\b(engine|truck|ladder|quint|medic|ambulance|squad|rescue|brush|tender|utility)\s*(\d{1,4})\b/i);
+            let number=station?Number(station[1]):NaN;
+            if(!Number.isFinite(number)&&apparatus){
+                const code=Number(apparatus[2]);
+                number=code>=501&&code<=509?code-500:
+                    code>=1&&code<=20?code:NaN;
+            }
+            if(!Number.isFinite(number))continue;
+            const candidate=[1,number,apparatus?(kind[apparatus[1].toLowerCase()]??9):9];
+            if(candidate[0]<best[0]||
+                (candidate[0]===best[0]&&candidate[1]<best[1])||
+                (candidate[0]===best[0]&&candidate[1]===best[1]&&candidate[2]<best[2]))
+                best=candidate;
+        }
+        return best;
+    }
+    function bcDepartmentStationName(person){
+        const rank=bcDepartmentStationRank(person);
+        return rank[0]===0?'BC':rank[0]===1?'Station '+rank[1]:'Unassigned';
+    }
+
+    // The roster is date-scoped. Scheduled people are previews, and
+    // confirmed OFF firefighters remain visible with an OFF status.
     function bcDepartmentDailyRows(schedule,pilot,report,date,manual=null){
         const roster=new Map();
-        const put=(person,source)=>{
-            const name=clean(person?.name);
-            const key=masterNameKey(name);
+        const put=(person,source,duty='working')=>{
+            const name=clean(person?.name),key=masterNameKey(name);
             if(!key)return;
             const old=roster.get(key);
             roster.set(key,{
                 name,prefix:clean(person.prefix||old?.prefix||''),
-                units:Array.isArray(person.units)?person.units:
-                    old?.units||[],
-                source,confirmed:source==='captain_confirmed'||
-                    source==='bc_confirmed'
+                units:Array.isArray(person.units)&&person.units.length?
+                    person.units:old?.units||[],
+                source,duty,confirmed:source==='captain_confirmed'||
+                    source==='captain_off'||source==='bc_confirmed'
             });
         };
         for(const row of schedule?.people||[])
             if(row.sourceStatus==='scheduled_work_evidence')
                 put(row,'schedule_preview');
-        const cActive=pilot?.activeTour===true&&
-            [pilot.tourStart,pilot.tourEnd].includes(date);
-        if(cActive){
+        if(pilot?.activeTour===true&&
+            [pilot.tourStart,pilot.tourEnd].includes(date)){
             for(const row of pilot.people||[]){
-                const status=date===pilot.tourStart?
-                    row.dutyDay1:row.dutyDay2;
+                const duty=date===pilot.tourStart?row.dutyDay1:row.dutyDay2;
                 if(!row.lastDutyConfirmedAt)continue;
-                if(status==='off')roster.delete(masterNameKey(row.name));
-                else if(status==='working')put({
-                    name:row.name,prefix:row.prefix},'captain_confirmed');
+                if(duty==='off')put(row,'captain_off','off');
+                else if(duty==='working')put(row,'captain_confirmed');
             }
         }
         const current=report?.tourRoster;
@@ -17140,16 +17170,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             ]);
             for(const owner of report.owners||[]){
                 if(!reviewed.has(owner.prefix))continue;
-                if(assigned.has(owner.prefix))
-                    put(owner,'captain_confirmed');
-                else roster.delete(masterNameKey(owner.name));
+                if(assigned.has(owner.prefix))put(owner,'captain_confirmed');
+                else put(owner,'captain_off','off');
             }
         }
-        const result=Array.from(roster.values());
+        let result=Array.from(roster.values());
         if(manual?.date===date&&manual?.confirmedAt&&
             Array.isArray(manual.people)){
-            const confirmed=new Map();
-            const allowed=new Map(getCaptainPersonOptions()
+            const confirmed=new Map(),allowed=new Map(getCaptainPersonOptions()
                 .map(p=>[masterNameKey(p.name),p]));
             for(const raw of manual.people){
                 const key=masterNameKey(raw.name);
@@ -17157,13 +17185,33 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 if(!known||confirmed.has(key))continue;
                 confirmed.set(key,{
                     name:known.name,prefix:known.prefix||'',
-                    units:known.units||[],source:'bc_confirmed',confirmed:true
+                    units:known.units||[],source:'bc_confirmed',
+                    duty:'working',confirmed:true
                 });
             }
-            result.length=0;result.push(...confirmed.values());
+            for(const raw of manual.offPeople||[]){
+                const key=masterNameKey(raw.name);
+                const known=roster.get(key)||allowed.get(key);
+                if(!known||confirmed.has(key))continue;
+                confirmed.set(key,{
+                    name:known.name,prefix:known.prefix||'',
+                    units:known.units||[],source:'bc_confirmed',
+                    duty:'off',confirmed:true
+                });
+            }
+            // Legacy saved reviews have no offPeople. Retain explicit native
+            // Captain OFF evidence without promoting schedule-only absence.
+            for(const [key,known] of roster)
+                if(known.duty==='off'&&!confirmed.has(key))
+                    confirmed.set(key,known);
+            result=Array.from(confirmed.values());
         }
-        result.sort((a,b)=>String(a.units[0]||'ZZ').localeCompare(
-            String(b.units[0]||'ZZ'))||a.name.localeCompare(b.name));
+        result.sort((a,b)=>{
+            const left=bcDepartmentStationRank(a),right=bcDepartmentStationRank(b);
+            for(let i=0;i<3;i++)if(left[i]!==right[i])return left[i]-right[i];
+            return String(a.units[0]||'').localeCompare(String(b.units[0]||''))||
+                a.name.localeCompare(b.name);
+        });
         return result.map(row=>({...row,
             cShifter:C_PILOT_NAMES.has(masterNameKey(row.name))}));
     }
