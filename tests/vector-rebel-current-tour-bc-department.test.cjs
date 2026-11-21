@@ -100,7 +100,7 @@ const bc=part('    const BC_DAILY_ROSTER_KEY=',
 const C=new Set(['michael brion','jared weston','jerry weems']);
 const f=new Function('clean','masterNameKey','C_PILOT_NAMES',
  'getCaptainPersonOptions','addDateKeyDays',bc+
- '\nreturn {bcDepartmentDailyRows,bcCShiftHistoryCell,bcDepartmentStationRank,bcDepartmentStationName};')(
+ '\nreturn {bcDepartmentDailyRows,bcCShiftHistoryCell,bcDepartmentStationRank,bcDepartmentStationName,bcDepartmentAttendanceCell};')(
  x=>String(x||'').trim(),normalize,C,
  ()=>[{name:'Current OT',prefix:'NEWOT'},
      {name:'Michael Brion',prefix:'BRION'},
@@ -235,4 +235,29 @@ test('BC manual review retains explicitly selected working people and off select
  assert.equal(rows.length,2);
  assert.equal(rows.find(p=>p.name==='Michael Brion').duty,'working');
  assert.equal(rows.find(p=>p.name==='Austin Fox').duty,'off');
+});
+
+test('BC uses verified full-tour OFF and work evidence for employees without a Captain Item Log',()=>{
+ const tour={startDate:'2026-10-27',endDate:'2026-10-28'};
+ const records=new Map([
+  ['nicole duncan|2026-10-27',{status:'full_leave_evidence',sourceQuality:'good_direct_capture'}],
+  ['nicole duncan|2026-10-28',{status:'deployment_evidence',sourceQuality:'good_direct_capture'}],
+  ['austin fox|2026-10-27',{status:'work_evidence',sourceQuality:'good_direct_capture'}],
+  ['austin fox|2026-10-28',{status:'unknown',sourceQuality:'good_direct_capture'}]
+ ]);
+ const unknown={label:'UNKNOWN',tone:'unknown',detail:'No native history'};
+ const off=f.bcDepartmentAttendanceCell(records,'Nicole Duncan',tour,unknown);
+ assert.equal(off.label,'OFF');
+ assert.match(off.detail,/both/i);
+ const other=f.bcDepartmentAttendanceCell(records,'Austin Fox',tour,unknown);
+ assert.equal(other.label,'NOT VERIFIED');
+ assert.match(other.detail,/no dated native/i);
+ const untouched=f.bcDepartmentAttendanceCell(records,'Someone Else',tour,unknown);
+ assert.equal(untouched.label,'UNKNOWN');
+ const native={label:'ALL COMPLETED',tone:'recorded',detail:'2 native completions'};
+ assert.deepEqual(f.bcDepartmentAttendanceCell(records,'Nicole Duncan',tour,native),native,
+  'CrewSense must never erase native completed PPE evidence');
+ records.get('nicole duncan|2026-10-28').sourceQuality='unverified';
+ assert.equal(f.bcDepartmentAttendanceCell(records,'Nicole Duncan',tour,unknown).label,'UNKNOWN',
+  'one untrusted day cannot falsely establish two full days OFF');
 });
