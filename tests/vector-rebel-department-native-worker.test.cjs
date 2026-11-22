@@ -86,7 +86,7 @@ function harness(board){
   navigateCaptainDailyToItem:(check,item)=>out.nav.push(item)
  };
  vm.runInNewContext(feature,context);
- return {out,context,queue,state};
+ return {out,context,queue,state,board:r};
 }
 const rdate='2026-11-21';
 const unmapped={scope:'department-ppe-readonly',readOnly:true,date:rdate,attendanceConfirmed:false,
@@ -298,6 +298,28 @@ test('archived native paths are not reused for already mapped gear',async()=>{
  assert.equal(h.out.nav.length,1);
 });
 
+test('background reuses Captain Item Log navigation after verified prior gear mapping',async()=>{
+ const h=harness({...unmapped,people:[
+  {name:'Mark Byrd',prefix:'BYRD',sourceStatus:'scheduled_unconfirmed',
+   attendanceConfirmed:false,knownItems:0,outstandingItems:0,nextItem:null}
+ ],archiveCandidates:[{personName:'Mark Byrd',personPrefix:'BYRD',knownHistoryItems:12}]});
+ assert.equal(await h.context.departmentAutoOnePass(),'mapped');
+ assert.equal(h.out.nav.length,0,'mapping is not an inspection');
+ // Simulate the server readback after a verified, OUTSTANDING-only mapping.
+ h.board.people[0].knownItems=12;
+ h.board.people[0].outstandingItems=12;
+ h.board.people[0].nextItem={assetId:'BYRD-COAT-01',
+  assetPath:'/app/equipment/PPE/pool/300045/321/item',
+  inspectionMode:'tour',assetType:'Bunker Coat'};
+ assert.equal(await h.context.departmentAutoOnePass(),'started');
+ const audit=h.out.saved.find(x=>x&&x.departmentRecheck);
+ assert.ok(audit,'the existing Captain read-only audit state is reused');
+ assert.equal(audit.items[0].assetId,'BYRD-COAT-01');
+ assert.equal(h.out.nav[0].assetId,'BYRD-COAT-01');
+ assert.equal(h.out.scans,0,'no fresh fragile PPE name search');
+ assert.equal(h.out.reusePosts.length,1,'prior gear reuse is idempotent');
+ assert.equal(h.out.nav.length,1,'one actual Item Log is opened, not an official inspection');
+});
 test('archived native assets not on today roster cannot be reused',async()=>{
  const h=harness({...unmapped,archiveCandidates:[{
   personName:'Mark Byrd',personPrefix:'BYRD',knownHistoryItems:12
