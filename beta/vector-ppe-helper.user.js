@@ -17239,7 +17239,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         // Prefer one actual Item Log read when a verified native gear
         // manifest already exists. Alternate with unmapped people so
         // today's department can still expand to additional stations.
-        const candidates=order%3===0?[...unmapped,...mapped]:[...mapped,...unmapped];
+        const byOldestAttempt=group=>group.slice().sort((a,b)=>
+            Number(attempts[a.prefix]||0)-Number(attempts[b.prefix]||0)||
+            masterNameKey(a.name).localeCompare(masterNameKey(b.name)));
+        // CRITICAL: Do not keep retrying the first roster row every nine
+        // minutes. An unresolved Vector Responsible Party must not starve
+        // the other stations. Try the least recently attempted candidate;
+        // mapped history reads get two of every three opportunities.
+        const candidates=order%3===0?
+            [...byOldestAttempt(unmapped),...byOldestAttempt(mapped)]:
+            [...byOldestAttempt(mapped),...byOldestAttempt(unmapped)];
         return candidates[0]||null;
     }
     async function departmentAutoOnePass(){

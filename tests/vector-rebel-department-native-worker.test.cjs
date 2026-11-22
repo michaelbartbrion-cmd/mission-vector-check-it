@@ -14,7 +14,8 @@ function harness(board){
   setItem:(k,v)=>state.set(k,String(v)),
   removeItem:k=>state.delete(k)
  };
- const approved=[{name:'Austin Fox',prefix:'FOX'},{name:'Michael Brion',prefix:'BRION'}];
+ const approved=[{name:'Aaron No Gear',prefix:'AARON'},
+  {name:'Austin Fox',prefix:'FOX'},{name:'Michael Brion',prefix:'BRION'}];
  const context={
   Date,Math,JSON,URL,URLSearchParams,
   sessionStorage:localStore,
@@ -35,6 +36,8 @@ function harness(board){
   getActiveMasterRoster:()=>approved,
   ensurePpeEquipmentPage:async()=>{},
   scanPpeCrewOwners:async(owners)=>{out.scans++;out.mapped.push(owners);
+    if(owners[0]?.name==='Aaron No Gear')
+     return{ownerErrors:[{name:'Aaron No Gear',error:'No confirmed PPE ownership'}],items:[]};
    return{ownerErrors:[],items:[{assetId:'FOX-COAT-01',ownerName:'Austin Fox',
      type:'Bunker Coat',pool:'300045',url:'https://checkitapp.targetsolutions.com/app/equipment/PPE/pool/300045/111/item'}]};},
   cPilotNativePath:u=>new URL(u,'https://checkitapp.targetsolutions.com').pathname,
@@ -119,6 +122,28 @@ test('off, nonapproved, and wrong-pool links do not become successful reads',asy
  await assert.rejects(()=>q.context.departmentAutoOnePass(),/invalid/i);
  assert.equal(q.out.nav.length,0);
 });
+test('one missing Vector Responsible Party cannot starve the rest of department',async()=>{
+ const board={...unmapped,people:[
+   {name:'Aaron No Gear',prefix:'AARON',sourceStatus:'scheduled_unconfirmed',
+     attendanceConfirmed:false,knownItems:0,outstandingItems:0,nextItem:null},
+   unmapped.people[0]
+ ]};
+ const h=harness(board);
+ await assert.rejects(()=>h.context.departmentAutoOnePass(),
+   /No unique Responsible Party equipment for Aaron No Gear/);
+ assert.equal(h.out.scans,1);
+ assert.equal(h.out.mapped[0][0].name,'Aaron No Gear');
+ // Worker gets the next nine-minute lease; the failed first person remains
+ // UNKNOWN but cannot block Austin's authentic Vector owner inventory.
+ assert.equal(await h.context.departmentAutoOnePass(),'mapped');
+ assert.equal(h.out.scans,2);
+ assert.equal(h.out.mapped[1][0].name,'Austin Fox');
+ assert.equal(h.queue.length,1);
+ assert.equal(h.queue[0].personName,'Austin Fox');
+ assert.equal(await h.context.departmentAutoOnePass(),'none');
+ assert.equal(h.out.nav.length,0);
+});
+
 test('per-person read attempts are throttled without marking any PASS',async()=>{
  const h=harness(unmapped);
  assert.equal(await h.context.departmentAutoOnePass(),'mapped');
