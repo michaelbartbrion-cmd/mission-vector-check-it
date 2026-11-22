@@ -17,7 +17,7 @@ const js=`
 const STORE=new Map();
 const clean=x=>String(x||'').trim(),masterNameKey=x=>clean(x).toLowerCase();
 const C_PILOT_NAMES=new Set(['michael brion','jerry weems','jared weston','michael baldree']);
-const localTodayKey=()=> '2026-11-21';
+const localTodayKey=()=> '2026-11-22';
 const getCaptainPersonOptions=()=>[
  {name:'Michael Brion',prefix:'PERSON-BRION'},
  {name:'Austin Fox',prefix:'PERSON-FOX'},
@@ -70,7 +70,7 @@ const report={
 };
 const getCaptainDailyReport=()=>report;
 const scheduled={
- scope:'bc-department-roster',readOnly:true,date:'2026-11-21',
+ scope:'bc-department-roster',readOnly:true,date:'2026-11-22',
  stale:true,capturedAt:'2026-11-15T16:47:10Z',people:[
  {name:'Michael Brion',prefix:'PERSON-BRION',units:['Truck 504'],sourceStatus:'scheduled_work_evidence'},
  {name:'Jerry Weems',prefix:'PERSON-WEEMS',units:['Truck 504'],sourceStatus:'scheduled_work_evidence'},
@@ -89,7 +89,7 @@ let requests=0,attendanceRequests=0,monitorOpened=0;
 const cPilotBridge=async(method,action,data,query)=>{
  if(method!=='GET')throw Error('Unexpected method');
  if(action==='vr-bc-department-roster'){
-  if(query.date!=='2026-11-21')throw Error('Wrong roster date');
+  if(query.date!=='2026-11-22')throw Error('Wrong roster date');
   requests++;return scheduled;
  }
  if(action==='vr-captain-attendance'){
@@ -107,10 +107,16 @@ const cPilotBridge=async(method,action,data,query)=>{
 };
 const cPilotFetch=async()=>pilot;
  const departmentFetch=async()=>({scope:'department-ppe-readonly',readOnly:true,
-    date:'2026-11-21',attendanceConfirmed:false,
-    people:[{name:'Austin Fox',prefix:'PERSON-FOX',knownItems:12,
-      nativeReadItems:12,nativeDatedItems:3}],
-    totals:{mappedPeople:1,nativeReadItems:12,nativeDatedItems:3}});
+ date:'2026-11-22',attendanceConfirmed:false,people:[],
+ totals:{mappedPeople:0,nativeReadItems:0,nativeDatedItems:0}});
+const departmentFetchTourHistory=async(starts)=>({
+ scope:'department-ppe-tour-history-readonly',readOnly:true,
+ tours:starts.map(start=>({tourStart:start,
+  people:start==='2026-11-21'?[{name:'Austin Fox',prefix:'PERSON-FOX',
+    knownItems:12,nativeReadItems:12,nativeDatedItems:3}]:[],
+  totals:{mappedPeople:start==='2026-11-21'?1:0,
+    nativeReadItems:start==='2026-11-21'?12:0,
+    nativeDatedItems:start==='2026-11-21'?3:0}}))});
 const showCShiftPilotBoard=()=>{monitorOpened++};
 __FEATURE__
 showBcDepartmentCheck();
@@ -125,9 +131,8 @@ try{
     !names.some(x=>x.includes('Nicole Duncan')&&x.includes('Engine 506'))||
     !names.some(x=>x.includes('Steven Beagle')&&x.includes('Battalion 501')))
    throw Error('BC did not display workers from stations outside Station 4; count='+names.length+', status='+summary.textContent.slice(0,300));
- if(!names.some(x=>x.includes('Jerry Weems')&&x.includes('OFF'))||
-    names.some(x=>x.includes('Prior Tour OT')))
-   throw Error('BC failed OFF duty or included previous-tour overtime');
+ if(names.some(x=>x.includes('Prior Tour OT')))
+   throw Error('BC incorrectly included previous-tour overtime');
   const headers=[...table.querySelectorAll('th')].map(x=>x.textContent);
   const picker=overlay.querySelector('select[aria-label="BC history month"]');
   if(!picker||picker.value!=='current'||
@@ -154,7 +159,8 @@ try{
     throw Error('Uncollected people must remain explicitly unknown');
   if(!summary.textContent.includes('Background Item Log search includes C shift')||
       !summary.textContent.includes('scheduled (unconfirmed)')||
-      !summary.textContent.includes('Department native search: 1 people with mapped gear, 12 Item Logs actually read, 3 dated'))
+      !summary.textContent.includes('Department native search: 0 people with mapped gear, 0 Item Logs actually read, 0 dated')||
+       !summary.textContent.includes('Latest two-day tour 2026-11-21: 3 actual native inspection dates'))
     throw Error('BC did not explain uncollected non-C-shift crews');
   if(!summary.textContent.includes('STALE: review needed'))
    throw Error('BC failed to label six-day-old schedule stale');

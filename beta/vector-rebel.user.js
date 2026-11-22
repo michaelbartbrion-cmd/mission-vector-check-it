@@ -17175,6 +17175,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             throw Error('Department native PPE roster source is incomplete.');
         return board;
     }
+    async function departmentFetchTourHistory(starts){
+        if(!Array.isArray(starts)||!starts.length||starts.length>12)return null;
+        const result=await cPilotBridge('GET','vr-ppe-department-tour-history',
+            null,{tours:starts.join(',')});
+        if(result?.scope!=='department-ppe-tour-history-readonly'||
+           result.readOnly!==true||!Array.isArray(result.tours))
+            throw Error('Native two-day PPE history source unavailable.');
+        return result;
+    }
     function departmentAutoAttempts(workDate){
         let state={};try{
             state=JSON.parse(sessionStorage.getItem('mvciDepartmentPpeAttemptsV1')||'{}')||{};
@@ -17684,6 +17693,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         box.append(heading,note,source,actions,legend,tableWrap,details);
         let schedule=null,pilot=null,department=null,report=null,rows=[],reviewing=false;
         const historyBoards=new Map();
+        const departmentTourBoards=new Map();
         const date=localTodayKey();
         const manualAll=loadJSON(BC_DAILY_ROSTER_KEY,{})||{};
         let manual=manualAll?.date===date?manualAll:null;
@@ -17717,6 +17727,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 if((department?.people||[]).some(p=>
                     masterNameKey(p.name)===masterNameKey(person.name)&&
                     Number(p.nativeDatedItems)>0))return true;
+                if([...departmentTourBoards.values()].some(board=>
+                    (board.people||[]).some(p=>
+                        masterNameKey(p.name)===masterNameKey(person.name)&&
+                        Number(p.nativeDatedItems)>0)))return true;
                 const owned=(report?.owners||[]).find(owner=>
                     masterNameKey(owner.name)===masterNameKey(person.name));
                 if((owned?.items||[]).some(item=>
@@ -17730,6 +17744,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             !!item.nativeCompletionDate&&item.status==='verified')));
             };
             const withNative=rows.filter(hasDatedNative).length;
+            const mostRecentTour=current.filter(t=>t.startDate<=date).at(-1);
+            const recentHistory=departmentTourBoards.get(mostRecentTour?.startDate);
+            const historicalDated=Number(recentHistory?.totals?.nativeDatedItems)||0;
             source.textContent='Daily roster '+date+' · '+confirmedWorking+' confirmed working / '+
                 scheduledUnconfirmed+' scheduled (unconfirmed) / '+off+' OFF'+
                 (manual?.confirmedAt?' · BC-confirmed':' · schedule/confirmed candidates')+
@@ -17744,6 +17761,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     ' Item Logs actually read, '+department.totals?.nativeDatedItems+
                     ' dated native inspection records (schedule not confirmed as attendance).':
                     ' Department native source not connected; no other crew checks are inferred.')+
+                (recentHistory?' Latest two-day tour '+recentHistory.tourStart+
+                    ': '+historicalDated+' actual native inspection dates across '+
+                    recentHistory.totals.mappedPeople+' mapped people (not physical PASS).':'')+
                 ' Schedule is not roll call; Unknown is not FAILED.'+
                 (attendanceMessage?' '+attendanceMessage:'');
             table.replaceChildren();
@@ -17805,9 +17825,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 future:'background:#f6f7f8;color:#8a969d;'
             };
             const departmentCell=(name,tour)=>{
-                if(!department||department.date!==tour.startDate||
-                   C_PILOT_NAMES.has(masterNameKey(name)))return null;
-                const person=(department.people||[]).find(p=>
+                if(C_PILOT_NAMES.has(masterNameKey(name)))return null;
+                const historical=departmentTourBoards.get(tour.startDate);
+                const board=historical||(department?.date===tour.startDate?department:null);
+                if(!board)return null;
+                const person=(board.people||[]).find(p=>
                     masterNameKey(p.name)===masterNameKey(name));
                 if(!person)return null;
                 const count=Number(person.knownItems)||0;
@@ -17926,7 +17948,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const outcomes=await Promise.allSettled([
                     cPilotBridge('GET','vr-bc-department-roster',null,{date}),
                     cPilotFetch(true),
-                    departmentFetch(date)
+                    departmentFetch(date),
+                    departmentFetchTourHistory(current.filter(t=>t.startDate<=date)
+                        .map(t=>t.startDate).slice(-12))
                 ]);
                 const one=outcomes[0],two=outcomes[1];
                 if(one.status!=='fulfilled'||one.value?.scope!=='bc-department-roster'||
@@ -17939,6 +17963,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 department=three.status==='fulfilled'&&
                     three.value?.scope==='department-ppe-readonly'?
                         three.value:null;
+                const four=outcomes[3];
+                if(four.status==='fulfilled'&&
+                   four.value?.scope==='department-ppe-tour-history-readonly'){
+                    departmentTourBoards.clear();
+                    for(const board of four.value.tours||[])
+                        if(board?.tourStart&&Array.isArray(board.people))
+                            departmentTourBoards.set(board.tourStart,board);
+                }
                 if(pilot?.tourStart)
                     historyBoards.set(pilot.tourStart,pilot);
             }catch(error){
@@ -18018,12 +18050,23 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             if(reviewing||departmentRefreshBusy)return;
             departmentRefreshBusy=true;
             try{
-                const next=await departmentFetch(date);
-                if(overlay.isConnected&&!reviewing&&
-                    next?.scope==='department-ppe-readonly'&&next.date===date){
-                    department=next;
-                    render();
-                }
+                const latestTour=current.filter(t=>t.startDate<=date).at(-1);
+                const results=await Promise.allSettled([
+                    departmentFetch(date),
+                    latestTour?departmentFetchTourHistory([latestTour.startDate]):Promise.resolve(null)
+                ]);
+                if(!overlay.isConnected||reviewing)return;
+                const fresh=results[0];
+                if(fresh.status==='fulfilled'&&
+                   fresh.value?.scope==='department-ppe-readonly'&&fresh.value.date===date)
+                    department=fresh.value;
+                const historical=results[1];
+                if(historical.status==='fulfilled'&&
+                   historical.value?.scope==='department-ppe-tour-history-readonly')
+                    for(const board of historical.value.tours||[])
+                        if(board?.tourStart&&Array.isArray(board.people))
+                            departmentTourBoards.set(board.tourStart,board);
+                render();
             }catch{ /* Keep last confirmed source until next refresh. */ }
             finally{departmentRefreshBusy=false;}
         },90*1000);
