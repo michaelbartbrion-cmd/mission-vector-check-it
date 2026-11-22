@@ -81,13 +81,13 @@ test('off-shift arming preserves designation for next tour and performs no nativ
  assert.equal(h.calls.rechecks.length,0);
  assert.equal(h.readState().tourStart,'2026-11-21');
 });
-function mapHarness({automated=true,working=true,mode='user',approve=false,partialMissing=false}={}){
- const calls={scans:0,queued:0,confirm:0,scout:0,options:[],snapshots:[]};
+function mapHarness({automated=true,working=true,mode='user',approve=false,partialMissing=false,skipKnownOwner=false}={}){
+ const calls={scans:0,queued:0,confirm:0,scout:0,options:[],snapshots:[],scannedOwnerNames:[]};
  const prefix='PERSON-0DCD2AB48E2A5588';
  const board={activeTour:true,historicalEligible:false,historicalTour:false,
   tourStart:'2026-11-21',
-  people:[{name:'Michael Brion',prefix,attendance:working?'working':'unconfirmed'},
-   ...(partialMissing?[{name:'Jerry Weems',prefix:'PERSON-WEEMS',attendance:'working'}]:[])]};
+  people:[{name:'Michael Brion',prefix,attendance:working?'working':'unconfirmed',knownItems:skipKnownOwner?8:0},
+   ...(partialMissing||skipKnownOwner?[{name:'Jerry Weems',prefix:'PERSON-WEEMS',attendance:'working',knownItems:0}]:[])]};
  const deps={
   isMasterOwnerInstallation:()=>true,panelInterfaceMode:()=>mode,
   setStatus:()=>{},getRun:()=>null,getCaptainDailyCheck:()=>null,
@@ -97,10 +97,10 @@ function mapHarness({automated=true,working=true,mode='user',approve=false,parti
   confirm:()=>{calls.confirm++;return approve;},
   cPilotBridge:async()=>{throw Error('No duty writes are allowed in test');},
   cPilotCache:null, getActiveMasterRoster:()=>[{name:'Michael Brion',prefix},
-   ...(partialMissing?[{name:'Jerry Weems',prefix:'PERSON-WEEMS'}]:[])],
+   ...(partialMissing||skipKnownOwner?[{name:'Jerry Weems',prefix:'PERSON-WEEMS'}]:[])],
   ensurePpeEquipmentPage:async()=>true,
   scanPpeCrewOwners:async (owners,progress,options)=>{
-   calls.scans++;calls.options.push(options);
+   calls.scans++;calls.options.push(options);calls.scannedOwnerNames.push(owners.map(x=>x.name));
    if(partialMissing&&!options?.readOnlyAllowUnresolved)
      throw Error('Jerry Weems: Responsible Party was not uniquely confirmed');
    return {items:[{ownerName:owners[0].name,assetId:'A-01',type:'Coat',
@@ -182,4 +182,13 @@ test('manual PPE map remains strict when one confirmed working owner is missing 
  assert.equal(h.calls.confirm,1);
  assert.deepEqual(h.calls.options,[{readOnlyAllowUnresolved:false}]);
  assert.equal(h.calls.queued,0);
+});
+
+test('background inventory discovery scans only the uncollected working owner and leaves mapped gear untouched',async()=>{
+  const h=mapHarness({skipKnownOwner:true});
+  assert.equal(await h.map('2026-11-21',true),true);
+  assert.deepEqual(h.calls.scannedOwnerNames,[['Jerry Weems']]);
+  assert.deepEqual(h.calls.snapshots[0].map(x=>x.ownerName),['Jerry Weems']);
+  assert.equal(h.calls.scans,1);
+  assert.equal(h.calls.confirm,0);
 });

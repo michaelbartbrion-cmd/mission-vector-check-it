@@ -17061,7 +17061,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             if(!combinedReviewConfirmed&&!automated&&!confirm('Read the Vector Responsible Party PPE list for '+
                 working.length+' confirmed-working C-shift firefighter(s)? This is read-only and creates no inspection.'))return false;
             const known=getActiveMasterRoster();
-            const owners=working.map(p=>{
+            // A background map only needs owners with NO item inventory for
+            // this confirmed tour. Do not rescan already mapped firefighters.
+            // Manual mapping still covers the entire confirmed working crew.
+            const targets=automated?
+                working.filter(row=>Number(row.knownItems)===0):working;
+            if(!targets.length)
+                throw Error('All confirmed-working firefighters already have mapped PPE.');
+            const owners=targets.map(p=>{
                 const x=known.find(y=>y.prefix===p.prefix&&
                     clean(y.name).toLowerCase()===clean(p.name).toLowerCase());
                 if(!x)throw Error('Approved PPE identity missing for '+p.name);
