@@ -16732,6 +16732,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 (query?.tourStart?'&tourStart='+encodeURIComponent(query.tourStart):'')+
                 (query?.dates?'&dates='+encodeURIComponent(query.dates):'')+
                 (query?.people?'&people='+encodeURIComponent(query.people):'')+
+                (query?.tours?'&tours='+encodeURIComponent(query.tours):'')+
                 (query?.date?'&date='+encodeURIComponent(query.date):''),
             headers:{Authorization:'Bearer '+pair.token,
                 'X-Rebel-Device-ID':pair.deviceId,

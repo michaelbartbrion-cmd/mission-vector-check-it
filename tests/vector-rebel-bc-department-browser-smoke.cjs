@@ -2,6 +2,8 @@
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {spawnSync}=require('node:child_process'),assert=require('node:assert/strict');
 const src=fs.readFileSync(path.join(__dirname,'../beta/vector-rebel.user.js'),'utf8');
+assert.match(src,/query\?\.tours\?'&tours='\+encodeURIComponent\(query\.tours\)/,
+ 'Authenticated Vector bridge must forward the actual tour date list to historical PPE endpoint.');
 const start=src.indexOf('    const BC_DAILY_ROSTER_KEY=');
 const end=src.indexOf('    function showCShiftPilotBoard(',start);
 assert.ok(start>0&&end>start);
