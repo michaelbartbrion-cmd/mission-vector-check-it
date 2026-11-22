@@ -112,7 +112,10 @@ const cPilotBridge=async(method,action,data,query)=>{
 };
 const cPilotFetch=async()=>pilot;
  const departmentFetch=async()=>({scope:'department-ppe-readonly',readOnly:true,
- date:'2026-11-22',attendanceConfirmed:false,people:[],
+ date:'2026-11-22',attendanceConfirmed:false,
+  people:[{name:'Nicole Duncan',prefix:'PERSON-DUNCAN',knownItems:0,
+    nativeDatedItems:0,lookupStatus:'owner_not_found',
+    lookupReason:'No exact Responsible Party match in Vector'}],
  totals:{mappedPeople:0,nativeReadItems:0,nativeDatedItems:0}});
 const departmentFetchTourHistory=async(starts)=>({
  scope:'department-ppe-tour-history-readonly',readOnly:true,
@@ -153,6 +156,8 @@ try{
    throw Error('BC did not display workers from stations outside Station 4; count='+names.length+', status='+summary.textContent.slice(0,300));
  if(names.some(x=>x.includes('Prior Tour OT')))
    throw Error('BC incorrectly included previous-tour overtime');
+  if(!names.some(x=>x.includes('Nicole Duncan')&&x.includes('LOOKUP ISSUE')))
+   throw Error('Attempted but unresolved native gear lookup must remain visible as unknown');
   const headers=[...table.querySelectorAll('th')].map(x=>x.textContent);
   const picker=overlay.querySelector('select[aria-label="BC history month"]');
   if(!picker||picker.value!=='both'||

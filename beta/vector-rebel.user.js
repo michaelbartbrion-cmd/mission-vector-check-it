@@ -17268,8 +17268,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             // No whole-department census: search exactly one approved owner
             // in the browser's existing authenticated PPE equipment UI.
             await ensurePpeEquipmentPage(null,false);
-            let inventory=await scanPpeCrewOwners([{name:owner.name,prefix:owner.prefix}],
-                null,{readOnlyAllowUnresolved:true});
+            let inventory;
+            try{
+                inventory=await scanPpeCrewOwners([{name:owner.name,prefix:owner.prefix}],
+                    null,{readOnlyAllowUnresolved:true});
             if((inventory.ownerErrors||[]).length||!inventory.items.length){
                 const reasons=(inventory.ownerErrors||[]).map(x=>clean(x.error));
                 const isUnresolved=reasons.length===0||
@@ -17301,6 +17303,22 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                    inventory.items.some(i=>masterNameKey(i.ownerName)!==
                        masterNameKey(owner.name)))
                     throw Error('No exactly assigned native PPE after both lookup methods for '+owner.name);
+            }
+            }catch(error){
+                const reason=clean(error?.message||error).slice(0,165);
+                // An unresolved owner is evidence of an attempted lookup,
+                // NEVER evidence of a missed, failed, or passed inspection.
+                const lookupStatus=/No PPE|no.*owner|not confirmed|not.*assigned/i.test(reason)?
+                    'owner_not_found':'source_error';
+                try{
+                    await cPilotBridge('POST','vr-ppe-department-lookup-status',{
+                        workDate:board.date,personName:owner.name,
+                        personPrefix:owner.prefix,status:lookupStatus,reason,
+                        source:'vector_responsible_party_readonly_lookup',
+                        observedAt:new Date().toISOString()
+                    });
+                }catch{}
+                throw error;
             }
             const gear=inventory.items.filter(item=>
                 masterNameKey(item.ownerName)===masterNameKey(owner.name)).map(item=>{
@@ -18025,12 +18043,26 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     masterNameKey(p.name)===masterNameKey(name));
                 const useArchive=archivePerson?.knownItems>0&&
                     Number(archivePerson.knownItems)>=Number(legacyPerson?.knownItems||0);
-                const person=useArchive?archivePerson:(legacyPerson||archivePerson);
+                const latestTour=current.filter(t=>t.startDate<=date).at(-1);
+                const currentLookup=latestTour?.startDate===tour.startDate?
+                    (department?.people||[]).find(p=>
+                        masterNameKey(p.name)===masterNameKey(name)):null;
+                const person=useArchive?archivePerson:
+                    (Number(legacyPerson?.knownItems)>0?legacyPerson:
+                        currentLookup||legacyPerson||archivePerson);
                 if(!person)return null;
                 const count=Number(person.knownItems)||0;
                 const dated=Number(person.nativeDatedItems)||0;
-                if(!count)return{label:'NOT COLLECTED',tone:'unknown',
-                    detail:'No authenticated native PPE history collected for this firefighter and tour. This does not establish that an inspection was missed.'};
+                if(!count){
+                    const status=currentLookup?.lookupStatus;
+                    if(status==='owner_not_found'||status==='source_error')
+                        return{label:'LOOKUP ISSUE',tone:'unknown',
+                            detail:'Actual Vector PPE source lookup was attempted but no complete native ownership evidence was accepted. '+
+                              clean(currentLookup.lookupReason||'')+
+                              '. Not a missed or failed PPE inspection. The collector will rotate to the next firefighter.'};
+                    return{label:'NOT COLLECTED',tone:'unknown',
+                        detail:'No authenticated native PPE history collected for this firefighter and tour. This does not establish that an inspection was missed.'};
+                }
                 const failures=Number(archivePerson?.explicitFailedItems)||0;
                 if(failures>0)return{label:failures+' FAILED',tone:'failed',
                     detail:failures+' PPE item(s) have an explicit FAILED outcome in authenticated Vector Item Log history. Open the firefighter for dates and equipment. Other equipment results remain independent.'};

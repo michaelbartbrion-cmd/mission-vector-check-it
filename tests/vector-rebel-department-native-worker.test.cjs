@@ -7,7 +7,7 @@ const b=source.indexOf('    async function startCShiftPilotNativeRecheck(',a);
 assert.ok(a>0&&b>a);
 const feature=source.slice(a,b);
 function harness(board){
- const queue=[],state=new Map(),out={mapped:[],nav:[],saved:[],queries:[],errors:[],scans:0,fallback:[],clears:0};
+ const queue=[],state=new Map(),out={mapped:[],nav:[],saved:[],queries:[],errors:[],scans:0,fallback:[],clears:0,lookupPosts:[]};
  const r={...board};
  const localStore={
   getItem:k=>state.get(k)||null,
@@ -25,6 +25,10 @@ function harness(board){
   localTodayKey:()=>r.date,
   cPilotBridge:async(method,action,data,query)=>{
    out.queries.push({method,action,query});
+   if(action==='vr-ppe-department-lookup-status'){
+     assert.equal(method,'POST');out.lookupPosts.push(data);
+     return{ok:true,scope:'department-ppe-lookup-status',readOnly:true};
+   }
    assert.equal(action,'vr-ppe-department');
    assert.equal(query.date,r.date);
    return r;
@@ -148,6 +152,11 @@ test('one missing Vector Responsible Party cannot starve the rest of department'
    /No PPE after exact native Responsible Party verification/);
  assert.equal(h.out.scans,1);
  assert.equal(h.out.mapped[0][0].name,'Aaron No Gear');
+ assert.equal(h.out.lookupPosts.length,1);
+ assert.equal(h.out.lookupPosts[0].status,'owner_not_found');
+ assert.equal(h.out.lookupPosts[0].personName,'Aaron No Gear');
+ assert.equal(h.out.lookupPosts[0].source,'vector_responsible_party_readonly_lookup');
+ assert.equal(h.out.lookupPosts[0].nativeCompletionDate,undefined);
  // Worker gets the next nine-minute lease; the failed first person remains
  // UNKNOWN but cannot block Austin's authentic Vector owner inventory.
  assert.equal(await h.context.departmentAutoOnePass(),'mapped');
