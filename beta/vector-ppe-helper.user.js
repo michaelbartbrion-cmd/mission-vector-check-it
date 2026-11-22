@@ -17385,10 +17385,25 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 if(!candidate||candidate.startsWith('PERSON-')||
                    !/^[A-Z0-9._-]{2,60}$/.test(candidate))
                     throw Error('No safe surname-scoped PPE lookup for '+owner.name);
-                const clear=[...document.querySelectorAll('button,[role="button"]')]
-                    .find(b=>visible(b)&&uiEquals(
-                        b.getAttribute('aria-label')||b.innerText||b.textContent||'',
-                        'Clear Filters'));
+                const findFilterAction=label=>
+                    [...document.querySelectorAll('button,[role="button"]')]
+                        .find(b=>visible(b)&&uiEquals(
+                            b.getAttribute('aria-label')||b.innerText||
+                            b.textContent||'',label));
+                let clear=findFilterAction('Clear Filters');
+                if(!clear){
+                    // Vector often closes the filter popover after Apply.
+                    // Reopen it before trying the safe asset-prefix search.
+                    const open=findFilterAction('Open filter options')||
+                        findFilterAction('Filters');
+                    if(!open)throw Error('Native PPE filter controls unavailable before alternate lookup for '+owner.name);
+                    open.click();
+                    const began=Date.now();
+                    while(!clear&&Date.now()-began<5000){
+                        await sleep(120);
+                        clear=findFilterAction('Clear Filters');
+                    }
+                }
                 if(!clear)throw Error('Cannot clear native Responsible Party filter before alternate lookup for '+owner.name);
                 clear.click();
                 await sleep(350);

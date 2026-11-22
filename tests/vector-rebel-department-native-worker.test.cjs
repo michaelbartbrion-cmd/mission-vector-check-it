@@ -7,8 +7,8 @@ const b=source.indexOf('    async function startCShiftPilotNativeRecheck(',a);
 assert.ok(a>0&&b>a);
 const feature=source.slice(a,b);
 function harness(board){
- const queue=[],state=new Map(),out={mapped:[],nav:[],saved:[],queries:[],errors:[],scans:0,fallback:[],clears:0,lookupPosts:[]};
- const r={...board};
+ const queue=[],state=new Map(),out={mapped:[],nav:[],saved:[],queries:[],errors:[],scans:0,fallback:[],clears:0,opens:0,lookupPosts:[]};
+ const r={...board};let filterOpen=!r.clearInitiallyHidden;
  const localStore={
   getItem:k=>state.get(k)||null,
   setItem:(k,v)=>state.set(k,String(v)),
@@ -47,7 +47,9 @@ function harness(board){
 
    crewPpeSearchPrefix:owner=>({prefix:owner.name.split(' ').at(-1).toUpperCase()}),
    document:{querySelectorAll:selector=>selector.startsWith('button')?
-     [{getAttribute:()=>'',innerText:'Clear Filters',click:()=>{out.clears++}}]:[]},
+  (filterOpen?
+    (r.clearMissingForever?[]:[{getAttribute:()=>'',innerText:'Clear Filters',click:()=>{out.clears++;filterOpen=false}}]):
+    [{getAttribute:()=>'',innerText:'Open filter options',click:()=>{out.opens++;filterOpen=true}}]):[]},
    visible:()=>true,uiEquals:(a,b)=>a===b,sleep:async()=>{},
    responsiblePartySelectionLabels:()=>[],
    scanPpeOwnerSearch:async owner=>{
@@ -232,6 +234,20 @@ test('two unsettled native PPE searches fail closed and do not claim no-work suc
  assert.equal(h.out.nav.length,0);
 });
 
+test('closed native PPE filter popover reopens and clears before surname search',async()=>{
+ const h=harness({...unmapped,failPrimaryFor:['Austin Fox'],clearInitiallyHidden:true});
+ assert.equal(await h.context.departmentAutoOnePass(),'mapped');
+ assert.equal(h.out.opens,1);
+ assert.equal(h.out.clears,1);
+ assert.equal(h.queue.length,1);
+ assert.equal(h.out.nav.length,0);
+});
+test('missing native Clear Filters fails closed without a false PPE check',async()=>{
+ const h=harness({...unmapped,failPrimaryFor:['Austin Fox'],clearInitiallyHidden:true,clearMissingForever:true});
+ await assert.rejects(()=>h.context.departmentAutoOnePass(),/Cannot clear native Responsible Party filter/);
+ assert.equal(h.queue.length,0);
+ assert.equal(h.out.nav.length,0);
+});
 test('unexpected source or wrong native link still stops the burst safely',async()=>{
  const h=harness({...unmapped,people:[{...unmapped.people[0],
   knownItems:1,outstandingItems:1,nextItem:{
