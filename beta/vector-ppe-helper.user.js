@@ -16733,7 +16733,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             // Attendance must already be captain-confirmed; Scout suggestions
             // alone do not authorize a working/on-duty declaration.
             const unmapped=data.people.filter(p=>
-                p.attendance==='working'&&p.knownItems===0);
+                p.attendance==='working'&&
+                (Number(p.knownItems)===0||Number(p.maskKnownItems)===0));
             if(unmapped.length){
                 const last=Number(state.lastAutoMapAt||0);
                 if(state.lastAutoMapTour===data.tourStart&&
@@ -16951,18 +16952,22 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 clean(p.name).toLowerCase()===name.toLowerCase()&&
                 clean(p.prefix).toUpperCase()===clean(entry.prefix).toUpperCase());
             if(!person?.prefix)continue;
-            const gear=(entry.items||[]).filter(item=>{
-                const mode=item.inspectionModeKey==='scbaTour'?'scbaTour':'tour';
+            const gear=(entry.items||[]).map(item=>{
                 const pool=clean(item.pool||'');
-                return mode==='scbaTour'?
-                    pool==='299947':
-                    !/scba|airpack|face mask/i.test(
-                        clean(item.type||'')+' '+pool);
-            }).map(item=>({assetId:clean(item.assetId),
-                type:clean(item.type||''),
-                inspectionMode:item.inspectionModeKey==='scbaTour'?
-                    'scbaTour':'tour',
-                assetPath:cPilotNativePath(item.url)}));
+                // Vector discovery rows contain pool and Responsible Party,
+                // but normally do NOT contain inspectionModeKey. Guessing
+                // 'tour' silently dropped every separately required SCBA mask.
+                // Select a mode from the exact native pool, never a gear label.
+                const mode=pool===SCBA_FACE_MASK_POOL?'scbaTour':
+                    Object.prototype.hasOwnProperty.call(
+                        BUILTIN_MODES.tour.templates,pool)?'tour':'';
+                if(!mode||item.inspectionModeKey&&
+                    item.inspectionModeKey!==mode)return null;
+                return{assetId:clean(item.assetId),
+                    type:clean(item.type||''),
+                    inspectionMode:mode,
+                    assetPath:cPilotNativePath(item.url)};
+            }).filter(Boolean);
             if(!gear.length||gear.length>25||
                 gear.some(item=>!/^[A-Za-z0-9._-]{2,75}$/.test(item.assetId))||
                 new Set(gear.map(item=>item.assetId.toUpperCase())).size!==gear.length)
@@ -17139,7 +17144,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             // this confirmed tour. Do not rescan already mapped firefighters.
             // Manual mapping still covers the entire confirmed working crew.
             const targets=automated?
-                working.filter(row=>Number(row.knownItems)===0):working;
+                working.filter(row=>Number(row.knownItems)===0||
+                    Number(row.maskKnownItems)===0):working;
             if(!targets.length)
                 throw Error('All confirmed-working firefighters already have mapped PPE.');
             const owners=targets.map(p=>{
@@ -19357,7 +19363,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     const board=await cPilotFetch(true);
                     const missing=board.activeTour&&Array.isArray(board.people)?
                         board.people.filter(p=>p.attendance==='working'&&
-                            Number(p.knownItems)===0):[];
+                            (Number(p.knownItems)===0||
+                             Number(p.maskKnownItems)===0)):[];
                     if(missing.length&&/^\d{4}-\d{2}-\d{2}$/.test(board.tourStart||'')){
                         const mapKey='mvciEnterprisePpeAutoMapV1';
                         let old={};

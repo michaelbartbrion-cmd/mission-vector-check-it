@@ -39,6 +39,8 @@ const js=`
 (function(){
 const FIXTURE=__DATA__,requests=[],STORE=new Map(),SESSION=new Map();
 const location={origin:'https://app.vectorcheckit.us',href:'https://app.vectorcheckit.us/main/asset-manager'};
+const SCBA_FACE_MASK_POOL='299947';
+const BUILTIN_MODES={tour:{templates:{'300045':'112411','300036':'118098'}}};
 window.__scanCount=0;
 let HIST_DUTY=null;
 const sessionStorage={getItem:k=>SESSION.has(k)?SESSION.get(k):null,
@@ -50,8 +52,11 @@ let cVisible=true;const TAB_ID='smoke-cshift-tab',getRun=()=>null,
  ensurePpeEquipmentPage=async()=>true,
  scanPpeCrewOwners=async()=>{window.__scanCount++;
   return{items:[{ownerName:'Michael Baldree',assetId:'A-001',type:'Coat',
-   pool:'300082',itemId:'4605913',
-   url:'https://app.vectorcheckit.us/app/equipment/PPE/pool/300082/4605913/item?source=assetManager&sourceTab=PPE'}]};},
+   pool:'300045',itemId:'4605913',
+   url:'https://app.vectorcheckit.us/app/equipment/PPE/pool/300045/4605913/item?source=assetManager&sourceTab=PPE'},
+  {ownerName:'Michael Baldree',assetId:'MASK-001',type:'SCBA Face Mask',
+   pool:'299947',itemId:'55661',
+   url:'https://app.vectorcheckit.us/app/equipment/PPE/pool/299947/55661/item?source=assetManager&sourceTab=PPE'}]};},
  masterNameKey=x=>String(x||'').toLowerCase(),
  inferRegularTourWindow=()=>({isActiveTour:true,startDate:'2026-11-21'}),
  saveCaptainDailyCheck=check=>{window.__nativePilotCheck=check;},
@@ -174,8 +179,10 @@ const cShiftMasterOwner=()=>true,
   await new Promise(r=>setTimeout(r,100));
   const mapped=requests.find(x=>x.url.includes('vr-ppe-pilot-inventory'));
   if(!mapped||mapped.data.personName!=='Michael Baldree'||
-      mapped.data.items.length!==1||
-      mapped.data.items[0].assetPath!=='/app/equipment/PPE/pool/300082/4605913/item')throw Error('Scoped PPE map not delivered: '+String(window.__nativeStatus)+'; requests='+requests.map(x=>x.url).join(','));
+      mapped.data.items.length!==2||
+      mapped.data.items[0].assetPath!=='/app/equipment/PPE/pool/300045/4605913/item'||
+      !mapped.data.items.some(x=>x.assetId==='MASK-001'&&x.inspectionMode==='scbaTour'&&
+       x.assetPath==='/app/equipment/PPE/pool/299947/55661/item'))throw Error('Scoped PPE map not delivered: '+String(window.__nativeStatus)+'; requests='+requests.map(x=>x.url).join(','));
   const monitor=[...master.querySelectorAll('button')].find(x=>x.textContent.includes('Monitor C Shift in This Tab'));
   if(!monitor)throw Error('Dedicated-tab monitoring button not found');
   const scansAfterMap=window.__scanCount;
@@ -190,7 +197,7 @@ const cShiftMasterOwner=()=>true,
   const session=JSON.parse(SESSION.get('vectorRebelCShiftDedicatedRecheckerV1')||'null');
   if(!session?.enabled||session.tourStart!=='2026-11-21')
     throw Error('Dedicated monitor not bound to one C-shift tour');
-  if(window.__nativePilotCheck.items[0].pool!=='300082'||
+  if(window.__nativePilotCheck.items[0].pool!=='300045'||
      window.__nativePilotCheck.items[0].itemId!=='4605913')
     throw Error('Direct native PPE target did not preserve exact pool and item identity');
   monitor.click(); // Stop live monitor before switching to the completed tour.
