@@ -17408,7 +17408,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 // Only confirmed absence / unresolved ownership may rotate
                 // in this lease. Any Vector UI parsing, authentication,
                 // inventory mismatch or source-write error fails closed.
-                if(!/No PPE after exact native Responsible Party verification|No exactly assigned native PPE after both lookup methods|No safe surname-scoped PPE lookup|Approved Vector Responsible Party identity unavailable/i.test(reason))
+                if(!/No PPE after exact native Responsible Party verification|No PPE could be verified for .+ with PPE prefix .+ and Responsible Party|No exactly assigned native PPE after both lookup methods|No safe surname-scoped PPE lookup|Approved Vector Responsible Party identity unavailable/i.test(reason))
                     throw error;
                 unresolved++;
                 if(typeof saveDiagnostic==='function')

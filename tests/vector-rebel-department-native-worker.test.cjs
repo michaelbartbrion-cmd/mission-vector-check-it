@@ -53,7 +53,7 @@ function harness(board){
    scanPpeOwnerSearch:async owner=>{
      out.fallback.push(owner);
      if(owner.name==='Aaron No Gear')
-       throw Error('No PPE after exact native Responsible Party verification');
+       throw Error('No PPE could be verified for Aaron No Gear with PPE prefix GEAR and Responsible Party.');
      return{items:[{assetId:'FOX-COAT-01',
        ownerName:r.badFallback?'Someone Else':'Austin Fox',
        type:'Bunker Coat',pool:'300045',
@@ -149,7 +149,7 @@ test('one missing Vector Responsible Party cannot starve the rest of department'
  ]};
  const h=harness(board);
  await assert.rejects(()=>h.context.departmentAutoOnePass(),
-   /No PPE after exact native Responsible Party verification/);
+   /No PPE could be verified for Aaron No Gear with PPE prefix GEAR/);
  assert.equal(h.out.scans,1);
  assert.equal(h.out.mapped[0][0].name,'Aaron No Gear');
  assert.equal(h.out.lookupPosts.length,1);
