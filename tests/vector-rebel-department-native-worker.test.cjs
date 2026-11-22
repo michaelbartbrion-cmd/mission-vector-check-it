@@ -273,6 +273,31 @@ test('previously authenticated native PPE history only seeds OUTSTANDING gear fo
  assert.equal(h.out.nav.length,0);
  assert.equal(h.queue.length,0);
 });
+test('shared Captain native gear paths keep mapping remaining owners after the first department member',async()=>{
+ const h=harness({...unmapped,totals:{mappedPeople:1},people:[
+  {...unmapped.people[0],knownItems:1,outstandingItems:1,
+   nextItem:{assetId:'FOX-COAT-01',inspectionMode:'tour',
+    assetPath:'/app/equipment/PPE/pool/300045/111/item'}},
+  {name:'Mark Byrd',prefix:'BYRD',sourceStatus:'scheduled_unconfirmed',
+   attendanceConfirmed:false,knownItems:0,outstandingItems:0,nextItem:null}
+ ],archiveCandidates:[{personName:'Mark Byrd',personPrefix:'BYRD',knownHistoryItems:12}]});
+ assert.equal(await h.context.departmentAutoOnePass(),'mapped');
+ assert.equal(h.out.reusePosts.length,1);
+ assert.equal(h.out.reusePosts[0].personName,'Mark Byrd');
+ assert.equal(h.out.reusePosts[0].inspectionSubmitted,false);
+ assert.equal(h.out.scans,0,'no duplicate Vector PPE search when native path was verified earlier');
+ assert.equal(h.out.nav.length,0,'archived date is not a fresh inspection');
+});
+test('archived native paths are not reused for already mapped gear',async()=>{
+ const h=harness({...unmapped,people:[{...unmapped.people[0],
+  knownItems:1,outstandingItems:1,nextItem:{assetId:'FOX-COAT-01',
+   assetPath:'/app/equipment/PPE/pool/300045/111/item',inspectionMode:'tour'}}],
+   archiveCandidates:[{personName:'Austin Fox',personPrefix:'FOX',knownHistoryItems:12}]});
+ assert.equal(await h.context.departmentAutoOnePass(),'started');
+ assert.equal(h.out.reusePosts.length,0);
+ assert.equal(h.out.nav.length,1);
+});
+
 test('archived native assets not on today roster cannot be reused',async()=>{
  const h=harness({...unmapped,archiveCandidates:[{
   personName:'Mark Byrd',personPrefix:'BYRD',knownHistoryItems:12

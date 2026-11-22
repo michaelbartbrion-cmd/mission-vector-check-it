@@ -17359,7 +17359,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         // from the existing archive. This creates TODAY'S OUTSTANDING
         // inventory (no native inspection date, no PASS) and the next broker
         // rotation must still read each real Item Log.
-        if((Number(board.totals?.mappedPeople)||0)===0){
+        // Reuse verified native paths for EACH eligible scheduled owner,
+        // even after another department member has already been mapped today.
+        // This invokes the same Captain native Item Log reader on the next
+        // lease and never carries a previous inspection result forward.
+        {
             const archive=await cPilotBridge('GET',
                 'vr-ppe-department-archive-candidates',null,{date:board.date});
             if(archive?.scope!=='department-ppe-archive-candidates'||
