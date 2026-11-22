@@ -17270,15 +17270,23 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         // dedicated browser lease, not parallel browser windows.
         // One person per lease, at most 12 real native item routes.
         const items=pending.map(next=>{
-            const path=cPilotNativePath(next.assetPath),pool=path.match(
-                /^\/app\/equipment\/PPE\/pool\/(\d+)\/\d+\/item$/)?.[1];
-            if(!path||!(next.inspectionMode==='scbaTour'?
+            const path=cPilotNativePath(next.assetPath);
+            const match=path.match(
+                /^\/app\/equipment\/PPE\/pool\/(\d+)\/(\d+)\/item$/);
+            const pool=match?.[1],itemId=match?.[2];
+            if(!path||!pool||!itemId||!(next.inspectionMode==='scbaTour'?
                 pool===SCBA_FACE_MASK_POOL:
                 Object.prototype.hasOwnProperty.call(BUILTIN_MODES.tour.templates,pool||'')))
                 throw Error('Native PPE path or form mode is invalid.');
+            const mode=getMode(next.inspectionMode);
+            const template=mode?.templates?.[pool]||'';
+            if(!template)throw Error('Official native Tour PPE form is not uniquely configured.');
+            // Crucial: isAssetPageFor requires BOTH exact pool and itemId.
+            // Without itemId the worker loops navigation and times out
+            // without ever reading the native Item Log.
             return{assetId:next.assetId,ownerName:owner.name,
                 ownerPrefix:owner.prefix,inspectionModeKey:next.inspectionMode,
-                type:next.assetType||'PPE',pool,
+                type:next.assetType||'PPE',pool,itemId,template,
                 url:location.origin+path+'?source=assetManager&sourceTab=PPE'};
         });
         if(new Set(items.map(x=>x.assetId.toUpperCase())).size!==items.length)

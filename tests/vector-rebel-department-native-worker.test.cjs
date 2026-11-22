@@ -40,6 +40,8 @@ function harness(board){
   cPilotNativePath:u=>new URL(u,'https://checkitapp.targetsolutions.com').pathname,
   SCBA_FACE_MASK_POOL:'299947',
   BUILTIN_MODES:{tour:{templates:{'300045':'112411'}}},
+  getMode:key=>key==='scbaTour'?{templates:{'299947':'119122'}}:
+    {templates:{'300045':'112411'}},
   cPilotPending:()=>queue.slice(),
   saveJSON:(k,rows)=>{queue.splice(0,queue.length,...rows);out.saved.push(k)},
   cPilotFlushReceipts:async()=>true,
@@ -98,6 +100,10 @@ test('mapped outside-C firefighter reads up to 12 legitimate PPE Item Logs in on
  assert.equal(check.items.length,2);
  assert.equal(check.items[0].assetId,'FOX-COAT-01');
  assert.equal(check.items[1].inspectionModeKey,'scbaTour');
+ assert.equal(check.items[0].pool,'300045');
+ assert.equal(check.items[0].itemId,'111');
+ assert.equal(check.items[1].itemId,'222');
+ assert.equal(check.items[1].template,'119122');
  assert.equal(h.out.nav.length,1,'only the first real Item Log navigates initially');
  assert.equal(h.out.nav[0].url.includes('pool/300045/111/item'),true);
  assert.equal(h.out.scans,0,'mapped native routes must not trigger another inventory crawl');
