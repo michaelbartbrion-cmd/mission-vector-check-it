@@ -107,8 +107,10 @@ const cPilotBridge=async(method,action,data,query)=>{
 };
 const cPilotFetch=async()=>pilot;
  const departmentFetch=async()=>({scope:'department-ppe-readonly',readOnly:true,
-   date:'2026-11-21',attendanceConfirmed:false,
-   people:[],totals:{mappedPeople:0,nativeDatedItems:0}});
+    date:'2026-11-21',attendanceConfirmed:false,
+    people:[{name:'Austin Fox',prefix:'PERSON-FOX',knownItems:12,
+      nativeReadItems:12,nativeDatedItems:3}],
+    totals:{mappedPeople:1,nativeReadItems:12,nativeDatedItems:3}});
 const showCShiftPilotBoard=()=>{monitorOpened++};
 __FEATURE__
 showBcDepartmentCheck();
@@ -145,11 +147,14 @@ try{
  if(!nicole||!nicole.textContent.includes('OFF'))
    throw Error('Trusted two-day CrewSense leave evidence did not show OFF');
  const austin=[...table.querySelectorAll('tr')].find(x=>x.textContent.includes('Austin Fox'));
-  if(!austin||!austin.textContent.includes('N/C'))
-   throw Error('Other employees must show explicit NOT VERIFIED rather than blank');
-  if(!summary.textContent.includes('outside the C pilot')||
-     !summary.textContent.includes('scheduled (unconfirmed)')||
-     !summary.textContent.includes('Department native search'))
+  if(!austin||!austin.textContent.includes('DATE 3/12'))
+    throw Error('Native-dated outside C shift history not displayed');
+  const unmapped=[...table.querySelectorAll('tr')].find(x=>x.textContent.includes('Steven Beagle'));
+  if(!unmapped||!unmapped.textContent.includes('N/C'))
+    throw Error('Uncollected people must remain explicitly unknown');
+  if(!summary.textContent.includes('Background Item Log search includes C shift')||
+      !summary.textContent.includes('scheduled (unconfirmed)')||
+      !summary.textContent.includes('Department native search: 1 people with mapped gear, 12 Item Logs actually read, 3 dated'))
     throw Error('BC did not explain uncollected non-C-shift crews');
   if(!summary.textContent.includes('STALE: review needed'))
    throw Error('BC failed to label six-day-old schedule stale');

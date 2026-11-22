@@ -83,6 +83,25 @@ test('one mapped native target starts read-only Item Log and retains original br
  assert.equal(h.out.nav[0].assetId,'FOX-COAT-01');
  assert.equal(h.out.scans,0);
 });
+test('mapped outside-C firefighter reads up to 12 legitimate PPE Item Logs in one existing serialized browser lease',async()=>{
+ const items=[
+  {assetId:'FOX-COAT-01',assetPath:'/app/equipment/PPE/pool/300045/111/item',
+    inspectionMode:'tour',assetType:'Bunker Coat'},
+  {assetId:'FOX-MASK-01',assetPath:'/app/equipment/PPE/pool/299947/222/item',
+    inspectionMode:'scbaTour',assetType:'SCBA Face Mask'}
+ ];
+ const h=harness({...unmapped,people:[{...unmapped.people[0],
+   knownItems:2,outstandingItems:2,pendingItems:items,nextItem:items[0]}]});
+ assert.equal(await h.context.departmentAutoOnePass(),'started');
+ const check=h.out.saved.find(x=>x&&x.departmentRecheck);
+ assert.ok(check);
+ assert.equal(check.items.length,2);
+ assert.equal(check.items[0].assetId,'FOX-COAT-01');
+ assert.equal(check.items[1].inspectionModeKey,'scbaTour');
+ assert.equal(h.out.nav.length,1,'only the first real Item Log navigates initially');
+ assert.equal(h.out.nav[0].url.includes('pool/300045/111/item'),true);
+ assert.equal(h.out.scans,0,'mapped native routes must not trigger another inventory crawl');
+});
 test('off, nonapproved, and wrong-pool links do not become successful reads',async()=>{
  const h=harness({...unmapped,people:[{...unmapped.people[0],sourceStatus:'off',
    knownItems:0},unmapped.people[1]]});
