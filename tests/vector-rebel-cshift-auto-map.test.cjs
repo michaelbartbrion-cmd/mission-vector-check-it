@@ -23,6 +23,7 @@ function tickHarness(input={}){
    cPilotAutoState:()=>state,
    cPilotAutoSave:v=>{state=v;calls.saved.push(v);},
    isMasterOwnerInstallation:()=>true,getRun:()=>null,
+    location:input.location,sessionStorage:input.sessionStorage,URLSearchParams,
    getCaptainDailyCheck:()=>null,captainDailyBusy:false,
    cPilotFetch:async()=>data,cPilotNextLocalBoundaryMs:()=>120000,
    startCShiftPilotNativeRecheck:async dedicated=>{
@@ -191,4 +192,12 @@ test('background inventory discovery scans only the uncollected working owner an
   assert.deepEqual(h.calls.snapshots[0].map(x=>x.ownerName),['Jerry Weems']);
   assert.equal(h.calls.scans,1);
   assert.equal(h.calls.confirm,0);
+});
+test('dedicated Enterprise PPE SPA navigation retains broker ownership without query flag',async()=>{
+  const h=tickHarness({location:{search:''},sessionStorage:{getItem:key=>
+    key==='mvciEnterpriseDedicatedRoleV1'?'ppe':null}});
+  assert.equal(await h.tick(),false);
+  assert.equal(h.calls.mapped.length,0);
+  assert.equal(h.calls.rechecks.length,0);
+  assert.equal(h.calls.saved.length,0);
 });

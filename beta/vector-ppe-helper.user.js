@@ -16646,9 +16646,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const state=cPilotAutoState();
         // The Enterprise localhost broker owns the designated ?mvci_worker=ppe
         // tab. Do not run the older local scheduler against the same page.
-        if(typeof location!=='undefined' &&
-           new URLSearchParams(location.search).get('mvci_worker')==='ppe')
-            return false;
+        let enterpriseDedicated=false;
+        try{
+            enterpriseDedicated=(typeof location!=='undefined'&&
+                new URLSearchParams(location.search).get('mvci_worker')==='ppe')||
+                (typeof sessionStorage!=='undefined'&&
+                sessionStorage.getItem('mvciEnterpriseDedicatedRoleV1')==='ppe');
+        }catch{}
+        if(enterpriseDedicated)return false;
         if(!state||!isMasterOwnerInstallation()||getRun()||
            getCaptainDailyCheck()||captainDailyBusy)return false;
         if(Date.now()<Number(state.nextAt||0))return false;
