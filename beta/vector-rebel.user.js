@@ -17497,20 +17497,27 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     // launches more than one native Item Log batch. Every candidate is marked
     // attempted by departmentAutoOnePass so unresolved owners cannot loop.
     async function departmentAutoScanBurst(){
-        let unresolved=0;
+        let unresolved=0,unsettled=0;
         for(let trial=0;trial<3;trial++){
             try{
                 return await departmentAutoOnePass();
             }catch(error){
                 const reason=clean(error?.message||error).slice(0,170);
-                // Only confirmed absence / unresolved ownership may rotate
-                // in this lease. Any Vector UI parsing, authentication,
-                // inventory mismatch or source-write error fails closed.
-                if(!/No PPE after exact native Responsible Party verification|No PPE could be verified for .+ with PPE prefix .+ and Responsible Party|No exactly assigned native PPE after both lookup methods|No safe surname-scoped PPE lookup|Approved Vector Responsible Party identity unavailable/i.test(reason))
+                const uiUnsettled=/^Vector did not confirm a settled PPE search for "[A-Z0-9._-]{2,60}"\.?$/.test(reason);
+                // Native search may fail to settle for one surname. Rotate
+                // ONCE to another exact approved owner rather than leave the
+                // whole department behind that row. Two independent settled
+                // search failures imply Vector UI/source degradation:
+                // fail the lease, don't quietly report no work.
+                if(uiUnsettled&&++unsettled>1)
+                    throw Error('Two native PPE surname searches did not settle in one lease; no inspection verified.');
+                if(!uiUnsettled&&
+                   !/No PPE after exact native Responsible Party verification|No PPE could be verified for .+ with PPE prefix .+ and Responsible Party|No exactly assigned native PPE after both lookup methods|No safe surname-scoped PPE lookup|Approved Vector Responsible Party identity unavailable/i.test(reason))
                     throw error;
                 unresolved++;
                 if(typeof saveDiagnostic==='function')
-                    saveDiagnostic('Department PPE lookup unresolved; next owner: '+reason);
+                    saveDiagnostic((uiUnsettled?'Native PPE search unconfirmed; ':'Department PPE lookup unresolved; ')+
+                        'next owner: '+reason);
             }
         }
         if(unresolved&&typeof setStatus==='function')

@@ -52,6 +52,8 @@ function harness(board){
    responsiblePartySelectionLabels:()=>[],
    scanPpeOwnerSearch:async owner=>{
      out.fallback.push(owner);
+      if(r.failSearchSettleFor?.includes(owner.name))
+        throw Error('Vector did not confirm a settled PPE search for "'+owner.prefix+'".');
      if(owner.name==='Aaron No Gear')
        throw Error('No PPE could be verified for Aaron No Gear with PPE prefix GEAR and Responsible Party.');
      return{items:[{assetId:'FOX-COAT-01',
@@ -201,6 +203,35 @@ test('same safe broker lease skips unresolved owners and maps next verified fire
  assert.equal(h.queue[0].personName,'Austin Fox');
  assert.equal(h.out.nav.length,0,'never submits inspection from inventory');
 });
+test('one Vector PPE search timeout advances another real approved owner without inventing an inspection',async()=>{
+ const h=harness({...unmapped,people:[
+  {name:'Aaron No Gear',prefix:'AARON',sourceStatus:'scheduled_unconfirmed',
+    attendanceConfirmed:false,knownItems:0,outstandingItems:0,nextItem:null},
+  unmapped.people[0]
+ ],failSearchSettleFor:['Aaron No Gear']});
+ assert.equal(await h.context.departmentAutoScanBurst(),'mapped');
+ assert.equal(h.out.scans,2);
+ assert.equal(h.out.lookupPosts.length,1);
+ assert.equal(h.out.lookupPosts[0].status,'source_error');
+ assert.equal(h.out.mapped[1][0].name,'Austin Fox');
+ assert.equal(h.queue.length,1);
+ assert.equal(h.out.nav.length,0);
+});
+test('two unsettled native PPE searches fail closed and do not claim no-work success',async()=>{
+ const h=harness({...unmapped,people:[
+  {name:'Aaron No Gear',prefix:'AARON',sourceStatus:'scheduled_unconfirmed',
+    attendanceConfirmed:false,knownItems:0,outstandingItems:0,nextItem:null},
+  unmapped.people[0]
+ ],failPrimaryFor:['Austin Fox'],
+ failSearchSettleFor:['Aaron No Gear','Austin Fox']});
+ await assert.rejects(()=>h.context.departmentAutoScanBurst(),
+   /Two native PPE surname searches did not settle in one lease/);
+ assert.equal(h.out.lookupPosts.length,2);
+ assert.deepEqual(h.out.lookupPosts.map(x=>x.status),['source_error','source_error']);
+ assert.equal(h.queue.length,0);
+ assert.equal(h.out.nav.length,0);
+});
+
 test('unexpected source or wrong native link still stops the burst safely',async()=>{
  const h=harness({...unmapped,people:[{...unmapped.people[0],
   knownItems:1,outstandingItems:1,nextItem:{
