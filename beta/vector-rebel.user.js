@@ -17430,6 +17430,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     {label:'NOT VERIFIED',detail:'No completed native dates confirmed; actual inspection state unknown.',tone:'unknown'};
             }
         }
+        if(!C_PILOT_NAMES.has(masterNameKey(name)))
+            return{label:'NOT COLLECTED',tone:'unknown',detail:
+                'Native PPE Item Log collection has not yet reached this firefighter. They may have completed checks in Vector; do not claim PASS or failure.'};
         return{label:'UNKNOWN',detail:'No mapped native PPE history for this person and tour',tone:'unknown'};
     }
     // CrewSense is a read-only attendance source. It may establish a full
@@ -17445,6 +17448,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             r.sourceQuality==='good_direct_capture'&&offStates.has(r.status)))
             return{label:'OFF',tone:'off',detail:
                 'Direct CrewSense records show full leave/deployment on BOTH tour days. No PPE tour check required.'};
+        if(nativeCell?.label==='NOT COLLECTED')return nativeCell;
         if(statuses.some(r=>
             r.sourceQuality==='good_direct_capture'&&r.status==='work_evidence'))
             return{label:'NOT VERIFIED',tone:'unknown',
@@ -17464,7 +17468,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         heading.style.cssText='font:700 22px Arial;color:#143e5a;margin:0 0 5px;';
         const note=document.createElement('div');
         note.style.cssText='font:12px/1.5 Arial;color:#45687a;margin-bottom:10px;';
-        note.textContent='Previous month + current month · all stations · read-only native PPE history.';
+        note.textContent='Current month first · all stations · whole two-day tours. Use History for older months.';
         const source=document.createElement('div');
         source.setAttribute('role','status');
         source.style.cssText='background:#f1f7fa;border:1px solid #c2dae6;'+
@@ -17476,7 +17480,19 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const review=makeButton('Review Today\'s Crew');
         const close=makeButton('Close');
         close.onclick=()=>overlay.remove();
-        actions.append(refresh,review,close);
+        const monthLabel=document.createElement('label');
+        monthLabel.textContent='History ';
+        monthLabel.style.cssText='font:700 11px Arial;color:#24516b;display:inline-flex;align-items:center;gap:5px;';
+        const monthPicker=document.createElement('select');
+        monthPicker.setAttribute('aria-label','BC history month');
+        monthPicker.style.cssText='padding:5px 6px;border:1px solid #9ebaca;border-radius:5px;max-width:150px;';
+        for(const [value,label] of [['current','Current month'],['previous','Previous month'],['both','Both months']]){
+            const option=document.createElement('option');
+            option.value=value;option.textContent=label;monthPicker.appendChild(option);
+        }
+        monthPicker.value='current';
+        monthLabel.appendChild(monthPicker);
+        actions.append(monthLabel,refresh,review,close);
         const tableWrap=document.createElement('div');
         tableWrap.style.cssText='overflow-y:auto;overflow-x:auto;max-height:70vh;'+
             'border:1px solid #c7dce6;border-radius:9px;';
@@ -17496,7 +17512,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             'margin:-2px 0 7px;';
         legend.textContent='DONE = all recorded · PART = partly recorded · '+
             'NONE = no record after a complete post-tour read · '+
-            'OFF = away · ? = not verified · – = not due. '+
+            'OFF = away · ? = unknown · N/C = native history not collected · – = not due. '+
             'Hover over a cell for the full result.';
         box.append(heading,note,source,actions,legend,tableWrap,details);
         let schedule=null,pilot=null,report=null,rows=[],reviewing=false;
@@ -17508,6 +17524,10 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const windows=captainAuditWindow(date,'C');
         const current=windows.tours.slice();
         const months=windows.months.slice();
+        let historyMode='current';
+        const displayMonths=()=>historyMode==='both'?months:
+            historyMode==='previous'?months.slice(0,1):months.slice(-1);
+        const displayTours=()=>current.filter(t=>displayMonths().includes(t.month));
         let historyLoadId=0;
         let attendance=new Map(),attendanceMessage='';
         const stamp=raw=>{
@@ -17517,10 +17537,15 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const render=()=>{
             report=getCaptainDailyReport();
             rows=bcDepartmentDailyRows(schedule,pilot,report,date,manual);
+            const visibleTours=displayTours(),visibleMonths=displayMonths();
             if(!reviewing)
                 choices=new Set(rows.filter(p=>p.duty!=='off')
                     .map(p=>masterNameKey(p.name)));
-            const working=rows.filter(p=>p.duty!=='off').length,off=rows.length-working;
+            const confirmedWorking=rows.filter(p=>p.duty!=='off'&&p.confirmed).length;
+            const scheduledUnconfirmed=rows.filter(p=>p.duty!=='off'&&!p.confirmed).length;
+            const off=rows.filter(p=>p.duty==='off').length;
+            const monitored=new Set((pilot?.people||[]).map(p=>masterNameKey(p.name)));
+            const outsidePilot=rows.filter(p=>p.duty!=='off'&&!monitored.has(masterNameKey(p.name))).length;
             const hasDatedNative=person=>{
                 const owned=(report?.owners||[]).find(owner=>
                     masterNameKey(owner.name)===masterNameKey(person.name));
@@ -17535,12 +17560,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                             !!item.nativeCompletionDate&&item.status==='verified')));
             };
             const withNative=rows.filter(hasDatedNative).length;
-            source.textContent='Daily roster '+date+' · '+working+' working / '+off+' OFF'+
+            source.textContent='Daily roster '+date+' · '+confirmedWorking+' confirmed working / '+
+                scheduledUnconfirmed+' scheduled (unconfirmed) / '+off+' OFF'+
                 (manual?.confirmedAt?' · BC-confirmed':' · schedule/confirmed candidates')+
                 ' · CrewSense captured '+stamp(schedule?.capturedAt)+
                 (schedule?.stale?' (STALE: review needed)':'')+
                 '. Dated native PPE records: '+withNative+' of '+rows.length+
-                ' people; remaining people need authenticated background Item Log collection.'+
+                ' people. Native Item Log monitor: C-shift pilot only; '+
+                outsidePilot+' other listed people are NOT COLLECTED by this monitor.'+
                 ' Schedule is not roll call; Unknown is not FAILED.'+
                 (attendanceMessage?' '+attendanceMessage:'');
             table.replaceChildren();
@@ -17549,14 +17576,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             table.style.tableLayout='fixed';
             const monthRow=document.createElement('tr');
             const dayRow=document.createElement('tr');
-            const fixed=['FIREFIGHTER','UNIT','DUTY','TODAY PPE'];
-            const widths=reviewing?[3,14,11,8,9]:[15,12,9,9];
+            const fixed=['FIREFIGHTER','UNIT','DUTY','TOUR PPE'];
+            const widths=reviewing?[4,18,11,8,8]:[19,12,9,9];
             if(reviewing)fixed.unshift('HERE');
             const colGroup=document.createElement('colgroup');
             const totalFixed=widths.reduce((sum,w)=>sum+w,0);
-            const historicalWidth=current.length?
-                (100-totalFixed)/current.length:0;
-            for(const pct of [...widths,...current.map(()=>historicalWidth)]){
+            const historicalWidth=visibleTours.length?
+                (100-totalFixed)/visibleTours.length:0;
+            for(const pct of [...widths,...visibleTours.map(()=>historicalWidth)]){
                 const col=document.createElement('col');
                 col.style.width=pct.toFixed(3)+'%';
                 colGroup.appendChild(col);
@@ -17570,8 +17597,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     'font-size:10px;overflow:hidden;white-space:nowrap;';
                 monthRow.appendChild(th);
             }
-            for(const month of months){
-                const matching=current.filter(t=>t.month===month);
+            for(const month of visibleMonths){
+                const matching=visibleTours.filter(t=>t.month===month);
                 if(!matching.length)continue;
                 const th=document.createElement('th');
                 th.colSpan=matching.length;
@@ -17612,7 +17639,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     const group=document.createElement('tr');
                     group.setAttribute('data-bc-station-group',station);
                     const label=document.createElement('td');
-                    label.colSpan=fixed.length+current.length;
+                    label.colSpan=fixed.length+visibleTours.length;
                     label.textContent=station;
                     label.style.cssText='background:#d6e7f1;color:#163f5d;'+
                         'font:800 12px Arial;padding:6px 10px;'+
@@ -17631,7 +17658,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     };
                     td.appendChild(chk);tr.appendChild(td);
                 }
-                const history=current.map(t=>
+                const history=visibleTours.map(t=>
                     t.startDate>date?
                         {label:'NOT DUE',detail:'Future C-shift tour',tone:'future'}:
                         bcDepartmentAttendanceCell(attendance,person.name,t,
@@ -17662,12 +17689,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     const td=document.createElement('td');
                     const fullLabel=String(field.text||'');
                     const isHistory=i>=historicalStart;
-                    const shortLabel=!isHistory?fullLabel:
+                    const shortLabel=(!isHistory&&i!==historicalStart-1)?fullLabel:
                         fullLabel.startsWith('ALL COMPLETED · ISSUE')?'ISSUE':
                         fullLabel.startsWith('ALL COMPLETED')?'DONE':
                         fullLabel.startsWith('PARTIAL ')?'PART '+fullLabel.slice(8):
                         fullLabel==='NOT COMPLETED'?'NONE':
                         fullLabel==='NOT DUE'?'–':
+                        fullLabel==='NOT COLLECTED'?'N/C':
                         ['NOT VERIFIED','UNKNOWN'].includes(fullLabel)?'?':
                         fullLabel;
                     td.textContent=shortLabel;
@@ -17688,7 +17716,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             }
             if(!rows.length){
                 const tr=document.createElement('tr'),td=document.createElement('td');
-                td.colSpan=fixed.length+current.length;
+                td.colSpan=fixed.length+visibleTours.length;
                 td.style.cssText='padding:18px;color:#80570c;';
                 td.textContent='No trustworthy department-wide staffing list available. Do not infer nobody is working.';
                 tr.appendChild(td);table.appendChild(tr);
@@ -17780,6 +17808,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             })();
         };
         refresh.onclick=()=>{void fetch();};
+        monthPicker.onchange=()=>{historyMode=monthPicker.value;render();};
         review.onclick=()=>{
             if(!schedule?.people?.length){
                 source.textContent='Cannot confirm a full department roll-call from unavailable staffing evidence.';
@@ -17820,7 +17849,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     .map(p=>({name:p.name,prefix:p.prefix}))};
             saveJSON(BC_DAILY_ROSTER_KEY,manual);
             reviewing=false;review.textContent='Review Today\'s Crew';
-            const chooser=actions.querySelector('select');
+            const chooser=actions.querySelector('select[aria-label="Add working firefighter"]');
             if(chooser)chooser.remove();
             render();
         };

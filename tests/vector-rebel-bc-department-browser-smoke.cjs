@@ -123,10 +123,15 @@ try{
  if(!names.some(x=>x.includes('Jerry Weems')&&x.includes('OFF'))||
     names.some(x=>x.includes('Prior Tour OT')))
    throw Error('BC failed OFF duty or included previous-tour overtime');
- const headers=[...table.querySelectorAll('th')].map(x=>x.textContent);
- if(!headers.includes('October 2026')||!headers.includes('November 2026')||
-    !headers.includes('4–5')||!headers.includes('27–28'))
-   throw Error('BC did not show both full calendar months');
+  const headers=[...table.querySelectorAll('th')].map(x=>x.textContent);
+  const picker=overlay.querySelector('select[aria-label="BC history month"]');
+  if(!picker||picker.value!=='current'||
+     !headers.includes('November 2026')||headers.includes('October 2026'))
+    throw Error('BC must open on the readable current month');
+  picker.value='previous';picker.dispatchEvent(new Event('change',{bubbles:true}));
+  const previous=[...table.querySelectorAll('th')].map(x=>x.textContent);
+  if(!previous.includes('October 2026')||previous.includes('November 2026'))
+    throw Error('Previous month must be selectable');
  const grouped=[...table.querySelectorAll('tr[data-bc-station-group]')];
  if(grouped[0]?.getAttribute('data-bc-station-group')!=='BC'||
     grouped[1]?.getAttribute('data-bc-station-group')!=='Station 1')
@@ -137,18 +142,26 @@ try{
  if(!nicole||!nicole.textContent.includes('OFF'))
    throw Error('Trusted two-day CrewSense leave evidence did not show OFF');
  const austin=[...table.querySelectorAll('tr')].find(x=>x.textContent.includes('Austin Fox'));
- if(!austin||!austin.textContent.includes('?'))
+  if(!austin||!austin.textContent.includes('N/C'))
    throw Error('Other employees must show explicit NOT VERIFIED rather than blank');
- if(!summary.textContent.includes('STALE: review needed'))
+  if(!summary.textContent.includes('NOT COLLECTED')||
+     !summary.textContent.includes('scheduled (unconfirmed)'))
+    throw Error('BC did not explain uncollected non-C-shift crews');
+  if(!summary.textContent.includes('STALE: review needed'))
    throw Error('BC failed to label six-day-old schedule stale');
  if(!names.some(x=>x.includes('Michael Brion')&&
     x.includes('PART 1 / 2')&&x.includes('DONE')))
    throw Error('BC did not show partial and all-completed native tour statuses');
- const wrap=table.parentElement;
+  picker.value='both';picker.dispatchEvent(new Event('change',{bubbles:true}));
+  const bothHeaders=[...table.querySelectorAll('th')].map(x=>x.textContent);
+  if(!bothHeaders.includes('October 2026')||!bothHeaders.includes('November 2026'))
+    throw Error('Both month history must remain available');
+  const wrap=table.parentElement;
  if(table.scrollWidth>wrap.clientWidth+3)
    throw Error('Two-month matrix overflows horizontally at desktop width ('+
      table.scrollWidth+' > '+wrap.clientWidth+')');
- if(!table.querySelector('th')?.textContent.includes('FIREFIGHTER'))
+  picker.value='current';picker.dispatchEvent(new Event('change',{bubbles:true}));
+  if(!table.querySelector('th')?.textContent.includes('FIREFIGHTER'))
    throw Error('BC did not use consistent Captain-like table');
  if(overlay.querySelectorAll('details').length!==1||monitorOpened)
    throw Error('Advanced pilot monitor not collapsed');
@@ -166,7 +179,9 @@ try{
    x.textContent.includes('Austin Fox')&&x.textContent.includes('OFF')))
    throw Error('BC review did not retain explicit OFF person');
  if(!summary.textContent.includes('BC-confirmed'))throw Error('BC local confirmed date missing');
- if(STORE.size!==1||requests!==1||attendanceRequests!==1)
+  if(overlay.querySelector('select[aria-label="BC history month"]')!==picker)
+    throw Error('Saved BC roster removed history picker');
+  if(STORE.size!==1||requests!==1||attendanceRequests!==1)
    throw Error('BC review performed wrong network or persistent storage operation');
  result={pass:true,citywide:true,staleLabel:true,twoMonths:true,
   completedAndPartial:true,offVisible:true,bcFirst:true,

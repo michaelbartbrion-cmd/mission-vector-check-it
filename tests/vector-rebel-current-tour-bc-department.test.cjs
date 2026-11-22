@@ -164,7 +164,8 @@ test('BC summary classifies completed, partial, missing, unknown, and OFF withou
  assert.equal(partial.label,'PARTIAL 1 / 3');
  assert.equal(partial.tone,'partial');
  assert.match(partial.detail,/completion is not automatically/i);
- assert.equal(f.bcCShiftHistoryCell(report,'Unknown C member',tour).label,'UNKNOWN');
+ assert.equal(f.bcCShiftHistoryCell(report,'Jerry Weems',tour).label,'UNKNOWN');
+ assert.equal(f.bcCShiftHistoryCell(report,'Austin Fox',tour).label,'NOT COLLECTED');
 
  report.owners[0].items[1].tourChecks[0].ok=true;
  report.owners[0].items[1].tourChecks[0].resultStatus='failed';
