@@ -17395,6 +17395,31 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         navigateCaptainDailyToItem(check,items[0]);
         return'started';
     }
+    // One broker lease may resolve several owner LOOKUP failures, but never
+    // launches more than one native Item Log batch. Every candidate is marked
+    // attempted by departmentAutoOnePass so unresolved owners cannot loop.
+    async function departmentAutoScanBurst(){
+        let unresolved=0;
+        for(let trial=0;trial<3;trial++){
+            try{
+                return await departmentAutoOnePass();
+            }catch(error){
+                const reason=clean(error?.message||error).slice(0,170);
+                // Only confirmed absence / unresolved ownership may rotate
+                // in this lease. Any Vector UI parsing, authentication,
+                // inventory mismatch or source-write error fails closed.
+                if(!/No PPE after exact native Responsible Party verification|No exactly assigned native PPE after both lookup methods|No safe surname-scoped PPE lookup|Approved Vector Responsible Party identity unavailable/i.test(reason))
+                    throw error;
+                unresolved++;
+                if(typeof saveDiagnostic==='function')
+                    saveDiagnostic('Department PPE lookup unresolved; next owner: '+reason);
+            }
+        }
+        if(unresolved&&typeof setStatus==='function')
+            setStatus('Background PPE: '+unresolved+
+                ' scheduled candidates had no verified Vector gear. Continuing other checks; no inspection was marked failed.');
+        return'none';
+    }
     async function startCShiftPilotNativeRecheck(dedicated=false,selectedTourStart=''){
         if(!isMasterOwnerInstallation()||(!dedicated&&panelInterfaceMode()!=='master')){
             setStatus('Only the master-linked C-shift pilot captain can start read-only verification.',false);
@@ -19236,9 +19261,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     turn=Number(sessionStorage.getItem(turnKey)||0)||0;
                     sessionStorage.setItem(turnKey,String((turn+1)%1000000));
                 }catch{}
-                if(turn%3!==2&&typeof departmentAutoOnePass==='function'){
+                if(turn%3!==2&&typeof departmentAutoScanBurst==='function'){
                     try{
-                        const result=await departmentAutoOnePass();
+                        const result=await departmentAutoScanBurst();
                         if(result==='started')return; // Native Item Log navigation.
                         if(result==='mapped'){
                             try{await broker('complete',{id:answer.id,

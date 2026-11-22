@@ -184,6 +184,31 @@ test('read-only surname fallback may map PPE only with an exact live Responsible
  assert.equal(bad.queue.length,0);
  assert.equal(bad.out.nav.length,0);
 });
+test('same safe broker lease skips unresolved owners and maps next verified firefighter',async()=>{
+ const board={...unmapped,people:[
+  {name:'Aaron No Gear',prefix:'AARON',sourceStatus:'scheduled_unconfirmed',
+   attendanceConfirmed:false,knownItems:0,outstandingItems:0,nextItem:null},
+  unmapped.people[0]
+ ]};
+ const h=harness(board);
+ assert.equal(await h.context.departmentAutoScanBurst(),'mapped');
+ assert.equal(h.out.scans,2);
+ assert.equal(h.out.lookupPosts.length,1);
+ assert.equal(h.out.lookupPosts[0].status,'owner_not_found');
+ assert.equal(h.out.mapped[0][0].name,'Aaron No Gear');
+ assert.equal(h.out.mapped[1][0].name,'Austin Fox');
+ assert.equal(h.queue.length,1);
+ assert.equal(h.queue[0].personName,'Austin Fox');
+ assert.equal(h.out.nav.length,0,'never submits inspection from inventory');
+});
+test('unexpected source or wrong native link still stops the burst safely',async()=>{
+ const h=harness({...unmapped,people:[{...unmapped.people[0],
+  knownItems:1,outstandingItems:1,nextItem:{
+   assetId:'FOX-MASK-01',inspectionMode:'tour',
+   assetPath:'/app/equipment/PPE/pool/299947/222/item'}}]});
+ await assert.rejects(()=>h.context.departmentAutoScanBurst(),/invalid/i);
+ assert.equal(h.out.nav.length,0);
+});
 test('per-person read attempts are throttled without marking any PASS',async()=>{
  const h=harness(unmapped);
  assert.equal(await h.context.departmentAutoOnePass(),'mapped');
