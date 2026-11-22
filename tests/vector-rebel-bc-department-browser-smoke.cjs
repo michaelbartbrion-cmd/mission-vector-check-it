@@ -106,6 +106,9 @@ const cPilotBridge=async(method,action,data,query)=>{
  throw Error('Unexpected BC network call '+action);
 };
 const cPilotFetch=async()=>pilot;
+ const departmentFetch=async()=>({scope:'department-ppe-readonly',readOnly:true,
+   date:'2026-11-21',attendanceConfirmed:false,
+   people:[],totals:{mappedPeople:0,nativeDatedItems:0}});
 const showCShiftPilotBoard=()=>{monitorOpened++};
 __FEATURE__
 showBcDepartmentCheck();
@@ -119,7 +122,7 @@ try{
  if(!names.some(x=>x.includes('Austin Fox')&&x.includes('Truck 501'))||
     !names.some(x=>x.includes('Nicole Duncan')&&x.includes('Engine 506'))||
     !names.some(x=>x.includes('Steven Beagle')&&x.includes('Battalion 501')))
-   throw Error('BC did not display workers from stations outside Station 4');
+   throw Error('BC did not display workers from stations outside Station 4; count='+names.length+', status='+summary.textContent.slice(0,300));
  if(!names.some(x=>x.includes('Jerry Weems')&&x.includes('OFF'))||
     names.some(x=>x.includes('Prior Tour OT')))
    throw Error('BC failed OFF duty or included previous-tour overtime');
@@ -144,8 +147,9 @@ try{
  const austin=[...table.querySelectorAll('tr')].find(x=>x.textContent.includes('Austin Fox'));
   if(!austin||!austin.textContent.includes('N/C'))
    throw Error('Other employees must show explicit NOT VERIFIED rather than blank');
-  if(!summary.textContent.includes('NOT COLLECTED')||
-     !summary.textContent.includes('scheduled (unconfirmed)'))
+  if(!summary.textContent.includes('outside the C pilot')||
+     !summary.textContent.includes('scheduled (unconfirmed)')||
+     !summary.textContent.includes('Department native search'))
     throw Error('BC did not explain uncollected non-C-shift crews');
   if(!summary.textContent.includes('STALE: review needed'))
    throw Error('BC failed to label six-day-old schedule stale');
