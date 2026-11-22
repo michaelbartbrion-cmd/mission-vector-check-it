@@ -10102,7 +10102,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const row = ppeRowForAnchor(anchor);
         const table = row?.closest('table');
         const heads = table ? [...table.querySelectorAll('thead th')].map(h =>
-            clean(h.innerText || h.textContent || '').toLowerCase()) : [];
+            clean(h.innerText || h.textContent || '').toLowerCase()
+                .replace(/\s+(?:ascending|descending)$/i,'')) : [];
         const cells = row ? [...row.querySelectorAll(':scope > td, :scope > [role="cell"]')] : [];
         const nameIndex = heads.indexOf('name'), partyIndex = heads.indexOf('responsible party');
         const statusIndex = heads.indexOf('item status');
@@ -10755,7 +10756,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const row = ppeRowForAnchor(anchor);
             const table = row?.closest('table');
             const headers = table ? [...table.querySelectorAll('thead th')].map(cell =>
-                clean(cell.innerText || cell.textContent || '').toLowerCase()) : [];
+                clean(cell.innerText || cell.textContent || '').toLowerCase()
+                .replace(/\s+(?:ascending|descending)$/i,'')) : [];
             const cells = row ? [...row.querySelectorAll(':scope > td, :scope > [role="cell"]')] : [];
             const nameIndex = headers.indexOf('name');
             const partyIndex = headers.indexOf('responsible party');

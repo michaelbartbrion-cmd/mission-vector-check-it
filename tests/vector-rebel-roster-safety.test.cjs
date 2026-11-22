@@ -18,10 +18,10 @@ const source = [
 ].join('\n') + '\nreturn {ownerRosterKey,rosterHasPersonSpecificPrefix,responsiblePartyPpeRow,scanPpeOwnerInventory,scanPpeRosterCandidates,discoverOwnerGear};';
 const clean = v => String(v ?? '').trim();
 const nameKey = s => clean(s).toLowerCase().replace(/\s+/g,' ');
-function makeRow(assetId, responsibleParty, location = 'Flower Mound Fire Department (TX)', status='In Service') {
+function makeRow(assetId, responsibleParty, location = 'Flower Mound Fire Department (TX)', status='In Service', sortableNameHeader='Name') {
     const texts = [assetId, 'Bunker Coat', location, responsibleParty, status];
     const cells = texts.map(t => ({innerText:t,textContent:t}));
-    const table = { querySelectorAll: () => ['Name','Pool','Location','Responsible Party','Item Status']
+    const table = { querySelectorAll: () => [sortableNameHeader,'Pool','Location','Responsible Party','Item Status']
         .map(t => ({innerText:t})) };
     const row = {
         closest: q => q === 'table' ? table : null,
@@ -58,6 +58,15 @@ test('reads numeric PPE Name field and Responsible Party instead of Location', (
     assert.equal(two.ownerName,'Ronnie McCarroll');
     const none = api.responsiblePartyPpeRow(makeRow('10237642','-','Daniel Guerra-Herrera'));
     assert.equal(none.ownerName,'');
+});
+test('accepts Vector live sortable Name Descending/Ascending column without inventing owner',()=>{
+ const api=createHarness([]);
+ for(const header of ['Name Descending','Name Ascending','Name']){
+  const result=api.responsiblePartyPpeRow(makeRow(
+    'FOX-11147022-FL','Austin Fox','Austin Fox','In Service',header));
+  assert.equal(result.assetId,'FOX-11147022-FL');
+  assert.equal(result.ownerName,'Austin Fox');
+ }
 });
 test('accepts real department asset names containing periods, spaces and punctuation', () => {
     const api = createHarness([]);
