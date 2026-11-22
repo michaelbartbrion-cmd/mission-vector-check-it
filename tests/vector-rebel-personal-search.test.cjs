@@ -32,6 +32,7 @@ function testHarness(data, settings={}) {
  };
  const from=new Function('clean','masterNameKey','ensurePpeEquipmentPage','getSearchInput',
   'visibleAssetLinksSignature','nativeSetInput','ppeLoadedRowsSnapshot','hasExplicitNoResults',
+  'submitNativePpeSearch','ppeNativeSearchConfirmedEmpty',
   'getPpeResultsContainer','getVisiblePpeAnchors','responsiblePartyPpeRow',
   'getPaginationControl','paginationControlEnabled','waitForPpePageChange',
   'location','Date','sleep','getPoolType','document',code);
@@ -39,7 +40,7 @@ function testHarness(data, settings={}) {
    ()=>rows().length?search.value+':'+currentIndex+':'+rows().length:'EMPTY',
    (_,term)=>{search.value=term;terms.push(term);currentIndex=0},
    ()=>({ready:rows().length>0,signature:JSON.stringify(pages().map(a=>a.x)),count:pages().length}),
-   ()=>rows().length===0,()=>({}),()=>pages(),
+   ()=>rows().length===0,()=>{},()=>rows().length===0,()=>({}),()=>pages(),
    a=>({...a.x,pool:'300045',itemId:a.getAttribute().split('/')[6],url:'https://app.vectorcheckit.us'+a.getAttribute()}),
    kind=>kind==='next'&&rows().length>(currentIndex+1)*10?{click(){currentIndex++}}:null,
    v=>!!v,async()=>{}, {origin:'https://app.vectorcheckit.us'},

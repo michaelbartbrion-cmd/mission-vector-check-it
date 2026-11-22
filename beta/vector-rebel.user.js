@@ -10390,6 +10390,41 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         throw new Error('Responsible Party PPE filtered scan did not reach the last page.');
     }
 
+    // Vector can render a genuine empty PPE result outside the table root.
+    // A missing table alone is NOT evidence that the firefighter has no gear.
+    // Require the PPE tab, zero visible PPE links, and explicit native text
+    // stable after setting the exact search term. Never fabricate a completion.
+    function ppeNativeSearchConfirmedEmpty(){
+        const input=getSearchInput();
+        const ppe=findVectorNavigationTarget('PPE');
+        if(!input||!visible(input)||!ppe||!vectorControlLooksActive(ppe))
+            return false;
+        if(getVisiblePpeAnchors(document).length)return false;
+        const roots=[getPpeResultsContainer(),
+            document.querySelector('main'),
+            document.querySelector('[role="main"]'),
+            document.querySelector('#root')].filter(Boolean);
+        const evidence=['no ppe item found','no equipment found',
+            'no items found','no records found','no results'];
+        return roots.some(root=>visible(root)&&evidence.some(x=>
+            uiText(root.innerText||root.textContent||'').toLowerCase().includes(x)));
+    }
+    function submitNativePpeSearch(search){
+        // On the live Equipment > PPE page Vector exposes a separate Search
+        // button. Updating React input state alone can leave the previous
+        // rows unchanged until that button is activated.
+        const ppe=findVectorNavigationTarget('PPE');
+        if(!search||!visible(search)||!ppe||!vectorControlLooksActive(ppe)||
+           !isConfirmedPpeEquipmentPage())
+            throw Error('Native PPE search controls not confirmed; lookup stopped.');
+        const candidates=[...document.querySelectorAll('button')].filter(btn=>
+            visible(btn)&&!btn.disabled&&
+            uiEquals(btn.getAttribute('aria-label')||btn.innerText||
+                btn.textContent||'','Search'));
+        if(candidates.length!==1)
+            throw Error('Vector PPE has no unique Search button; lookup stopped without submitting an inspection.');
+        candidates[0].click(); // Native PPE FILTER only, never an inspection.
+    }
     async function scanPpeOwnerSearch(owner, progress = null) {
         const ownerName = clean(owner?.name);
         const ownerKey = masterNameKey(ownerName);
@@ -10418,6 +10453,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 const before = visibleAssetLinksSignature();
                 const priorTerm = clean(search.value);
                 nativeSetInput(search, term);
+                submitNativePpeSearch(search);
                 // The form changes immediately, but Vector may fetch/render the
                 // new results considerably later. Wait for an actual transition
                 // or an explicit, settled no-results state.
@@ -10428,7 +10464,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     await sleep(200);
                     if (clean(search.value) !== clean(term)) continue;
                     const snap = ppeLoadedRowsSnapshot();
-                    const emptyState = hasExplicitNoResults() && !snap.ready &&
+                    const emptyState = !snap.ready &&
+                        ppeNativeSearchConfirmedEmpty()&&
                         Date.now() - started >= 2200;
                     const changed = before !== visibleAssetLinksSignature();
                     const unchangedQuery = priorTerm === clean(term);
