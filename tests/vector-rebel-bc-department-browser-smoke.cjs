@@ -142,7 +142,7 @@ __FEATURE__
 showBcDepartmentCheck();
 await new Promise(r=>setTimeout(r,90));
 const overlay=document.querySelector('.test-overlay');
-const table=overlay.querySelector('table');
+const table=overlay.querySelector('table[data-bc-department-grid]');
 const summary=overlay.querySelector('[role=status]');
 const names=[...table.querySelectorAll('tr')].map(x=>x.textContent);
 let result={};

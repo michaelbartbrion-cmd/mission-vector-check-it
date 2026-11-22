@@ -17694,6 +17694,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         tableWrap.style.cssText='overflow-y:auto;overflow-x:auto;max-height:70vh;'+
             'border:1px solid #c7dce6;border-radius:9px;';
         const table=document.createElement('table');
+        table.setAttribute('data-bc-department-grid','');
         table.style.cssText='width:100%;min-width:0;table-layout:fixed;'+
             'border-collapse:collapse;font:10px Arial;color:#173e56;';
         tableWrap.appendChild(table);
@@ -17730,7 +17731,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             'font:11px/1.4 Arial;color:#173d56;';
         personTableWrap.appendChild(personTable);
         personPanel.append(personHeader,personDescription,personClose,personTableWrap);
-        box.append(heading,note,source,actions,legend,tableWrap,personPanel,details);
+        box.append(heading,note,source,actions,legend,personPanel,tableWrap,details);
         let schedule=null,pilot=null,department=null,report=null,rows=[],reviewing=false;
         const historyBoards=new Map();
         const departmentTourBoards=new Map();
