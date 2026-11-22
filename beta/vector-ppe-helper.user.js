@@ -5624,22 +5624,75 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
     }
 
     async function readModeCompletionHistory(item, modeKey) {
-        const mode = getMode(modeKey);
-        if (!mode) throw new Error(`${modeKey}: inspection mode is unavailable.`);
-        const settled = await waitForItemLogSnapshotSettled(item, mode.title, 9000, 3);
-        if (!settled) throw new Error(`${item.assetId}: ${mode.short} Item Log did not become readable and stable.`);
-        const source = itemLogCompletedRowSource(item, mode.title);
-        if (!source) throw new Error(`${item.assetId}: ${mode.short} Item Log history could not be read.`);
-        const dates = historyEntriesFromSource(source);
-        const verdicts=nativeCompletedVerdictsFromSource(source);
-        return {
-            title: mode.title,
-            short: mode.short,
-            parserPath: source.parserPath,
-            dates,
-            latestDate: dates[0] || '',
-            verdicts,
-            completedRowCount: source.rows.length
+        const mode=getMode(modeKey);
+        if(!mode)throw new Error(`${modeKey}: inspection mode is unavailable.`);
+        const seen=new Set(),dateSet=new Set(),verdicts={};
+        const parserPaths=new Set();
+        let pages=0,completedRowCount=0,exhaustive=false;
+        // Native Vector Item Logs may paginate after ten inspections.
+        // Reading only the visible page is not a complete two-month audit.
+        const pageFingerprint=()=>{
+            const table=findItemLogHistoryTable();
+            const rows=table?historyRows(table):
+                (itemLogCompletedRowSource(item,mode.title)?.rows||[]);
+            return diagnosticTextHash(rows.map(itemLogRowText).join(' | '));
+        };
+        for(let page=0;page<30;page++){
+            if(!isAssetPageFor(item)||!assetPageContainsExpectedId(item))
+                throw new Error(item.assetId+': native Item Log left its verified asset.');
+            const settled=await waitForItemLogSnapshotSettled(item,mode.title,9000,3);
+            if(!settled)throw new Error(item.assetId+': '+mode.short+
+                ' Item Log did not become readable and stable.');
+            const source=itemLogCompletedRowSource(item,mode.title);
+            if(!source)throw new Error(item.assetId+': '+mode.short+
+                ' Item Log history could not be read.');
+            const fingerprint=pageFingerprint();
+            if(seen.has(fingerprint))
+                throw new Error(item.assetId+': native Item Log pagination repeated a page.');
+            seen.add(fingerprint);pages++;
+            parserPaths.add(source.parserPath);
+            for(const date of historyEntriesFromSource(source))dateSet.add(date);
+            for(const [date,result] of Object.entries(
+                nativeCompletedVerdictsFromSource(source))){
+                const prior=verdicts[date];
+                // Multiple same-day native rows can represent different
+                // inspections. An unknown outcome cannot certify that ALL
+                // same-day rows passed; explicit failure always wins.
+                verdicts[date]=prior==='failed'||result==='failed'?'failed':
+                    prior==='unknown'||result==='unknown'?'unknown':result;
+            }
+            completedRowCount+=source.rows.length;
+            const next=typeof getPaginationControl==='function'?
+                getPaginationControl('next'):null;
+            if(!next||!paginationControlEnabled(next)){
+                // A full page without a visible Next control may hide more
+                // history. Preserve dates, but don't certify exhaustive.
+                const table=findItemLogHistoryTable();
+                const fullRows=table?historyRows(table):source.rows;
+                exhaustive=!!next||fullRows.length<10;
+                break;
+            }
+            next.click(); // ONLY read-only Item Log pagination; never a form.
+            let changed=false;
+            const began=Date.now();
+            while(Date.now()-began<12000){
+                if(!isAssetPageFor(item)||!assetPageContainsExpectedId(item))
+                    throw new Error(item.assetId+': Vector changed native asset during history paging.');
+                const refreshed=pageFingerprint();
+                if(refreshed&&refreshed!==fingerprint){changed=true;break;}
+                await sleep(200);
+            }
+            if(!changed)throw new Error(item.assetId+
+                ': Item Log Next did not change the rendered native page.');
+        }
+        if(pages>=30)throw new Error(item.assetId+
+            ': native Item Log exceeds 30 pages; history incomplete.');
+        const dates=[...dateSet].sort((a,b)=>b.localeCompare(a));
+        return{
+            title:mode.title,short:mode.short,
+            parserPath:[...parserPaths].join(','),
+            dates,latestDate:dates[0]||'',verdicts,
+            completedRowCount,pages,exhaustive
         };
     }
 
