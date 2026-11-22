@@ -83,5 +83,5 @@ test('the Assets button opens a compact in-page review drawer while Daily Tour s
   assert.match(src,/position:fixed;top:188px;left:16px/);
   assert.doesNotMatch(src,/position:fixed;inset:0/);
   assert.doesNotMatch(src,/Daily Tour \+ Assets|readAssetFollowup/);
-  assert.match(src,/^\/\/ @version\s+0\.1\.21/m);
+  assert.match(src,/^\/\/ @version\s+0\.1\.22/m);
 });
