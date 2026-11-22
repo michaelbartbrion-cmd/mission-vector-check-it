@@ -106,8 +106,9 @@ test('existing saved report is rebuilt locally on open, not re-scanned',()=>{
  assert.match(render,/captainRebuildStoredDailyReport\(report\)/);
  assert.match(render,/saveJSON\(CAPTAIN_DAILY_REPORT_KEY,report\)/);
  assert.match(render,/SWING '\+escapeHtml\(swingDates\.join/);
- assert.doesNotMatch(render,/startCaptainDailyCheck\(/,
-  'migration does not launch a new native equipment scan');
+ assert.doesNotMatch(render.slice(0,render.indexOf('const rerunV4')),
+   /startCaptainDailyCheck\(/,
+   'saved report migration does not launch a new native equipment scan');
 });
 test('read-only Scout query and evidence counts exclude temporary swing historical dates',()=>{
  const read=part('    async function captainReadCommandAttendance(',

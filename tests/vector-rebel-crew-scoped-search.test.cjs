@@ -143,7 +143,11 @@ test('actual Captain report keeps valid native green receipts but marks unresolv
   });
   assert.equal(result.ownerCount,2);
   assert.equal(result.owners[0].tourCheckOk,true);
-  assert.equal(result.owners[0].tourPassedCount,1);
+  assert.equal(result.owners[0].tourCompletedCount,1);
+  assert.equal(result.owners[0].tourPassedCount,0,
+    'a native completion date without answers is not a proven PASS');
+  assert.equal(result.owners[0].tourResultUnknownCount,1);
+  assert.equal(result.owners[0].compliant,false);
   assert.equal(result.owners[1].gearCount,0);
   assert.equal(result.owners[1].compliant,false);
   assert.equal(result.owners[1].allReadable,false);

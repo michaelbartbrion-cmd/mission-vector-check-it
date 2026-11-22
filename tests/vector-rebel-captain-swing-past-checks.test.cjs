@@ -134,11 +134,11 @@ test('renderer prioritizes completed native evidence then OFF*, else due X, else
  const ui=part('    function showCaptainDailyReport(',
   '    function showCaptainDailySetPicker(');
  assert.match(ui,/const ok=item\.status==='ok' && tour\.ok===true && !!tour\.date/);
- assert.match(ui,/mark\.textContent=ok\?'✓':off\?/);
+ assert.match(ui,/mark\.textContent=completedFailed\?'⚠':ok\?'✓':off\?/);
  assert.match(ui,/const notAssigned=tour\.notAssigned===true/);
  assert.match(ui,/const otherShiftDetail=notAssigned\?/);
  assert.match(ui,/DIFFERENT SHIFT \/ other captain/);
- assert.doesNotMatch(ui,/mark\.textContent=ok\?'✓':off\?[\s\S]{0,90}notAssigned\?'OFF'/);
+ assert.doesNotMatch(ui,/mark\.textContent=completedFailed\?'⚠':ok\?'✓':off\?[\s\S]{0,90}notAssigned\?'OFF'/);
 });
 test('swings are included in the same read-only native PPE inventory scan',()=>{
  const start=source.indexOf('    async function startCaptainDailyCheck(');

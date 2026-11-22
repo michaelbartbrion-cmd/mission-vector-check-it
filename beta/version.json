@@ -1,14 +1,14 @@
 {
-    "schemaVersion":  1,
-    "project":  "Mission Vector Check It",
-    "channel":  "beta",
-    "latestVersion":  "3.2.85",
-    "minimumSupportedVersion":  "2.3.1",
-    "status":  "current",
-    "message":  "Vector Rebel 3.2.85: Simple Captain full-gear status and BC shift summary using shared background verification receipts.",
-    "releaseNotes":  "C-shift Master now has two simple report entrypoints: Daily Captain Check lists every known PPE item per firefighter with source-labeled native inspection status, and BC Check shows one summary row per firefighter. Both read the existing Rebel Command ledger on opening and do not automatically repeat a full all-item Vector history scan. Both expose a single Check outstanding action and a small collapsed Setup/troubleshooting section; historic Captain two-month reports are preserved through an optional archived view, with rebuild only by explicit selection. Correct staffing editor is collapsed. A dedicated authorized signed-in Vector tab may be armed once for rotating background rechecks across future C tours while that browser tab stays open; outside C tours it waits without scanning. Pending does not mean missed, and no CrewSense writes or official inspections occur automatically.",
-    "installUrl":  "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js",
-    "legacyUpdateUrl":  "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
-    "repoUrl":  "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
-    "publishedAt":  "2026-11-17"
+  "schemaVersion": 1,
+  "project": "Mission Vector Check It",
+  "channel": "beta",
+  "latestVersion": "3.2.92",
+  "minimumSupportedVersion": "2.3.1",
+  "status": "current",
+  "message": "Vector Rebel 3.2.92: BC Check fits both full months on one desktop screen.",
+  "releaseNotes": "BC Check now uses the available desktop window width and a compact 10-tour layout across the entire previous/current month. Personnel and unit columns are kept visible, with short dated headings; full PPE statuses, inspection evidence, and read-only provenance remain available by hovering over each compact cell. No change to native inspection submissions, CrewSense edits, background collector or Captain item reports. 3.2.91 functional fixes are retained.",
+  "installUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-rebel.user.js",
+  "legacyUpdateUrl": "https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/vector-ppe-helper.user.js",
+  "repoUrl": "https://github.com/michaelbartbrion-cmd/mission-vector-check-it",
+  "publishedAt": "2026-11-21"
 }

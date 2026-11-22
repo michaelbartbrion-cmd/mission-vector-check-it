@@ -51,3 +51,43 @@ test('notification text is independent from existing portable backup storage', (
   assert.match(script,/RESTORE FULL VECTOR REBEL BACKUP/);
   assert.doesNotMatch(recoverySource,/GM_deleteValue|localStorage\.removeItem|persistentRemoveRaw/);
 });
+
+test('Master Check for Update gives immediate, visible result for current, newer, and failed server checks', async()=>{
+  const source=between('    let lastManualUpdateCheck=null;',
+    '    function refreshInterfaceNotice(){');
+  assert.match(script,/make\('Check for Update',\(\)=>\{void checkManagedInterfaceRelease\(\{manual:true\}\);\}\)/);
+  const messages=[],network=[],calls=[];
+  const api=new Function('GM_xmlhttpRequest','MANAGED_UPDATE_URL','VERSION',
+    'compareReleaseVersions','refreshInterfaceNotice','setStatus',
+    'let availableRelease="",releaseCheckError="";\n'+source+
+    '\nreturn {checkManagedInterfaceRelease,get:()=>({availableRelease,releaseCheckError,lastManualUpdateCheck})};')(
+      req=>{network.push(req);const call=calls.shift();if(call.kind==='timeout')req.ontimeout();
+        else req.onload({status:call.code,responseText:call.body});},
+      URL,'3.2.92',
+      (a,b)=>{const x=a.split('.').map(Number),y=b.split('.').map(Number);
+        for(let i=0;i<3;i++){if(x[i]!==y[i])return x[i]>y[i]?1:-1;}return 0;},
+      ()=>{},(msg)=>messages.push(msg)
+    );
+  calls.push({code:200,body:'// ==UserScript==\n// @version      3.2.92\n// ==/UserScript=='});
+  assert.equal(await api.checkManagedInterfaceRelease({manual:true}),true);
+  assert.ok(messages.some(x=>x.includes('No newer release is available')));
+  assert.equal(api.get().lastManualUpdateCheck.published,'3.2.92');
+  calls.push({code:200,body:'// @version      3.2.93'});
+  assert.equal(await api.checkManagedInterfaceRelease({manual:true}),true);
+  assert.equal(api.get().availableRelease,'3.2.93');
+  assert.ok(messages.some(x=>x.includes('Select Install Update below')));
+  calls.push({kind:'timeout'});
+  assert.equal(await api.checkManagedInterfaceRelease({manual:true}),false);
+  assert.ok(messages.some(x=>x.includes('Update check failed')));
+  assert.equal(network.length,3);
+});
+test('review all and Captain cancellation use a defined async wait helper',async()=>{
+  const m=script.match(/^    function wait\(ms\)\{return new Promise\(resolve=>setTimeout\(resolve,Math\.max\(0,Number\(ms\)\|\|0\)\)\);\}$/m);
+  assert.ok(m,'there must be one shared real async wait helper');
+  const wait=new Function('setTimeout',m[0]+'\nreturn wait;')(setTimeout);
+  let elapsed=false;
+  await wait(0).then(()=>{elapsed=true;});
+  assert.equal(elapsed,true);
+  assert.match(script,/if\(i<pending\.length-1\)await wait\(120\)/);
+  assert.match(script,/while \(captainDailyBusy && Date\.now\(\) < deadline\) await wait\(100\)/);
+});

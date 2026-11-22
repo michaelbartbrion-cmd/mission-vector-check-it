@@ -23,7 +23,9 @@ function renderMock({master=false,owner=false}={}){
  const run=new Function('document','PANEL_ID','panelInterfaceMode',
   'isMasterOwnerInstallation','refreshMasterAlertBadge','refreshInterfaceNotice','calls',
   'const showPpeCleanRepairForm=()=>{},launchCaptainDailyCheckFromAnywhere=()=>calls.push(\'full\'),'+
+  'getCaptainDailyReport=()=>null,showCaptainDailyReport=()=>calls.push(\'cached\'),'+
   'cPilotEligible=()=>true,showCShiftPilotBoard=(b,m)=>calls.push([\'quick\',b,m||\'bc\']),'+
+  'showBcDepartmentCheck=()=>calls.push([\'department-bc\']),'+
   'showSharedMasterList=()=>{},showStation4ScbaAirpackCheck=()=>{},'+
   'showApparatusCheck=()=>{},showMasterErrorInbox=()=>{},'+
   'showProblemReport=()=>{},showSettings=()=>{},checkManagedInterfaceRelease=()=>{};\n'+
@@ -56,12 +58,13 @@ test('Master Interface keeps user actions and exposes additional owner tools',()
  assert.equal(v.mode,'MASTER INTERFACE');
  assert.equal(v.switch.textContent,'Preview User Interface');
 });
-test('Master has a dedicated BC Check and Captain defaults to a one-person rotating check, not full audit',()=>{
+test('Master BC Check remains distinct from original Daily Captain Check',()=>{
  const master=renderMock({master:true,owner:true});
  const click=(v,label)=>v.buttons.find(x=>x.textContent===label).onclick();
  click(master,'BC Check');
  click(master,'Daily Captain Check');
- assert.deepEqual(master.calls,[['quick',true,'bc'],['quick',true,'captain']]);
+ assert.deepEqual(master.calls,[['department-bc'],'full'],
+  'Daily Captain Check must never open the unpopulated pilot instead of native history');
  const user=renderMock({master:false,owner:false});
  click(user,'Daily Captain Check');
  assert.deepEqual(user.calls,['full'],'other user workflow is not silently changed');
@@ -141,7 +144,7 @@ test('master inbox remains owner-only, shows new server errors without mutating 
  assert.doesNotMatch(inbox,/deleteSuggestion|updateSuggestion|bulkCreate\(/);
 });
 test('release check uses official managed URL; silent code hot swap not allowed',()=>{
- const chk=part('    async function checkManagedInterfaceRelease(){',
+ const chk=part('    let lastManualUpdateCheck=null;',
   '    async function refreshMasterErrorInbox(');
  assert.match(chk,/MANAGED_UPDATE_URL/);
  assert.match(chk,/availableRelease/);
@@ -170,7 +173,7 @@ test('minimized owner panel surfaces received errors without overriding active r
  const active=section.indexOf("if (run?.items?.length");
  const alert=section.indexOf('if(isMasterOwnerInstallation() && errorInbox.count>0)');
  assert.ok(stop>=0&&active>stop&&alert>active);
- assert.match(section,/new error reports/);
+ assert.match(section,/new diagnostic error reports/);
 });
 
 test('midnight checks run once per local date, and repeat on the next date only',async()=>{

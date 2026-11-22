@@ -1,4 +1,4 @@
-﻿
+
 'use strict';
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {spawnSync}=require('node:child_process'),assert=require('node:assert/strict');
@@ -63,6 +63,8 @@ const cShiftMasterOwner=()=>true,
  clean=x=>String(x||'').trim(),
  loadJSON=(key,fallback)=>STORE.has(key)?STORE.get(key):fallback,
  saveJSON=(key,value)=>STORE.set(key,structuredClone(value)),
+ persistentGetRaw=key=>STORE.get(key)||null,
+ persistentSetRaw=(key,value)=>STORE.set(key,String(value)),
  getActiveMasterRoster=()=>FIXTURE.people.map(p=>({name:p.name,prefix:p.prefix,active:true})),
  rebelCommandPaired=()=>true,ensureRebelCommandEnrollment=async()=>true,
  rebelCommandPairing=()=>({token:'TEST',deviceId:'DEVICE'}),
@@ -256,6 +258,25 @@ const cShiftMasterOwner=()=>true,
     throw Error('BC summary displayed off-duty firefighters');
   if([...master.querySelectorAll('button')].filter(b=>b.parentElement?.parentElement===master.querySelector('section')).length>4)
     throw Error('Too many primary buttons in battalion view');
+  // Reproduce actual Nov 21: confirmed working roster, zero PPE Item
+  // Log rows from the collector. The BC screen must say UNCOLLECTED,
+  // not falsely imply no outstanding checks.
+  FIXTURE.totals.knownItems=0;
+  FIXTURE.totals.verifiedItems=0;
+  FIXTURE.totals.outstandingItems=0;
+  FIXTURE.outstandingOnDuty=0;
+  for(const row of FIXTURE.people){
+    row.knownItems=0;row.verifiedItems=0;row.outstandingItems=0;
+    row.gear=[];row.nextItem='';
+  }
+  showCShiftPilotBoard(true);
+  await new Promise(r=>setTimeout(r,120));
+  const uncollected=[...document.querySelectorAll('.pilot-overlay')].at(-1);
+  const status=uncollected.querySelector('[role=status]')?.textContent||'';
+  if(!status.includes('PPE inspection records NOT COLLECTED')||
+     !status.includes('UNKNOWN, not an all-clear')||
+     !status.includes('original detailed native history'))
+    throw Error('Empty Nov 21 inventory misleadingly rendered as zero missing checks: '+status);
   // No captain-confirmed workers is not "all clear" or seven misleading
   // BC equipment rows. The empty state must explicitly request staffing.
   for(const row of FIXTURE.people){

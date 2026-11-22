@@ -18,6 +18,6 @@ for(const raw of ['Jared Weston - H Holiday Pay [99] 07:00 - 07:00 24 hrs',
  });
 }
 test('Source version identifies corrected holiday parser',()=>{
- assert.match(src,/const VERSION='1\.1\.50'/);
+ assert.match(src,/const VERSION='1\.1\.53'/);
  assert.match(src,/range-sync-plan&sourceVersion=/);
 });

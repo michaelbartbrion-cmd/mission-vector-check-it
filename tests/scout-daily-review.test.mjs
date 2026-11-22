@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 
 const script=readFileSync(new URL('../beta/rebel-scout.user.js',import.meta.url),'utf8');
 test('daily background watch requests bounded review instead of 30-minute current-day polling',()=>{
-  assert.match(script, /@version\s+1\.1\.52/);
+  assert.match(script, /@version\s+1\.1\.53/);
   assert.match(script, /SHIFT_WATCH_INTERVAL_MS=24\*60\*60\*1000/);
   assert.match(script, /await startSync\('daily-review'\)/);
   assert.match(script, /mode==='daily-review'\?'&mode=daily-review'/);
