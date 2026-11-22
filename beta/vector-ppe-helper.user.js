@@ -18942,7 +18942,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     turn=Number(sessionStorage.getItem(turnKey)||0)||0;
                     sessionStorage.setItem(turnKey,String((turn+1)%1000000));
                 }catch{}
-                if(turn%2===0&&typeof departmentAutoOnePass==='function'){
+                if(turn%3!==2&&typeof departmentAutoOnePass==='function'){
                     try{
                         const result=await departmentAutoOnePass();
                         if(result==='started')return; // Native Item Log navigation.
