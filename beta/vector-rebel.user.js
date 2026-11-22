@@ -17353,6 +17353,44 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         if(!isMasterOwnerInstallation()||!rebelCommandPaired()||
            getRun()||getCaptainDailyCheck()||captainDailyBusy)return'none';
         const board=await departmentFetch();
+        // Avoid repeatedly using a fragile Responsible Party autocomplete
+        // for someone whose OWN equipment was already authenticated in a
+        // prior native Item Log. Only reuse exact approved owner/asset paths
+        // from the existing archive. This creates TODAY'S OUTSTANDING
+        // inventory (no native inspection date, no PASS) and the next broker
+        // rotation must still read each real Item Log.
+        if((Number(board.totals?.mappedPeople)||0)===0){
+            const archive=await cPilotBridge('GET',
+                'vr-ppe-department-archive-candidates',null,{date:board.date});
+            if(archive?.scope!=='department-ppe-archive-candidates'||
+               archive?.readOnly!==true||archive?.date!==board.date||
+               !Array.isArray(archive.people))
+                throw Error('Verified prior native PPE inventory source unavailable.');
+            const picked=archive.people.find(p=>
+                !C_PILOT_NAMES.has(masterNameKey(p.personName))&&
+                Number(p.knownHistoryItems)>0&&
+                (board.people||[]).some(x=>x.prefix===p.personPrefix&&
+                    masterNameKey(x.name)===masterNameKey(p.personName)&&
+                    Number(x.knownItems)===0));
+            if(picked){
+                const reused=await cPilotBridge('POST',
+                    'vr-ppe-department-archive-reuse',{
+                        workDate:board.date,personPrefix:picked.personPrefix,
+                        personName:picked.personName,
+                        source:'prior_authenticated_native_item_log_readonly',
+                        inspectionSubmitted:false
+                    });
+                if(reused?.scope!=='department-ppe-archive-reuse'||
+                   reused.readOnly!==true||
+                   reused.inspectionSubmitted!==false)
+                    throw Error('Prior native PPE inventory reuse receipt unverified.');
+                if(Number(reused.added)>0){
+                    setStatus('Background PPE: reused authenticated gear links for '+
+                        picked.personName+'. Today’s Item Log checks still pending.');
+                    return'mapped';
+                }
+            }
+        }
         const target=departmentNextCandidate(board);
         if(!target)return'none';
         departmentMarkAttempt(board.date,target.prefix);

@@ -7,7 +7,7 @@ const b=source.indexOf('    async function startCShiftPilotNativeRecheck(',a);
 assert.ok(a>0&&b>a);
 const feature=source.slice(a,b);
 function harness(board){
- const queue=[],state=new Map(),out={mapped:[],nav:[],saved:[],queries:[],errors:[],scans:0,fallback:[],clears:0,opens:0,lookupPosts:[]};
+ const queue=[],state=new Map(),out={mapped:[],nav:[],saved:[],queries:[],errors:[],scans:0,fallback:[],clears:0,opens:0,lookupPosts:[],reusePosts:[]};
  const r={...board};let filterOpen=!r.clearInitiallyHidden;
  const localStore={
   getItem:k=>state.get(k)||null,
@@ -15,7 +15,8 @@ function harness(board){
   removeItem:k=>state.delete(k)
  };
  const approved=[{name:'Aaron No Gear',prefix:'AARON'},
-  {name:'Austin Fox',prefix:'FOX'},{name:'Michael Brion',prefix:'BRION'}];
+  {name:'Austin Fox',prefix:'FOX'},{name:'Michael Brion',prefix:'BRION'},
+  {name:'Mark Byrd',prefix:'BYRD'}];
  const context={
   Date,Math,JSON,URL,URLSearchParams,
   sessionStorage:localStore,
@@ -29,7 +30,15 @@ function harness(board){
      assert.equal(method,'POST');out.lookupPosts.push(data);
      return{ok:true,scope:'department-ppe-lookup-status',readOnly:true};
    }
-   assert.equal(action,'vr-ppe-department');
+   if(action==='vr-ppe-department-archive-candidates')return{
+     scope:'department-ppe-archive-candidates',readOnly:true,
+     date:r.date,people:r.archiveCandidates||[]};
+    if(action==='vr-ppe-department-archive-reuse'){
+     assert.equal(method,'POST');out.reusePosts.push(data);
+     return{scope:'department-ppe-archive-reuse',readOnly:true,
+      added:r.archiveReuseAdded??12,inspectionSubmitted:false};
+    }
+    assert.equal(action,'vr-ppe-department');
    assert.equal(query.date,r.date);
    return r;
   },
@@ -248,6 +257,31 @@ test('missing native Clear Filters fails closed without a false PPE check',async
  assert.equal(h.queue.length,0);
  assert.equal(h.out.nav.length,0);
 });
+test('previously authenticated native PPE history only seeds OUTSTANDING gear for a scheduled owner',async()=>{
+ const h=harness({...unmapped,people:[{
+  name:'Mark Byrd',prefix:'BYRD',sourceStatus:'scheduled_unconfirmed',
+  attendanceConfirmed:false,knownItems:0,outstandingItems:0,nextItem:null
+ }],archiveCandidates:[{
+  personName:'Mark Byrd',personPrefix:'BYRD',knownHistoryItems:12
+ }]});
+ assert.equal(await h.context.departmentAutoOnePass(),'mapped');
+ assert.equal(h.out.reusePosts.length,1);
+ assert.equal(h.out.reusePosts[0].personName,'Mark Byrd');
+ assert.equal(h.out.reusePosts[0].inspectionSubmitted,false);
+ assert.equal(h.out.reusePosts[0].source,'prior_authenticated_native_item_log_readonly');
+ assert.equal(h.out.scans,0);
+ assert.equal(h.out.nav.length,0);
+ assert.equal(h.queue.length,0);
+});
+test('archived native assets not on today roster cannot be reused',async()=>{
+ const h=harness({...unmapped,archiveCandidates:[{
+  personName:'Mark Byrd',personPrefix:'BYRD',knownHistoryItems:12
+ }]});
+ assert.equal(await h.context.departmentAutoOnePass(),'mapped');
+ assert.equal(h.out.reusePosts.length,0);
+ assert.equal(h.out.scans,1);
+});
+
 test('unexpected source or wrong native link still stops the burst safely',async()=>{
  const h=harness({...unmapped,people:[{...unmapped.people[0],
   knownItems:1,outstandingItems:1,nextItem:{
