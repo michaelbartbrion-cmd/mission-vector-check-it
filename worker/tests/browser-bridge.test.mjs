@@ -72,6 +72,47 @@ test('Scout on an ordinary CrewSense tab does not use enterprise loopback',()=>{
  assert.equal(callbacks.length,0);
  assert.equal(t.calls.length,0);
 });
+test('tagged dedicated PPE startup cleans the broken Vector Equipment query in the SAME tab',()=>{
+ const tab=storage(),redirects=[],callbacks=[];
+ const location={search:'?mvci_worker=ppe',pathname:'/main/asset-manager',
+  origin:'https://checkitapp.targetsolutions.com',
+  replace:url=>redirects.push(url)};
+ vm.runInNewContext(ppeScript,{
+  sessionStorage:tab,location,URLSearchParams,Date,Math,JSON,
+  TAB_ID:'ppe-tagged-boot',
+  setTimeout:f=>callbacks.push(f),setInterval:f=>callbacks.push(f)
+ });
+ assert.equal(tab.getItem('mvciEnterpriseDedicatedRoleV1'),'ppe');
+ assert.deepEqual(redirects,['https://checkitapp.targetsolutions.com/main/asset-manager']);
+ assert.equal(callbacks.length,0,'the broken page must not claim a lease');
+});
+test('same-tab clean Vector Equipment URL retains the dedicated PPE collector without a second redirect',()=>{
+ const tab=storage(),callbacks=[],intervals=[];
+ tab.setItem('mvciEnterpriseDedicatedRoleV1','ppe');
+ vm.runInNewContext(ppeScript,{
+  sessionStorage:tab,
+  location:{search:'',pathname:'/main/asset-manager',origin:'https://checkitapp.targetsolutions.com',
+   replace:()=>assert.fail('clean page should not redirect again')},
+  URLSearchParams,Date,Math,JSON,TAB_ID:'ppe-clean-boot',
+  setTimeout:f=>callbacks.push(f),setInterval:f=>intervals.push(f)
+ });
+ assert.equal(callbacks.length,1);
+ assert.equal(intervals.length,1);
+});
+test('tagged native Item Log route is not redirected or counted as an inspection',()=>{
+ const tab=storage(),callbacks=[];
+ vm.runInNewContext(ppeScript,{
+  sessionStorage:tab,location:{search:'?mvci_worker=ppe',
+   pathname:'/app/equipment/PPE/pool/300045/111/item',
+   origin:'https://checkitapp.targetsolutions.com',
+   replace:()=>assert.fail('native Item Log must not be redirected')},
+  URLSearchParams,Date,Math,JSON,TAB_ID:'ppe-item-route',
+  setTimeout:f=>callbacks.push(f),setInterval:()=>{}
+ });
+ assert.equal(tab.getItem('mvciEnterpriseDedicatedRoleV1'),'ppe');
+ assert.equal(callbacks.length,1);
+});
+
 test('PPE bridge protects an active Captain check and completes only after native read results',async()=>{
  const t=transport(),tab=storage(),callbacks=[],intervals=[];
  let captainBusy=true,started=0;

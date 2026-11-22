@@ -19352,8 +19352,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             leaseKey='mvciEnterprisePpeLeaseV1',
             resultKey='mvciEnterprisePpeOutcomeV1';
         try{
-            if(new URLSearchParams(location.search).get('mvci_worker')===role)
+            if(new URLSearchParams(location.search).get('mvci_worker')===role){
                 sessionStorage.setItem(key,role);
+                // The live Vector SPA rendered a blank page at the tagged
+                // Equipment URL. Preserve this tab's role in sessionStorage,
+                // then open the NORMAL Equipment route in the SAME tab.
+                // Never redirect an active native PPE Item Log route.
+                if(location.pathname==='/main/asset-manager' &&
+                   location.search==='?mvci_worker=ppe'){
+                    location.replace(location.origin+'/main/asset-manager');
+                    return;
+                }
+            }
             if(sessionStorage.getItem(key)!==role)return;
         }catch{return;}
         const tabId=TAB_ID;
