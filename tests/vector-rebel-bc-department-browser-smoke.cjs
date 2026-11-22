@@ -18,8 +18,11 @@ const js=`
 (async()=>{
 const STORE=new Map();
 const clean=x=>String(x||'').trim(),masterNameKey=x=>clean(x).toLowerCase();
+const validDateKey=x=>typeof x==='string'&&x.length===10&&
+ Number.isFinite(Date.parse(x+'T12:00:00Z'))?x:'';
 const C_PILOT_NAMES=new Set(['michael brion','jerry weems','jared weston','michael baldree']);
 const localTodayKey=()=> '2026-11-22';
+const departmentOperationalKey=()=> '2026-11-22';
 const getCaptainPersonOptions=()=>[
  {name:'Michael Brion',prefix:'PERSON-BRION'},
  {name:'Austin Fox',prefix:'PERSON-FOX'},
@@ -119,6 +122,21 @@ const departmentFetchTourHistory=async(starts)=>({
   totals:{mappedPeople:start==='2026-11-21'?1:0,
     nativeReadItems:start==='2026-11-21'?12:0,
     nativeDatedItems:start==='2026-11-21'?3:0}}))});
+const departmentFetchItemHistory=async(starts)=>({
+ scope:'department-ppe-item-history-readonly',readOnly:true,date:'2026-11-22',
+ tours:starts.map(start=>{
+  const observed=['2026-10-04','2026-11-03','2026-11-21'].includes(start)?start:'';
+  const item={assetId:'FOX-COAT-01',assetType:'Bunker Coat',inspectionMode:'tour',
+   recordedDates:observed?[observed]:[],
+   events:observed?[{date:observed,verdict:start==='2026-11-03'?'failed':
+      start==='2026-10-04'?'unknown':'passed'}]:[],
+   readAt:'2026-11-22T16:00:00Z'};
+  return{tourStart:start,people:[{name:'Austin Fox',prefix:'PERSON-FOX',
+    knownItems:1,nativeDatedItems:observed?1:0,
+    explicitFailedItems:start==='2026-11-03'?1:0,items:[item]}],
+    totals:{mappedPeople:1,datedItems:observed?1:0}};
+ })
+});
 const showCShiftPilotBoard=()=>{monitorOpened++};
 __FEATURE__
 showBcDepartmentCheck();
@@ -137,9 +155,9 @@ try{
    throw Error('BC incorrectly included previous-tour overtime');
   const headers=[...table.querySelectorAll('th')].map(x=>x.textContent);
   const picker=overlay.querySelector('select[aria-label="BC history month"]');
-  if(!picker||picker.value!=='current'||
-     !headers.includes('November 2026')||headers.includes('October 2026'))
-    throw Error('BC must open on the readable current month');
+  if(!picker||picker.value!=='both'||
+     !headers.includes('November 2026')||!headers.includes('October 2026'))
+    throw Error('BC must open on current and previous months');
   picker.value='previous';picker.dispatchEvent(new Event('change',{bubbles:true}));
   const previous=[...table.querySelectorAll('th')].map(x=>x.textContent);
   if(!previous.includes('October 2026')||previous.includes('November 2026'))
@@ -154,11 +172,19 @@ try{
  if(!nicole||!nicole.textContent.includes('OFF'))
    throw Error('Trusted two-day CrewSense leave evidence did not show OFF');
  const austin=[...table.querySelectorAll('tr')].find(x=>x.textContent.includes('Austin Fox'));
-  if(!austin||!austin.textContent.includes('DATE 3/12'))
-    throw Error('Native-dated outside C shift history not displayed');
+  if(!austin||!austin.textContent.includes('3 RECORDED'))
+    throw Error('Native outside-C inspection evidence not labeled in plain language');
   const unmapped=[...table.querySelectorAll('tr')].find(x=>x.textContent.includes('Steven Beagle'));
   if(!unmapped||!unmapped.textContent.includes('N/C'))
     throw Error('Uncollected people must remain explicitly unknown');
+  const personButton=austin.querySelector('button[aria-label="View native PPE history for Austin Fox"]');
+  if(!personButton)throw Error('Firefighter name must open individual equipment details');
+  personButton.click();
+  const pane=overlay.querySelector('[aria-label="Firefighter individual PPE Item Log history"]');
+  if(!pane||pane.hidden||!pane.textContent.includes('FOX-COAT-01')||
+     !pane.textContent.includes('10/04')||!pane.textContent.includes('11/21')||
+     !pane.textContent.includes('FAILED'))
+    throw Error('Native inspection history must show per-equipment dates and explicit failure: '+(pane?.textContent||'NO PANE').slice(0,850));
   if(!summary.textContent.includes('Background Item Log search includes C shift')||
       !summary.textContent.includes('scheduled (unconfirmed)')||
       !summary.textContent.includes('Department native search: 0 people with mapped gear, 0 Item Logs actually read, 0 dated')||

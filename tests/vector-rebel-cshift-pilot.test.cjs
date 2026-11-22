@@ -20,7 +20,7 @@ function harness(){
  };
  const api=new Function('isMasterOwnerInstallation','getConfig','clean','loadJSON','saveJSON','getActiveMasterRoster',
  'rebelCommandPaired','ensureRebelCommandEnrollment','rebelCommandPairing','GM_xmlhttpRequest','REBEL_COMMAND_ENDPOINT',
- 'document','makeOverlayBox','makeButton','location',segment+
+ 'document','makeOverlayBox','makeButton','location','validDateKey',segment+
  '\nreturn {queue:cPilotQueueNativeCompletion,pending:cPilotPending,flush:cPilotFlushReceipts,fetch:cPilotFetch,show:showCShiftPilotBoard,queueReadOnly:cPilotQueueReadOnlyResults,nativePath:cPilotNativePath,directTarget:cPilotDirectTarget};')(
  ()=>true,()=>({inspectorName:'Michael Brion'}),
  x=>String(x||'').trim(),
@@ -30,7 +30,8 @@ function harness(){
  bridge,'https://example.test/bridge',
  {querySelector:()=>null},()=>({overlay:{remove(){}},box:{append(){}}}),
  ()=>({onclick:null}),
- {origin:'https://app.vectorcheckit.us',href:'https://app.vectorcheckit.us/main/asset-manager'}
+ {origin:'https://app.vectorcheckit.us',href:'https://app.vectorcheckit.us/main/asset-manager'},
+  x=>typeof x==='string'&&x.length===10&&Number.isFinite(Date.parse(x+'T12:00:00Z'))?x:''
  );
  return{...api,store,events};
 }

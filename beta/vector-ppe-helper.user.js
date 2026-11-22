@@ -17149,7 +17149,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 nativeAssetIdentityVerified:readable,readResult:readable?'ok':'unreadable',
                 readError:readable?'':clean(result?.error||'Native Item Log unreadable').slice(0,160),
                 checkedAt:result?.readAt||now,
-                completedDates:readable?result.tour.dates.slice(0,12):[]});
+                completedDates:readable?
+                    [...new Set(result.tour.dates.filter(validDateKey))].slice(0,100):[],
+                ...(check.departmentRecheck?{
+                    completedVerdicts:readable?Object.fromEntries(
+                        Object.entries(result.tour.verdicts||{})
+                            .filter(([date,status])=>
+                                validDateKey(date)&&
+                                ['passed','failed','unknown'].includes(status)&&
+                                result.tour.dates.includes(date))
+                    ):{}
+                }:{})});
             queued++;
         }
         if(existing.length>200)
@@ -17184,6 +17194,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
            result.readOnly!==true||!Array.isArray(result.tours))
             throw Error('Native two-day PPE history source unavailable.');
         return result;
+    }
+    async function departmentFetchItemHistory(starts,workDate=departmentOperationalKey()){
+        if(!Array.isArray(starts)||!starts.length||starts.length>12)return null;
+        const response=await cPilotBridge('GET','vr-ppe-department-item-history',
+            null,{date:workDate,tours:starts.join(',')});
+        if(response?.scope!=='department-ppe-item-history-readonly'||
+           response.readOnly!==true||response.date!==workDate||
+           !Array.isArray(response.tours))
+            throw Error('Per-item native PPE two-month history unavailable.');
+        return response;
     }
     function departmentAutoAttempts(workDate){
         let state={};try{
@@ -17667,7 +17687,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             const option=document.createElement('option');
             option.value=value;option.textContent=label;monthPicker.appendChild(option);
         }
-        monthPicker.value='current';
+        monthPicker.value='both';
         monthLabel.appendChild(monthPicker);
         actions.append(monthLabel,refresh,review,close);
         const tableWrap=document.createElement('div');
@@ -17691,18 +17711,40 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             'LOG = native history reviewed but no inspection date; GEAR = equipment mapped only. '+
             'DONE/PART = C-shift native history; OFF = absent; N/C = not collected; - = not due. '+
             'Hover over a cell for the full result.';
-        box.append(heading,note,source,actions,legend,tableWrap,details);
+        const personPanel=document.createElement('section');
+        personPanel.hidden=true;
+        personPanel.setAttribute('aria-label','Firefighter individual PPE Item Log history');
+        personPanel.style.cssText='background:#fff;border:2px solid #8eafc5;border-radius:8px;'+
+            'margin:12px 0;padding:12px;font:12px/1.45 Arial;color:#173e56;';
+        const personHeader=document.createElement('h3');
+        personHeader.style.cssText='font:bold 17px Arial;margin:0 0 6px;';
+        const personDescription=document.createElement('p');
+        personDescription.style.cssText='font:12px/1.4 Arial;color:#365974;margin:6px 0 10px;';
+        const personClose=makeButton('Close firefighter details');
+        personClose.onclick=()=>{selectedPerson='';personPanel.hidden=true;};
+        const personTableWrap=document.createElement('div');
+        personTableWrap.style.cssText='max-height:43vh;overflow:auto;border:1px solid #c6dce8;'+
+            'border-radius:6px;margin-top:8px;';
+        const personTable=document.createElement('table');
+        personTable.style.cssText='border-collapse:collapse;min-width:940px;width:100%;'+
+            'font:11px/1.4 Arial;color:#173d56;';
+        personTableWrap.appendChild(personTable);
+        personPanel.append(personHeader,personDescription,personClose,personTableWrap);
+        box.append(heading,note,source,actions,legend,tableWrap,personPanel,details);
         let schedule=null,pilot=null,department=null,report=null,rows=[],reviewing=false;
         const historyBoards=new Map();
         const departmentTourBoards=new Map();
-        const date=localTodayKey();
+        const departmentItemArchiveBoards=new Map();
+        // Use the same 07:00 operational boundary as the existing broker.
+        // Before shift change, do not lose the previous tour's native history.
+        const date=departmentOperationalKey();
         const manualAll=loadJSON(BC_DAILY_ROSTER_KEY,{})||{};
         let manual=manualAll?.date===date?manualAll:null;
         let choices=new Set();
         const windows=captainAuditWindow(date,'C');
         const current=windows.tours.slice();
         const months=windows.months.slice();
-        let historyMode='current';
+        let historyMode='both';
         const displayMonths=()=>historyMode==='both'?months:
             historyMode==='previous'?months.slice(0,1):months.slice(-1);
         const displayTours=()=>current.filter(t=>displayMonths().includes(t.month));
@@ -17711,6 +17753,113 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const stamp=raw=>{
             const t=Date.parse(raw||'');
             return Number.isFinite(t)?new Date(t).toLocaleString():'unavailable';
+        };
+        let selectedPerson='';
+        const renderPersonPanel=()=>{
+            if(!selectedPerson)return;
+            personPanel.hidden=false;
+            personHeader.textContent='Native Vector PPE history: '+selectedPerson;
+            const tours=current.filter(t=>t.startDate<=date);
+            const assetMap=new Map();
+            const addItem=(item,t,fromArchive=false)=>{
+                const id=clean(item.assetId);
+                if(!id)return;
+                const key=id.toUpperCase();
+                let entry=assetMap.get(key);
+                if(!entry){
+                    entry={assetId:id,assetType:clean(item.assetType||item.type||'PPE'),
+                        inspectionMode:item.inspectionMode||'tour',perTour:new Map()};
+                    assetMap.set(key,entry);
+                }
+                const dates=[...new Set((item.recordedDates||item.events?.map(x=>x.date)||
+                    (item.nativeCompletionDate?[item.nativeCompletionDate]:[]))
+                    .filter(validDateKey))].sort();
+                const events=Array.isArray(item.events)?item.events.filter(e=>
+                    dates.includes(e.date)&&['passed','failed','unknown'].includes(e.verdict)):[];
+                const prior=entry.perTour.get(t.startDate);
+                const merged=[...new Set([...(prior?.dates||[]),...dates])].sort();
+                const outcome=events.some(e=>e.verdict==='failed')?'failed':
+                    events.length&&events.every(e=>e.verdict==='passed')?'passed':
+                    prior?.outcome==='failed'?'failed':'unknown';
+                entry.perTour.set(t.startDate,{dates:merged,outcome,
+                    read:!!(prior?.read||item.read||item.readAt||item.lastReadAt),
+                    source:fromArchive?'Native Item Log archive':(prior?.source||'Vector day-specific read')});
+            };
+            for(const tour of tours){
+                const day=departmentTourBoards.get(tour.startDate);
+                const archived=departmentItemArchiveBoards.get(tour.startDate);
+                for(const [board,isArchive] of [[day,false],[archived,true]]){
+                    const p=(board?.people||[]).find(x=>
+                        masterNameKey(x.name)===masterNameKey(selectedPerson));
+                    for(const item of p?.items||[])addItem(item,tour,isArchive);
+                }
+                const cBoard=historyBoards.get(tour.startDate)||
+                    (pilot?.tourStart===tour.startDate?pilot:null);
+                const crew=(cBoard?.people||[]).find(x=>
+                    masterNameKey(x.name)===masterNameKey(selectedPerson));
+                for(const item of [...(crew?.gear||[]),...(crew?.maskGear||[])]){
+                    addItem({...item,assetId:item.assetId||item.id,
+                        recordedDates:item.nativeCompletionDate?[item.nativeCompletionDate]:[],
+                        inspectionMode:(crew?.maskGear||[]).includes(item)?'scbaTour':'tour'},tour,false);
+                }
+            }
+            const items=[...assetMap.values()].sort((a,b)=>
+                a.assetType.localeCompare(b.assetType)||
+                a.assetId.localeCompare(b.assetId));
+            personDescription.textContent=items.length?
+                items.length+' PPE item(s) have some native source evidence in this report. '+
+                'Each tour shows an actual date only when retrieved from a Vector Item Log. '+
+                'A missing date is UNKNOWN, not a missed or failed check. '+
+                'PASS/FAILED appears only where a native result explicitly says so. '+
+                'This inventory may be incomplete for earlier dates.':
+                'NO NATIVE PPE ITEM HISTORY COLLECTED for this firefighter during the requested two months. '+
+                'This does NOT mean they failed or skipped checks. The background collection is incomplete.';
+            personTable.replaceChildren();
+            if(!items.length)return;
+            const head=document.createElement('tr');
+            for(const title of ['PPE ITEM','FORM',...tours.map(t=>
+                t.startDate.slice(5).replace('-','/')+'–'+t.endDate.slice(8))]){
+                const th=document.createElement('th');
+                th.textContent=title;
+                th.style.cssText='position:sticky;top:0;padding:6px;border:1px solid #c0d6e4;'+
+                    'background:#dcecf5;font:bold 10px Arial;white-space:nowrap;';
+                head.appendChild(th);
+            }
+            personTable.appendChild(head);
+            for(const item of items){
+                const row=document.createElement('tr');
+                const cols=[item.assetType+' | '+item.assetId,
+                    item.inspectionMode==='scbaTour'?'SCBA mask':'Tour PPE'];
+                for(const text of cols){
+                    const td=document.createElement('td');
+                    td.textContent=text;
+                    td.style.cssText='padding:6px;border:1px solid #d5e6ee;'+
+                        'font-weight:600;white-space:nowrap;';
+                    row.appendChild(td);
+                }
+                for(const tour of tours){
+                    const evidence=item.perTour.get(tour.startDate);
+                    const dates=evidence?.dates||[];
+                    const td=document.createElement('td');
+                    const prefix=evidence?.outcome==='failed'?'FAILED · ':
+                        evidence?.outcome==='passed'?'PASSED · ':'';
+                    td.textContent=dates.length?prefix+dates.map(d=>
+                        d.slice(5).replace('-','/')).join(', '):
+                        evidence?.read?'NO DATE VERIFIED':'NOT COLLECTED';
+                    td.title=dates.length?
+                        'Authenticated native inspection date(s) '+dates.join(', ')+
+                        '. Explicit result: '+(evidence?.outcome||'unknown')+'.':
+                        'Native Item Log has no confirmed inspection date in this tour. '+
+                        'This does not prove a check was missed.';
+                    td.style.cssText='padding:6px;border:1px solid #d5e6ee;'+
+                        'font:10px Arial;white-space:nowrap;'+
+                        (evidence?.outcome==='failed'?'background:#ffe0df;color:#8b1c17;':
+                            dates.length?'background:#e9f4fb;color:#145171;':
+                                'background:#f6f8fa;color:#606c75;');
+                    row.appendChild(td);
+                }
+                personTable.appendChild(row);
+            }
         };
         const render=()=>{
             report=getCaptainDailyReport();
@@ -17827,24 +17976,31 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             };
             const departmentCell=(name,tour)=>{
                 if(C_PILOT_NAMES.has(masterNameKey(name)))return null;
-                const historical=departmentTourBoards.get(tour.startDate);
-                const board=historical||(department?.date===tour.startDate?department:null);
-                if(!board)return null;
-                const person=(board.people||[]).find(p=>
+                const archived=departmentItemArchiveBoards.get(tour.startDate);
+                const historic=departmentTourBoards.get(tour.startDate);
+                const archivePerson=(archived?.people||[]).find(p=>
                     masterNameKey(p.name)===masterNameKey(name));
+                const legacyBoard=historic||(department?.date===tour.startDate?department:null);
+                const legacyPerson=(legacyBoard?.people||[]).find(p=>
+                    masterNameKey(p.name)===masterNameKey(name));
+                const useArchive=archivePerson?.knownItems>0&&
+                    Number(archivePerson.knownItems)>=Number(legacyPerson?.knownItems||0);
+                const person=useArchive?archivePerson:(legacyPerson||archivePerson);
                 if(!person)return null;
                 const count=Number(person.knownItems)||0;
-                const checked=Number(person.nativeDatedItems)||0;
+                const dated=Number(person.nativeDatedItems)||0;
                 if(!count)return{label:'NOT COLLECTED',tone:'unknown',
-                    detail:'No native Vector PPE inventory mapped yet for this scheduled candidate; work attendance not confirmed.'};
+                    detail:'No authenticated native PPE history collected for this firefighter and tour. This does not establish that an inspection was missed.'};
+                const failures=Number(archivePerson?.explicitFailedItems)||0;
+                if(failures>0)return{label:failures+' FAILED',tone:'failed',
+                    detail:failures+' PPE item(s) have an explicit FAILED outcome in authenticated Vector Item Log history. Open the firefighter for dates and equipment. Other equipment results remain independent.'};
                 const read=Number(person.nativeReadItems)||0;
-                if(!checked&&read>0)return{label:'LOG '+read+'/'+count,tone:'recorded',
-                    detail:'Native Vector Item Logs actually read for '+read+' of '+count+
-                    ' mapped PPE items. NO matching inspection completion date yet; not passed or failed. Attendance not confirmed.'};
-                if(!checked)return{label:'GEAR '+count,tone:'unknown',
-                    detail:count+' PPE assets found in Vector; no native Item Logs read and no inspection completion confirmed. This is NOT a PPE check.'};
-                return{label:'DATE '+checked+'/'+count,tone:'recorded',
-                    detail:checked+' of '+count+' mapped PPE items contain the correct date in authenticated native Item Logs. This is an inspection-date record, NOT physical PASS or proof of a complete inventory. Attendance not confirmed.'};
+                if(!dated&&read>0)return{label:'LOG READ',tone:'unknown',
+                    detail:read+' native Vector PPE Item Logs were read, but no inspection date for this two-day tour was confirmed. This is NOT a failed or missed inspection.'};
+                if(!dated)return{label:'GEAR FOUND',tone:'unknown',
+                    detail:count+' PPE items were mapped, but this is inventory only. No confirmed inspection date for this tour.'};
+                return{label:dated+' RECORDED',tone:'recorded',
+                    detail:dated+' of '+count+' currently mapped PPE items have a native Vector inspection record dated within this two-day tour. This does NOT mean all items passed or that the full historical inventory is proven. Click the firefighter for item-by-item dates.'};
             };
             let lastStation='';
             for(const [index,person] of rows.entries()){
@@ -17930,6 +18086,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         (field.tone?'font-weight:700;text-align:center;':'')+
                         (isHistory?'font-size:9px;':'')+
                         (boundary?'border-top:2px solid #a7c0ce;':'');
+                    if(i===(reviewing?1:0)){
+                        const link=document.createElement('button');
+                        link.textContent=person.name;
+                        link.type='button';
+                        link.setAttribute('aria-label','View native PPE history for '+person.name);
+                        link.title='Open individual PPE items for previous and current month';
+                        link.style.cssText='font:700 10px Arial;color:#14577c;background:none;'+
+                            'border:0;padding:0;text-align:left;text-decoration:underline;cursor:pointer;';
+                        link.onclick=()=>{selectedPerson=person.name;renderPersonPanel();};
+                        td.replaceChildren(link);
+                    }
                     tr.appendChild(td);
                 }
                 table.appendChild(tr);
@@ -17941,6 +18108,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 td.textContent='No trustworthy department-wide staffing list available. Do not infer nobody is working.';
                 tr.appendChild(td);table.appendChild(tr);
             }
+            if(selectedPerson)renderPersonPanel();
         };
         const fetch=async()=>{
             const token=++historyLoadId;
@@ -17951,7 +18119,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     cPilotFetch(true),
                     departmentFetch(date),
                     departmentFetchTourHistory(current.filter(t=>t.startDate<=date)
-                        .map(t=>t.startDate).slice(-12))
+                        .map(t=>t.startDate).slice(-12)),
+                    departmentFetchItemHistory(current.filter(t=>t.startDate<=date)
+                        .map(t=>t.startDate).slice(-12),date)
                 ]);
                 const one=outcomes[0],two=outcomes[1];
                 if(one.status!=='fulfilled'||one.value?.scope!=='bc-department-roster'||
@@ -17971,6 +18141,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     for(const board of four.value.tours||[])
                         if(board?.tourStart&&Array.isArray(board.people))
                             departmentTourBoards.set(board.tourStart,board);
+                }
+                const archiveResult=outcomes[4];
+                if(archiveResult.status==='fulfilled'&&
+                   archiveResult.value?.scope==='department-ppe-item-history-readonly'){
+                    departmentItemArchiveBoards.clear();
+                    for(const tour of archiveResult.value.tours||[])
+                        if(tour?.tourStart&&Array.isArray(tour.people))
+                            departmentItemArchiveBoards.set(tour.tourStart,tour);
                 }
                 if(pilot?.tourStart)
                     historyBoards.set(pilot.tourStart,pilot);
@@ -18998,9 +19176,23 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     }catch(error){
                         // A failed department scan must NOT block the existing
                         // functioning C-shift path or create a false receipt.
-                        if(typeof saveDiagnostic==='function')
-                            saveDiagnostic('Department PPE read-only preview: '+
-                                clean(error?.message||error).slice(0,180));
+                        const problem='Department PPE history collection failed: '+
+                            clean(error?.message||error).slice(0,180);
+                        if(typeof saveDiagnostic==='function')saveDiagnostic(problem);
+                        // Do not silently count a failed outside-C scan as a
+                        // success just because a C-shift fallback can run.
+                        // One diagnostic per hour; no email, CrewSense write,
+                        // or official Vector inspection submission.
+                        const diagKey='mvciDepartmentPpeLastErrorReportV1';
+                        let last=0;try{
+                            last=Number(sessionStorage.getItem(diagKey)||0);
+                        }catch{}
+                        if(Date.now()-last>=60*60000){
+                            try{sessionStorage.setItem(diagKey,String(Date.now()));}catch{}
+                            if(typeof reportRebelErrorToCommand==='function')
+                                void reportRebelErrorToCommand(problem,'bcDepartment',
+                                    'native_background_readonly');
+                        }
                     }
                 }
                 // A fresh tour starts with zero mapped PPE for some confirmed
