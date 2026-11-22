@@ -7,7 +7,7 @@ const b=source.indexOf('    async function startCShiftPilotNativeRecheck(',a);
 assert.ok(a>0&&b>a);
 const feature=source.slice(a,b);
 function harness(board){
- const queue=[],state=new Map(),out={mapped:[],nav:[],saved:[],queries:[],errors:[],scans:0};
+ const queue=[],state=new Map(),out={mapped:[],nav:[],saved:[],queries:[],errors:[],scans:0,fallback:[],clears:0};
  const r={...board};
  const localStore={
   getItem:k=>state.get(k)||null,
@@ -36,11 +36,26 @@ function harness(board){
   getActiveMasterRoster:()=>approved,
   ensurePpeEquipmentPage:async()=>{},
   scanPpeCrewOwners:async(owners)=>{out.scans++;out.mapped.push(owners);
-    if(owners[0]?.name==='Aaron No Gear')
-     return{ownerErrors:[{name:'Aaron No Gear',error:'No confirmed PPE ownership'}],items:[]};
+    if(owners[0]?.name==='Aaron No Gear'||r.failPrimaryFor?.includes(owners[0]?.name))
+     return{ownerErrors:[{name:owners[0]?.name,error:'No PPE assigned to Responsible Party'}],items:[]};
    return{ownerErrors:[],items:[{assetId:'FOX-COAT-01',ownerName:'Austin Fox',
      type:'Bunker Coat',pool:'300045',url:'https://checkitapp.targetsolutions.com/app/equipment/PPE/pool/300045/111/item'}]};},
-  cPilotNativePath:u=>new URL(u,'https://checkitapp.targetsolutions.com').pathname,
+
+   crewPpeSearchPrefix:owner=>({prefix:owner.name.split(' ').at(-1).toUpperCase()}),
+   document:{querySelectorAll:selector=>selector.startsWith('button')?
+     [{getAttribute:()=>'',innerText:'Clear Filters',click:()=>{out.clears++}}]:[]},
+   visible:()=>true,uiEquals:(a,b)=>a===b,sleep:async()=>{},
+   responsiblePartySelectionLabels:()=>[],
+   scanPpeOwnerSearch:async owner=>{
+     out.fallback.push(owner);
+     if(owner.name==='Aaron No Gear')
+       throw Error('No PPE after exact native Responsible Party verification');
+     return{items:[{assetId:'FOX-COAT-01',
+       ownerName:r.badFallback?'Someone Else':'Austin Fox',
+       type:'Bunker Coat',pool:'300045',
+       url:'https://checkitapp.targetsolutions.com/app/equipment/PPE/pool/300045/111/item'}]};
+   },
+   cPilotNativePath:u=>new URL(u,'https://checkitapp.targetsolutions.com').pathname,
   SCBA_FACE_MASK_POOL:'299947',
   BUILTIN_MODES:{tour:{templates:{'300045':'112411'}}},
   getMode:key=>key==='scbaTour'?{templates:{'299947':'119122'}}:
@@ -130,7 +145,7 @@ test('one missing Vector Responsible Party cannot starve the rest of department'
  ]};
  const h=harness(board);
  await assert.rejects(()=>h.context.departmentAutoOnePass(),
-   /No unique Responsible Party equipment for Aaron No Gear/);
+   /No PPE after exact native Responsible Party verification/);
  assert.equal(h.out.scans,1);
  assert.equal(h.out.mapped[0][0].name,'Aaron No Gear');
  // Worker gets the next nine-minute lease; the failed first person remains
@@ -144,6 +159,22 @@ test('one missing Vector Responsible Party cannot starve the rest of department'
  assert.equal(h.out.nav.length,0);
 });
 
+test('read-only surname fallback may map PPE only with an exact live Responsible Party match',async()=>{
+ const h=harness({...unmapped,failPrimaryFor:['Austin Fox']});
+ assert.equal(await h.context.departmentAutoOnePass(),'mapped');
+ assert.equal(h.out.scans,1);
+ assert.equal(h.out.clears,1);
+ assert.equal(h.out.fallback.length,1);
+ assert.equal(h.out.fallback[0].prefix,'FOX');
+ assert.equal(h.queue[0].kind,'departmentInventory');
+ assert.equal(h.queue[0].personName,'Austin Fox');
+ assert.equal(h.out.nav.length,0);
+ const bad=harness({...unmapped,failPrimaryFor:['Austin Fox'],badFallback:true});
+ await assert.rejects(()=>bad.context.departmentAutoOnePass(),
+   /No exactly assigned native PPE after both lookup methods/);
+ assert.equal(bad.queue.length,0);
+ assert.equal(bad.out.nav.length,0);
+});
 test('per-person read attempts are throttled without marking any PASS',async()=>{
  const h=harness(unmapped);
  assert.equal(await h.context.departmentAutoOnePass(),'mapped');

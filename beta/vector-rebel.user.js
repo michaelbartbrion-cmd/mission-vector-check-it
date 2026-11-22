@@ -17268,10 +17268,40 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             // No whole-department census: search exactly one approved owner
             // in the browser's existing authenticated PPE equipment UI.
             await ensurePpeEquipmentPage(null,false);
-            const inventory=await scanPpeCrewOwners([{name:owner.name,prefix:owner.prefix}],
+            let inventory=await scanPpeCrewOwners([{name:owner.name,prefix:owner.prefix}],
                 null,{readOnlyAllowUnresolved:true});
-            if((inventory.ownerErrors||[]).length||!inventory.items.length)
-                throw Error('No unique Responsible Party equipment for '+owner.name);
+            if((inventory.ownerErrors||[]).length||!inventory.items.length){
+                const reasons=(inventory.ownerErrors||[]).map(x=>clean(x.error));
+                const isUnresolved=reasons.length===0||
+                    reasons.every(x=>/Responsible Party.+not confirmed as the ONE selected owner|no PPE ownership confirmed|no PPE assigned/i.test(x));
+                if(!isUnresolved)throw Error('Vector owner lookup failed for '+owner.name+
+                    ': '+reasons.join('; ').slice(0,130));
+                // Second, narrower read-only discovery route. PPE Name may be
+                // surname-marked while the Responsible Party autocomplete
+                // fails. Asset IDs are NEVER sufficient ownership evidence:
+                // scanPpeOwnerSearch validates the exact Responsible Party
+                // column on every returned row.
+                const candidate=crewPpeSearchPrefix(owner).prefix;
+                if(!candidate||candidate.startsWith('PERSON-')||
+                   !/^[A-Z0-9._-]{2,60}$/.test(candidate))
+                    throw Error('No safe surname-scoped PPE lookup for '+owner.name);
+                const clear=[...document.querySelectorAll('button,[role="button"]')]
+                    .find(b=>visible(b)&&uiEquals(
+                        b.getAttribute('aria-label')||b.innerText||b.textContent||'',
+                        'Clear Filters'));
+                if(!clear)throw Error('Cannot clear native Responsible Party filter before alternate lookup for '+owner.name);
+                clear.click();
+                await sleep(350);
+                const selected=[...document.querySelectorAll('input[role="combobox"]')]
+                    .find(el=>visible(el)&&/filter-equip-.*-responsibleParty/i.test(el.id));
+                if(selected&&responsiblePartySelectionLabels(selected).length)
+                    throw Error('Previous Responsible Party remains selected; alternate PPE search blocked.');
+                inventory=await scanPpeOwnerSearch({name:owner.name,prefix:candidate});
+                if(!inventory.items.length||
+                   inventory.items.some(i=>masterNameKey(i.ownerName)!==
+                       masterNameKey(owner.name)))
+                    throw Error('No exactly assigned native PPE after both lookup methods for '+owner.name);
+            }
             const gear=inventory.items.filter(item=>
                 masterNameKey(item.ownerName)===masterNameKey(owner.name)).map(item=>{
                     const pool=clean(item.pool);
