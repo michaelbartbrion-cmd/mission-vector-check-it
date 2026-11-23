@@ -84,12 +84,19 @@ test('off-shift arming preserves designation for next tour and performs no nativ
 });
 function mapHarness({automated=true,working=true,mode='user',approve=false,partialMissing=false,skipKnownOwner=false}={}){
  const calls={scans:0,queued:0,confirm:0,scout:0,options:[],snapshots:[],scannedOwnerNames:[]};
+ const tabData=new Map();
+ const sessionStorage={
+  getItem:key=>tabData.get(key)||null,
+  setItem:(key,val)=>tabData.set(key,String(val)),
+  removeItem:key=>tabData.delete(key)
+ };
  const prefix='PERSON-0DCD2AB48E2A5588';
  const board={activeTour:true,historicalEligible:false,historicalTour:false,
   tourStart:'2026-11-21',
   people:[{name:'Michael Brion',prefix,attendance:working?'working':'unconfirmed',knownItems:skipKnownOwner?8:0},
    ...(partialMissing||skipKnownOwner?[{name:'Jerry Weems',prefix:'PERSON-WEEMS',attendance:'working',knownItems:0}]:[])]};
  const deps={
+  sessionStorage,
   isMasterOwnerInstallation:()=>true,panelInterfaceMode:()=>mode,
   setStatus:()=>{},getRun:()=>null,getCaptainDailyCheck:()=>null,
   captainDailyBusy:false,cPilotFetch:async()=>board,
@@ -118,7 +125,7 @@ function mapHarness({automated=true,working=true,mode='user',approve=false,parti
  };
  const keys=Object.keys(deps);
  const map=new Function(...keys,mapSource+'; return cPilotMapWorkingGear;')(...keys.map(k=>deps[k]));
- return{map,calls};
+ return{map,calls,sessionStorage};
 }
 test('previously armed background tab can map confirmed duty gear without a dialog even in User mode',async()=>{
  const h=mapHarness();
@@ -192,6 +199,21 @@ test('background inventory discovery scans only the uncollected working owner an
   assert.deepEqual(h.calls.snapshots[0].map(x=>x.ownerName),['Jerry Weems']);
   assert.equal(h.calls.scans,1);
   assert.equal(h.calls.confirm,0);
+});
+test('one background gear mapping lease scans at most one confirmed-working owner and rotates',async()=>{
+ const h=mapHarness({partialMissing:true});
+ assert.equal(await h.map('2026-11-21',true),true);
+ assert.deepEqual(h.calls.scannedOwnerNames,[['Michael Brion']]);
+ // Next automatic mapping rotates to Weems. Since that owner has no unique
+ // equipment in this test, it must remain UNKNOWN and cannot produce a PASS.
+ assert.equal(await h.map('2026-11-21',true),false);
+ assert.deepEqual(h.calls.scannedOwnerNames,[['Michael Brion'],['Jerry Weems']]);
+ assert.equal(h.calls.confirm,0);
+});
+test('manual full-crew PPE mapping still scans all working people on explicit confirmation',async()=>{
+ const h=mapHarness({partialMissing:true,automated:false,mode:'master',approve:true});
+ assert.equal(await h.map('2026-11-21',false),false);
+ assert.deepEqual(h.calls.scannedOwnerNames,[['Michael Brion','Jerry Weems']]);
 });
 test('dedicated Enterprise PPE SPA navigation retains broker ownership without query flag',async()=>{
   const h=tickHarness({location:{search:''},sessionStorage:{getItem:key=>

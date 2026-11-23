@@ -17200,9 +17200,24 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             // A background map only needs owners with NO item inventory for
             // this confirmed tour. Do not rescan already mapped firefighters.
             // Manual mapping still covers the entire confirmed working crew.
-            const targets=automated?
-                working.filter(row=>Number(row.knownItems)===0||
-                    Number(row.maskKnownItems)===0):working;
+            const missing=working.filter(row=>Number(row.knownItems)===0||
+                Number(row.maskKnownItems)===0);
+            // A full seven-person autocomplete crawl can exceed the native
+            // Enterprise broker's twenty-minute lease. Background mapping
+            // scans ONE confirmed-working owner per lease and rotates, while
+            // an expressly initiated Captain map retains the full crew.
+            // Missing owners remain UNKNOWN, never marked failed or passed.
+            let targets=automated?missing:working;
+            if(automated&&targets.length){
+                const cursorKey='mvciEnterpriseCShiftGearMapCursorV1';
+                let cursor=0;try{
+                    cursor=Number(sessionStorage.getItem(cursorKey)||0)||0;
+                }catch{}
+                const index=Number.isFinite(cursor)&&cursor>=0?cursor:0;
+                targets=[targets[index%targets.length]];
+                try{sessionStorage.setItem(cursorKey,String((index+1)%1000000));}
+                catch{}
+            }
             if(!targets.length)
                 throw Error('All confirmed-working firefighters already have mapped PPE.');
             const owners=targets.map(p=>{
