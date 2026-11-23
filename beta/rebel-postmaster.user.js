@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Postmaster
 // @namespace    mission-vector-check-it-rebel-postmaster
-// @version      1.2.18
+// @version      1.2.19
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @description  Minimal read-only Outlook Web collector for Rebel Command with whole-mailbox indexing and automatic capture of messages the user opens.
@@ -22,7 +22,7 @@
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_POSTMASTER)return;
-const VERSION='rebel-postmaster-1.2.18';
+const VERSION='rebel-postmaster-1.2.19';
 const DEFAULT_ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const MANAGED_UPDATE_URL='https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js';
 function openManagedUpdate(){
@@ -88,9 +88,17 @@ function apiOnce(method,payload=null){
                 if(r.status>=200&&r.status<300&&b?.ok!==false)return resolve(b);
                 const message=clean(b?.error||`HTTP ${r.status}`);
                 const error=new Error(message);
-                // Retry ONLY an explicit rate-limit response. A timeout or
-                // ambiguous network failure might have persisted the batch.
+                // Never retry an ambiguous timeout/network failure or auth
+                // denial. A definitive completed 500 from this bridge can
+                // be retried only for an idempotent Work Email receipt using
+                // the same captureId / folderId and unchanged payload.
                 error.rateLimited=Number(r.status)===429||/rate limit exceeded/i.test(message);
+                error.retryableMailReceipt=Number(r.status)===500&&message==='Telemetry unavailable'&&(
+                    method==='GET'||(method==='POST'&&(
+                        !!payload?.workEmailCapture?.captureId||
+                        !!payload?.workEmailIngestionState?.folderId
+                    ))
+                );
                 reject(error);
             },
             onerror:()=>reject(new Error('Network error')),
@@ -102,9 +110,10 @@ async function api(method,payload=null){
     for(let attempt=0;attempt<4;attempt++){
         try{return await apiOnce(method,payload)}
         catch(error){
-            if(!error.rateLimited||attempt===3)throw error;
-            const delayMs=2000*Math.pow(2,attempt);
-            trace('bridge_rate_limited_backoff',{attempt:attempt+1,delayMs});
+            if((!error.rateLimited&&!error.retryableMailReceipt)||attempt===3)throw error;
+            const delayMs=(error.rateLimited?2000:1500)*Math.pow(2,attempt);
+            trace(error.rateLimited?'bridge_rate_limited_backoff':'bridge_mail_receipt_retry',
+                {attempt:attempt+1,delayMs});
             await wait(delayMs);
         }
     }
@@ -329,7 +338,7 @@ function render(){
     state.last=snapshot();const r=ensureUi();r.replaceChildren();const cs=crawlState(),same=crawlMatchesPage(cs),ms=mailboxState(),mb=mailboxSummary(ms),scopeOk=mailboxMatches(ms),needsVerification=mailboxHasUnverifiedEmpty(ms),retryNeeded=mailboxNeedsRetry(ms);
     if(state.open){
         const p=add(r,'div',null,'p'),h=add(p,'div',null,'h'),title=add(h,'div');add(title,'b','REBEL POSTMASTER');
-        const sub=add(title,'div','v1.2.18 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
+        const sub=add(title,'div','v1.2.19 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
         const close=add(h,'button','','orb header-orb');close.type='button';close.dataset.pmAction='close';close.title='Minimize Rebel Postmaster';close.setAttribute('aria-label','Minimize Rebel Postmaster');close.innerHTML=REBEL_SYMBOL_HTML;
         const b=add(p,'div',null,'b');
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');
