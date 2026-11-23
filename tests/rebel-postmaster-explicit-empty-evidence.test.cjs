@@ -61,5 +61,5 @@ test('older zero-count complete folder without proof is flagged for recheck',()=
  assert.equal(h.check({folders:[{status:'complete',indexedCount:11}]}),false);
  assert.match(source,/s\.emptyWitness=true;s\.status='complete'/);
  assert.doesNotMatch(source,/phraseEmpty\|\|await stableEmptyFolder/);
- assert.match(source,/mailboxHasUnverifiedEmpty\(ms\)\?'VERIFY FOLDER INDEX'/);
+ assert.match(source,/scopeOk&&needsVerification&&ms\?\.status!=='running'\?'VERIFY FOLDER INDEX'/);
 });
