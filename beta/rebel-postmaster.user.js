@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Postmaster
 // @namespace    mission-vector-check-it-rebel-postmaster
-// @version      1.2.18
+// @version      1.2.19
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @description  Minimal read-only Outlook Web collector for Rebel Command with whole-mailbox indexing and automatic capture of messages the user opens.
@@ -22,7 +22,7 @@
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_POSTMASTER)return;
-const VERSION='rebel-postmaster-1.2.18';
+const VERSION='rebel-postmaster-1.2.19';
 const DEFAULT_ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const MANAGED_UPDATE_URL='https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js';
 function openManagedUpdate(){
@@ -287,7 +287,7 @@ function ensureUi(){
     if(!styleEl){
         styleEl=document.createElement('style');
         styleEl.id='pm-style';
-        styleEl.textContent=`:host{all:initial}.mount{font-family:Arial,sans-serif;color:#263746;pointer-events:auto}.mount *{box-sizing:border-box}.orb{width:54px;height:54px;border-radius:50%;border:2px solid #173e63;background:#fff;color:#173e63;box-shadow:0 6px 20px #0004;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;font:800 14px/1 Arial,sans-serif;letter-spacing:.5px}.orb.header-orb{width:38px;height:38px;min-width:38px;border-color:rgba(255,255,255,.7);box-shadow:none}.orb.header-orb img{width:30px!important;height:30px!important}.p{width:410px;max-width:calc(100vw - 24px);margin-bottom:8px;background:#f6f8f9;border:1px solid #cbd8df;border-radius:10px;box-shadow:0 10px 30px #0005;overflow:hidden}.h{background:#173e63;color:#fff;padding:12px 14px;display:flex;justify-content:space-between;gap:10px}.b{padding:12px}.a{width:100%;padding:10px;border-radius:8px;border:1px solid #173e63;background:#173e63;color:#fff;font-weight:800;cursor:pointer;margin-top:8px}.s{padding:8px;border-radius:8px;border:1px solid #cbd8df;background:#fff;color:#263746;cursor:pointer}.mount button:disabled{opacity:.45;cursor:not-allowed}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.m{margin-top:8px;padding:8px;border:1px solid #dce5ea;border-radius:8px;background:#fff;font-size:11px;line-height:1.4}.ok{border-color:#a7d9bd;background:#f0fbf5;color:#216340}.err{border-color:#efb2b2;background:#fff4f4;color:#8b2c2c}.note{margin-top:8px;font-size:10px;line-height:1.35;color:#607682}`;
+        styleEl.textContent=`:host{all:initial}.mount{font-family:Arial,sans-serif;color:#263746;pointer-events:auto}.mount *{box-sizing:border-box}.orb{width:54px;height:54px;min-width:54px;flex:none;box-sizing:border-box;border:2px solid #1b5a7a;border-radius:50%;background:#fff;color:#153e5c;box-shadow:0 5px 18px rgba(13,50,72,.28);cursor:pointer;padding:0;margin:0;display:flex;align-items:center;justify-content:center;overflow:hidden}.orb.header-orb{width:43px;height:43px;min-width:43px;border:2px solid rgba(255,255,255,.72);box-shadow:0 2px 8px rgba(0,0,0,.18)}.p{width:410px;max-width:calc(100vw - 24px);margin-bottom:8px;background:#f6f8f9;border:1px solid #cbd8df;border-radius:10px;box-shadow:0 10px 30px #0005;overflow:hidden}.h{background:#173e63;color:#fff;padding:12px 14px;display:flex;justify-content:space-between;gap:10px}.b{padding:12px}.a{width:100%;padding:10px;border-radius:8px;border:1px solid #173e63;background:#173e63;color:#fff;font-weight:800;cursor:pointer;margin-top:8px}.s{padding:8px;border-radius:8px;border:1px solid #cbd8df;background:#fff;color:#263746;cursor:pointer}.mount button:disabled{opacity:.45;cursor:not-allowed}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.m{margin-top:8px;padding:8px;border:1px solid #dce5ea;border-radius:8px;background:#fff;font-size:11px;line-height:1.4}.ok{border-color:#a7d9bd;background:#f0fbf5;color:#216340}.err{border-color:#efb2b2;background:#fff4f4;color:#8b2c2c}.note{margin-top:8px;font-size:10px;line-height:1.35;color:#607682}`;
         uiRoot.appendChild(styleEl);
     }
     uiMount=uiRoot.getElementById('pm-mount');
@@ -329,7 +329,7 @@ function render(){
     state.last=snapshot();const r=ensureUi();r.replaceChildren();const cs=crawlState(),same=crawlMatchesPage(cs),ms=mailboxState(),mb=mailboxSummary(ms),scopeOk=mailboxMatches(ms),needsVerification=mailboxHasUnverifiedEmpty(ms),retryNeeded=mailboxNeedsRetry(ms);
     if(state.open){
         const p=add(r,'div',null,'p'),h=add(p,'div',null,'h'),title=add(h,'div');add(title,'b','REBEL POSTMASTER');
-        const sub=add(title,'div','v1.2.18 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
+        const sub=add(title,'div','v1.2.19 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
         const close=add(h,'button','','orb header-orb');close.type='button';close.dataset.pmAction='close';close.title='Minimize Rebel Postmaster';close.setAttribute('aria-label','Minimize Rebel Postmaster');close.innerHTML=REBEL_SYMBOL_HTML;
         const b=add(p,'div',null,'b');
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');
