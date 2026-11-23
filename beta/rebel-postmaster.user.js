@@ -111,6 +111,24 @@ async function api(method,payload=null){
 }
 const request=payload=>api('POST',payload);
 const verify=()=>api('GET');
+// Outlook exposes a named native List / Group in its current accessibility tree.
+// Restrict new list support to that exact semantic region, never arbitrary lists.
+function isNativeMessageListRegion(el){
+    if(!el?.getAttribute)return false;
+    const role=attr(el,'role').toLowerCase(),tag=String(el.tagName||'').toLowerCase();
+    if(!['group','list','listbox','grid','region'].includes(role)&&!['ul','ol','section'].includes(tag))return false;
+    const refs=attr(el,'aria-labelledby').split(/\s+/).filter(Boolean);
+    const linked=refs.map(id=>clean(document.getElementById(id)?.textContent||'')).join(' ');
+    const label=clean(attr(el,'aria-label')||linked);
+    return /^(?:message|mail) list$/i.test(label);
+}
+function nativeMessageListRegion(el){
+    for(let n=el;n&&n!==document.body;n=n.parentElement)if(isNativeMessageListRegion(n))return n;
+    return null;
+}
+function containsNativeMessageList(el){
+    return [...(el?.querySelectorAll?.('[role="list"],[role="group"],[role="listbox"],[role="grid"],[role="region"],ul,ol,section')||[])].some(isNativeMessageListRegion);
+}
 function candidateRows(){
     const pane=findReadingPane();
     const selectors='[role="option"],[data-convid],[data-itemid],[data-item-id],[role="listitem"][id],li[id]';
@@ -119,10 +137,10 @@ function candidateRows(){
         if(seen.has(el))continue;
         seen.add(el);
         if(el.closest('[role="tree"]'))continue;
-        if(pane&&(el===pane||pane.contains(el)))continue;
+        if(pane&&(el===pane||pane.contains(el))&&!nativeMessageListRegion(el))continue;
         const txt=clean(el.innerText||el.textContent||''),aria=attr(el,'aria-label');
         if((txt||aria).length<8)continue;
-        const inMail=!!el.closest('[role="listbox"],[role="grid"],[aria-label*="message" i],[aria-label*="mail" i]');
+        const inMail=!!nativeMessageListRegion(el)||!!el.closest('[role="listbox"],[role="grid"],[aria-label*="message" i],[aria-label*="mail" i]');
         const explicitId=!!(attr(el,'data-convid')||attr(el,'data-itemid')||attr(el,'data-item-id')||attr(el,'data-conversation-id'));
         // Outlook's newer virtualized message list exposes real ListItem
         // elements inside its scroll host, with stable opaque HTML ids.
@@ -173,7 +191,7 @@ function credibleMessageRow(m){return!!m?._strongId&&clean(m.senderName).length>
 function assess(messages){const strong=messages.filter(m=>m._strongId).length,valid=messages.filter(credibleMessageRow).length,positions=messages.every((m,i)=>Number(m.listPosition)===i);return{quality:messages.length&&strong===messages.length&&valid===messages.length&&positions?'good':'partial',total:messages.length,strongIdRows:strong,validRows:valid,positionsValid:positions}}
 function snapshot(){const messages=candidateRows().map(parseRow),assessment=assess(messages);return{messages,assessment,folder:folderName(),mailbox:mailboxHint()}}
 async function stableSnapshot(timeout=2200){const started=Date.now();let best=snapshot(),last='',stable=0;while(Date.now()-started<timeout){const x=snapshot();if(x.messages.length>best.messages.length)best=x;const sig=x.messages.map(m=>`${m.listPosition}:${m.messageKey}`).join('|');if(sig&&sig===last)stable++;else stable=0;last=sig;if(stable>=2)return x;await wait(220)}return best}
-function mailListHosts(){const out=[];for(const sel of ['[role="listbox"]','[role="grid"]','[aria-label*="message list" i]','[aria-label*="mail list" i]'])for(const el of document.querySelectorAll(sel))if(el instanceof HTMLElement&&visible(el)&&!el.closest('[role="tree"]')&&!out.includes(el))out.push(el);return out}
+function mailListHosts(){const out=[];for(const sel of ['[role="listbox"]','[role="grid"]','[aria-label*="message list" i]','[aria-label*="mail list" i]','[role="list"][aria-labelledby]','[role="list"][aria-label]'])for(const el of document.querySelectorAll(sel))if(el instanceof HTMLElement&&visible(el)&&!el.closest('[role="tree"]')&&(!el.matches('[role="list"]')||isNativeMessageListRegion(el))&&!out.includes(el))out.push(el);return out}
 function listScroller(){const row=candidateRows()[0];const candidates=[];let n=row;while(n&&n!==document.body){if(n instanceof HTMLElement)candidates.push(n);n=n.parentElement}for(const el of mailListHosts())candidates.push(el);const seen=new Set();for(const el of candidates){if(seen.has(el)||!visible(el))continue;seen.add(el);const st=getComputedStyle(el);if(el.scrollHeight>el.clientHeight+40&&/(auto|scroll|overlay)/i.test(st.overflowY||''))return el}for(const el of candidates){if(el.scrollHeight>el.clientHeight+40)return el}return null}
 function mailBusy(){return[...document.querySelectorAll('[aria-busy="true"],[role="progressbar"],[aria-label*="loading" i],[title*="loading" i]')].some(visible)}
 function hasExplicitEmptyFolderWitness(){
@@ -203,7 +221,7 @@ async function stableEmptyFolder(timeout=5200){
     }
     return false;
 }
-function readingPaneCandidates(){const selectors=['[role="main"] [aria-label*="message" i]','[role="main"] [aria-label*="reading pane" i]','[aria-label*="reading pane" i]','[data-app-section="MailReadCompose"]','[role="document"]'];const out=[];for(const sel of selectors)for(const el of document.querySelectorAll(sel))if(visible(el)&&!out.includes(el))out.push(el);return out}
+function readingPaneCandidates(){const selectors=['[role="main"] [aria-label*="message" i]','[role="main"] [aria-label*="reading pane" i]','[aria-label*="reading pane" i]','[data-app-section="MailReadCompose"]','[role="document"]'];const out=[];for(const sel of selectors)for(const el of document.querySelectorAll(sel))if(visible(el)&&!nativeMessageListRegion(el)&&!containsNativeMessageList(el)&&!out.includes(el))out.push(el);return out}
 function scorePane(el){const text=rawText(el.innerText||el.textContent||'');if(text.length<40)return-1;let score=Math.min(30,text.length/500);if(el.querySelector('[role="document"]'))score+=15;if(el.querySelector('time,[datetime]'))score+=5;if(el.querySelector('[aria-label*="From" i],[title*="From" i],a[href^="mailto:"]'))score+=5;if(el.closest('[role="listbox"],[role="grid"]'))score-=30;return score}
 function findReadingPane(){return readingPaneCandidates().map(el=>({el,score:scorePane(el)})).filter(x=>x.score>0).sort((a,b)=>b.score-a.score)[0]?.el||null}
 function firstText(selectors,root=document){for(const sel of selectors){for(const el of root.querySelectorAll(sel)){const t=clean(attr(el,'aria-label')||attr(el,'title')||el.textContent||'');if(t)return t}}return''}

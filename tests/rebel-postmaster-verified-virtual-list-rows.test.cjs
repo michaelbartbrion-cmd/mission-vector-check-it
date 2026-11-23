@@ -6,7 +6,7 @@ const path=require('node:path');
 const vm=require('node:vm');
 const source=fs.readFileSync(path.join(__dirname,'../beta/rebel-postmaster.user.js'),'utf8');
 function between(a,b){const start=source.indexOf(a),end=source.indexOf(b,start);assert.ok(start>=0&&end>start,'Expected native parser');return source.slice(start,end)}
-const candidate=between('function candidateRows(){','function displayedReceived(');
+const candidate=between('function isNativeMessageListRegion(el){','function displayedReceived(');
 const parse=between('function parseRow(','function isFolderTreeNode(');
 function row({role='listitem',id='AgAAA5zpZsgCAAAIy8tVwgAAA',text='Example Sender\nSubject Example\nPreview',scroll=true,tree=false,inMail=false,visible=true,explicitId='',isReading=false}={}){
  const attrs={id,role,'data-itemid':explicitId};
