@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Postmaster
 // @namespace    mission-vector-check-it-rebel-postmaster
-// @version      1.2.16
+// @version      1.2.17
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @description  Minimal read-only Outlook Web collector for Rebel Command with whole-mailbox indexing and automatic capture of messages the user opens.
@@ -22,7 +22,7 @@
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_POSTMASTER)return;
-const VERSION='rebel-postmaster-1.2.16';
+const VERSION='rebel-postmaster-1.2.17';
 const DEFAULT_ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const MANAGED_UPDATE_URL='https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js';
 function openManagedUpdate(){
@@ -111,7 +111,32 @@ async function api(method,payload=null){
 }
 const request=payload=>api('POST',payload);
 const verify=()=>api('GET');
-function candidateRows(){const pane=findReadingPane(),found=[...document.querySelectorAll('[role="option"],[data-convid],[data-itemid],[data-item-id]')].filter(visible),out=[],seen=new Set();for(const el of found){if(seen.has(el))continue;seen.add(el);if(el.closest('[role="tree"]'))continue;if(pane&&(el===pane||pane.contains(el)))continue;const txt=clean(el.innerText||el.textContent||''),aria=attr(el,'aria-label');if((txt||aria).length<8)continue;const inMail=!!el.closest('[role="listbox"],[role="grid"],[aria-label*="message" i],[aria-label*="mail" i]'),hasId=!!(attr(el,'data-convid')||attr(el,'data-itemid')||attr(el,'data-item-id')||attr(el,'data-conversation-id'));if(!inMail&&!hasId)continue;out.push(el)}return out.slice(0,150)}
+function candidateRows(){
+    const pane=findReadingPane();
+    const selectors='[role="option"],[data-convid],[data-itemid],[data-item-id],[role="listitem"][id],li[id]';
+    const found=[...document.querySelectorAll(selectors)].filter(visible),out=[],seen=new Set();
+    for(const el of found){
+        if(seen.has(el))continue;
+        seen.add(el);
+        if(el.closest('[role="tree"]'))continue;
+        if(pane&&(el===pane||pane.contains(el)))continue;
+        const txt=clean(el.innerText||el.textContent||''),aria=attr(el,'aria-label');
+        if((txt||aria).length<8)continue;
+        const inMail=!!el.closest('[role="listbox"],[role="grid"],[aria-label*="message" i],[aria-label*="mail" i]');
+        const explicitId=!!(attr(el,'data-convid')||attr(el,'data-itemid')||attr(el,'data-item-id')||attr(el,'data-conversation-id'));
+        // Outlook's newer virtualized message list exposes real ListItem
+        // elements inside its scroll host, with stable opaque HTML ids.
+        // Never treat arbitrary navigation, account or folder list items as
+        // messages. A long id is required, but parseRow / credibleMessageRow
+        // still enforce genuine sender + subject before any upload.
+        const nativeRow=!!(el.matches?.('[role="listitem"][id],li[id],[role="option"][id]')&&
+            el.closest('[class~="customScrollBar"]')&&
+            attr(el,'id').length>=18);
+        if(!inMail&&!explicitId&&!nativeRow)continue;
+        out.push(el);
+    }
+    return out.slice(0,150);
+}
 function displayedReceived(lines,timeEl){const explicit=clean(attr(timeEl,'aria-label')||attr(timeEl,'title')||timeEl?.textContent||'');if(explicit)return explicit.slice(0,160);return clean(lines.find(timeLike)||'').slice(0,160)}
 function parseRow(el,index){const raw=(el.innerText||el.textContent||'').trim(),text=clean(raw),aria=attr(el,'aria-label'),title=attr(el,'title'),dataId=attr(el,'data-itemid')||attr(el,'data-item-id')||attr(el,'data-convid')||attr(el,'data-conversation-id')||attr(el,'id'),lines=raw.split(/\n+/).map(clean).filter(Boolean),meaningful=lines.filter(x=>!symbolOnly(x)),content=meaningful.filter(x=>!timeLike(x));while(content.length>=2&&initialBadge(content[0],content[1]))content.shift();const sender=content[0]||'',subject=content[1]||'',preview=content.slice(2,6).join(' '),timeEl=el.querySelector('time,[datetime]'),receivedAt=isoMaybe(attr(timeEl,'datetime')),displayedReceivedText=displayedReceived(lines,timeEl),unread=/\bunread\b/i.test(`${aria} ${el.className||''}`),flagged=/\bflagged\b/i.test(`${aria} ${title}`)||!!el.querySelector('[aria-label*="flag" i][aria-pressed="true"],[title*="flagged" i]'),attachments=!!el.querySelector('[aria-label*="attachment" i],[title*="attachment" i],svg[data-icon-name*="Attach" i]')||/\battachment\b/i.test(aria),rawKey=dataId||hash(`${sender}|${subject}|${aria}|${text.slice(0,500)}|${index}`);return{messageKey:`outlook:${rawKey}`,senderName:sender,subject,previewText:preview||text.slice(0,1800),receivedAt:receivedAt||undefined,displayedReceivedText:displayedReceivedText||undefined,listPosition:index,isUnread:!!unread,isFlagged:!!flagged,hasAttachments:!!attachments,webUrl:location.href,captureLevel:'list',_strongId:!!dataId}}
 function isFolderTreeNode(el){return!!el?.closest?.('[role="tree"]')&&!el.closest('[role="listbox"],[role="grid"],[aria-label*="message list" i],[aria-label*="mail list" i]')}
@@ -286,7 +311,7 @@ function render(){
     state.last=snapshot();const r=ensureUi();r.replaceChildren();const cs=crawlState(),same=crawlMatchesPage(cs),ms=mailboxState(),mb=mailboxSummary(ms),scopeOk=mailboxMatches(ms),needsVerification=mailboxHasUnverifiedEmpty(ms);
     if(state.open){
         const p=add(r,'div',null,'p'),h=add(p,'div',null,'h'),title=add(h,'div');add(title,'b','REBEL POSTMASTER');
-        const sub=add(title,'div','v1.2.16 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
+        const sub=add(title,'div','v1.2.17 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
         const close=add(h,'button','','orb header-orb');close.type='button';close.dataset.pmAction='close';close.title='Minimize Rebel Postmaster';close.setAttribute('aria-label','Minimize Rebel Postmaster');close.innerHTML=REBEL_SYMBOL_HTML;
         const b=add(p,'div',null,'b');
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');
