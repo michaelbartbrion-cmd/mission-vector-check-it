@@ -17401,11 +17401,21 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         // from the existing archive. This creates TODAY'S OUTSTANDING
         // inventory (no native inspection date, no PASS) and the next broker
         // rotation must still read each real Item Log.
-        // Reuse verified native paths for EACH eligible scheduled owner,
-        // even after another department member has already been mapped today.
-        // This invokes the same Captain native Item Log reader on the next
-        // lease and never carries a previous inspection result forward.
-        {
+        // Do not let another archive reuse preempt the FIRST current
+        // native Item Log from an already mapped on-duty candidate. Prior
+        // reuse creates only OUTSTANDING items; it must not crowd out the
+        // real authenticated read that determines historical completion.
+        // After that owner has one successful read, rotate back to safely
+        // map remaining scheduled people from their archived native paths.
+        const hasFirstNativeReadPending=(board.people||[]).some(p=>
+            !C_PILOT_NAMES.has(masterNameKey(p.name))&&
+            p.sourceStatus==='scheduled_unconfirmed'&&
+            p.attendanceConfirmed===false&&
+            Number(p.knownItems)>0&&
+            Number(p.outstandingItems)>0&&
+            !Number(p.nativeReadItems||0)&&
+            !!p.nextItem?.assetPath);
+        if(!hasFirstNativeReadPending){
             const archive=await cPilotBridge('GET',
                 'vr-ppe-department-archive-candidates',null,{date:board.date});
             if(archive?.scope!=='department-ppe-archive-candidates'||
