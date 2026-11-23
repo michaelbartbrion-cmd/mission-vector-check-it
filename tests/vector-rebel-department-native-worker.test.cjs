@@ -105,6 +105,22 @@ test('existing dedicated worker maps ONLY scheduled approved nonpilot owner and 
  assert.equal(h.queue[0].items[0].inspectionMode,'tour');
  assert.equal(h.out.nav.length,0);
 });
+test('an already mapped outside-C owner gets first genuine Item Log read before additional owner search',async()=>{
+ const item={assetId:'FOX-COAT-01',
+   assetPath:'/app/equipment/PPE/pool/300045/111/item',
+   inspectionMode:'tour',assetType:'Bunker Coat'};
+ const h=harness({...unmapped,people:[
+  {name:'Aaron No Gear',prefix:'AARON',sourceStatus:'scheduled_unconfirmed',
+   attendanceConfirmed:false,knownItems:0,outstandingItems:0,nextItem:null},
+  {...unmapped.people[0],knownItems:1,nativeReadItems:0,outstandingItems:1,
+   nextItem:item,pendingItems:[item]}
+ ]});
+ assert.equal(await h.context.departmentAutoOnePass(),'started');
+ assert.equal(h.out.nav[0].assetId,'FOX-COAT-01');
+ assert.equal(h.out.scans,0,'native Item Log read should precede another fragile search');
+ assert.equal(h.out.lookupPosts.length,0);
+});
+
 test('one mapped native target starts read-only Item Log and retains original browser tab',async()=>{
  const h=harness({...unmapped,people:[{...unmapped.people[0],knownItems:1,outstandingItems:1,
    nextItem:{assetId:'FOX-COAT-01',

@@ -10410,9 +10410,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             uiText(root.innerText||root.textContent||'').toLowerCase().includes(x)));
     }
     function submitNativePpeSearch(search){
-        // On the live Equipment > PPE page Vector exposes a separate Search
-        // button. Updating React input state alone can leave the previous
-        // rows unchanged until that button is activated.
+        // Vector Equipment > PPE has two native search layouts. Some show
+        // a labeled Search button; the live Enterprise layout shows a search
+        // field with a magnifier but no uniquely labeled Search button.
+        // The fallback commits only the SEARCH FIELD's Enter key. No native
+        // inspection form, checkbox, signature, or Submit control is touched.
+        // The caller still requires a genuine results transition or settled
+        // empty state before accepting any asset or ownership evidence.
         const ppe=findVectorNavigationTarget('PPE');
         if(!search||!visible(search)||!ppe||!vectorControlLooksActive(ppe)||
            !isConfirmedPpeEquipmentPage())
@@ -10421,9 +10425,25 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             visible(btn)&&!btn.disabled&&
             uiEquals(btn.getAttribute('aria-label')||btn.innerText||
                 btn.textContent||'','Search'));
-        if(candidates.length!==1)
-            throw Error('Vector PPE has no unique Search button; lookup stopped without submitting an inspection.');
-        candidates[0].click(); // Native PPE FILTER only, never an inspection.
+        if(candidates.length>1)
+            throw Error('Vector PPE has ambiguous Search buttons; lookup stopped without submitting an inspection.');
+        if(candidates.length===1){
+            candidates[0].click(); // Native PPE FILTER only.
+            return;
+        }
+        // Enter on the confirmed equipment-name input is a native UI
+        // search gesture. It is not an official inspection submission.
+        // If this Vector variant does not respond, the existing read-only
+        // search settle guard rejects its unmodified/stale results.
+        search.focus();
+        const enter=new KeyboardEvent('keydown',{
+            key:'Enter',code:'Enter',keyCode:13,which:13,
+            bubbles:true,cancelable:true
+        });
+        search.dispatchEvent(enter);
+        search.dispatchEvent(new KeyboardEvent('keyup',{
+            key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true
+        }));
     }
     async function scanPpeOwnerSearch(owner, progress = null) {
         const ownerName = clean(owner?.name);
@@ -17340,10 +17360,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const byOldestAttempt=group=>group.slice().sort((a,b)=>
             Number(attempts[a.prefix]||0)-Number(attempts[b.prefix]||0)||
             masterNameKey(a.name).localeCompare(masterNameKey(b.name)));
-        // CRITICAL: Do not keep retrying the first roster row every nine
-        // minutes. An unresolved Vector Responsible Party must not starve
-        // the other stations. Try the least recently attempted candidate;
-        // mapped history reads get two of every three opportunities.
+        // The first authentic Item Log is the critical acceptance step.
+        // As soon as the native inventory has been mapped, read at least
+        // one REAL Item Log before spending another lease on new owner
+        // discovery. An unreadable item still obeys the server's 30-minute
+        // cooldown; this never fabricates a PASS or a completed inspection.
+        const neverRead=byOldestAttempt(mapped.filter(p=>
+            !Number(p.nativeReadItems||0)));
+        if(neverRead.length)return neverRead[0];
+        // Once actual reads exist, rotate the least recently attempted
+        // people. Alternate additional mapping with known-history reads
+        // so unresolved owners cannot starve other stations.
         const candidates=order%3===0?
             [...byOldestAttempt(unmapped),...byOldestAttempt(mapped)]:
             [...byOldestAttempt(mapped),...byOldestAttempt(unmapped)];
