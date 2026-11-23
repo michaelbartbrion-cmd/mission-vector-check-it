@@ -49,7 +49,7 @@ test('unknown Outlook sign-in/loading page never fabricates a mailbox identity',
 });
 test('complete manifest clears stale last_error after genuine folder verification',()=>{
  const part=between('function mailboxManifestPayload(ms){','async function reportMailboxManifest(');
- const ctx={VERSION:'rebel-postmaster-1.2.17',MANIFEST_PROVIDER:'test',mailboxManifestFingerprint:()=> 'digest',mailboxSummary:ms=>({folders:ms.folders.length,complete:ms.folders.filter(f=>f.status==='complete').length,errors:ms.folders.filter(f=>f.status==='error').length,indexed:3})};
+ const ctx={VERSION:'rebel-postmaster-1.2.18',MANIFEST_PROVIDER:'test',mailboxManifestFingerprint:()=> 'digest',mailboxSummary:ms=>({folders:ms.folders.length,complete:ms.folders.filter(f=>f.status==='complete').length,errors:ms.folders.filter(f=>f.status==='error').length,indexed:3})};
  vm.createContext(ctx);vm.runInContext(part,ctx);
  const ms={mailboxId:'outlook:1yhbdbn',status:'complete',lastError:'Old network timeout',folders:[{status:'complete'}]};
  assert.equal(ctx.mailboxManifestPayload(ms).workEmailIngestionState.lastError,'');
@@ -60,5 +60,5 @@ test('Postmaster never presents the prior mailbox as complete when identity is u
  assert.match(source,/SCOPE UNVERIFIED/);
  assert.match(source,/VERIFY REQUIRED/);
  assert.match(source,/if\(!mailboxId\(\)\)throw new Error\('Outlook account identity not confirmed/);
- assert.match(source,/@version\s+1\.2\.17/);
+ assert.match(source,/@version\s+1\.2\.18/);
 });
