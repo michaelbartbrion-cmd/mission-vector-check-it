@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Postmaster
 // @namespace    mission-vector-check-it-rebel-postmaster
-// @version      1.2.18
+// @version      1.2.19
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @description  Minimal read-only Outlook Web collector for Rebel Command with whole-mailbox indexing and automatic capture of messages the user opens.
@@ -22,7 +22,7 @@
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_POSTMASTER)return;
-const VERSION='rebel-postmaster-1.2.18';
+const VERSION='rebel-postmaster-1.2.19';
 const DEFAULT_ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const MANAGED_UPDATE_URL='https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js';
 function openManagedUpdate(){
@@ -111,6 +111,24 @@ async function api(method,payload=null){
 }
 const request=payload=>api('POST',payload);
 const verify=()=>api('GET');
+// Outlook exposes a named native List / Group in its current accessibility tree.
+// Restrict new list support to that exact semantic region, never arbitrary lists.
+function isNativeMessageListRegion(el){
+    if(!el?.getAttribute)return false;
+    const role=attr(el,'role').toLowerCase(),tag=String(el.tagName||'').toLowerCase();
+    if(!['group','list','listbox','grid','region'].includes(role)&&!['ul','ol','section'].includes(tag))return false;
+    const refs=attr(el,'aria-labelledby').split(/\s+/).filter(Boolean);
+    const linked=refs.map(id=>clean(document.getElementById(id)?.textContent||'')).join(' ');
+    const label=clean(attr(el,'aria-label')||linked);
+    return /^(?:message|mail) list$/i.test(label);
+}
+function nativeMessageListRegion(el){
+    for(let n=el;n&&n!==document.body;n=n.parentElement)if(isNativeMessageListRegion(n))return n;
+    return null;
+}
+function containsNativeMessageList(el){
+    return [...(el?.querySelectorAll?.('[role="list"],[role="group"],[role="listbox"],[role="grid"],[role="region"],ul,ol,section')||[])].some(isNativeMessageListRegion);
+}
 function candidateRows(){
     const pane=findReadingPane();
     const selectors='[role="option"],[data-convid],[data-itemid],[data-item-id],[role="listitem"][id],li[id]';
@@ -119,10 +137,10 @@ function candidateRows(){
         if(seen.has(el))continue;
         seen.add(el);
         if(el.closest('[role="tree"]'))continue;
-        if(pane&&(el===pane||pane.contains(el)))continue;
+        if(pane&&(el===pane||pane.contains(el))&&!nativeMessageListRegion(el))continue;
         const txt=clean(el.innerText||el.textContent||''),aria=attr(el,'aria-label');
         if((txt||aria).length<8)continue;
-        const inMail=!!el.closest('[role="listbox"],[role="grid"],[aria-label*="message" i],[aria-label*="mail" i]');
+        const inMail=!!nativeMessageListRegion(el)||!!el.closest('[role="listbox"],[role="grid"],[aria-label*="message" i],[aria-label*="mail" i]');
         const explicitId=!!(attr(el,'data-convid')||attr(el,'data-itemid')||attr(el,'data-item-id')||attr(el,'data-conversation-id'));
         // Outlook's newer virtualized message list exposes real ListItem
         // elements inside its scroll host, with stable opaque HTML ids.
@@ -173,7 +191,7 @@ function credibleMessageRow(m){return!!m?._strongId&&clean(m.senderName).length>
 function assess(messages){const strong=messages.filter(m=>m._strongId).length,valid=messages.filter(credibleMessageRow).length,positions=messages.every((m,i)=>Number(m.listPosition)===i);return{quality:messages.length&&strong===messages.length&&valid===messages.length&&positions?'good':'partial',total:messages.length,strongIdRows:strong,validRows:valid,positionsValid:positions}}
 function snapshot(){const messages=candidateRows().map(parseRow),assessment=assess(messages);return{messages,assessment,folder:folderName(),mailbox:mailboxHint()}}
 async function stableSnapshot(timeout=2200){const started=Date.now();let best=snapshot(),last='',stable=0;while(Date.now()-started<timeout){const x=snapshot();if(x.messages.length>best.messages.length)best=x;const sig=x.messages.map(m=>`${m.listPosition}:${m.messageKey}`).join('|');if(sig&&sig===last)stable++;else stable=0;last=sig;if(stable>=2)return x;await wait(220)}return best}
-function mailListHosts(){const out=[];for(const sel of ['[role="listbox"]','[role="grid"]','[aria-label*="message list" i]','[aria-label*="mail list" i]'])for(const el of document.querySelectorAll(sel))if(el instanceof HTMLElement&&visible(el)&&!el.closest('[role="tree"]')&&!out.includes(el))out.push(el);return out}
+function mailListHosts(){const out=[];for(const sel of ['[role="listbox"]','[role="grid"]','[aria-label*="message list" i]','[aria-label*="mail list" i]','[role="list"][aria-labelledby]','[role="list"][aria-label]'])for(const el of document.querySelectorAll(sel))if(el instanceof HTMLElement&&visible(el)&&!el.closest('[role="tree"]')&&(!el.matches('[role="list"]')||isNativeMessageListRegion(el))&&!out.includes(el))out.push(el);return out}
 function listScroller(){const row=candidateRows()[0];const candidates=[];let n=row;while(n&&n!==document.body){if(n instanceof HTMLElement)candidates.push(n);n=n.parentElement}for(const el of mailListHosts())candidates.push(el);const seen=new Set();for(const el of candidates){if(seen.has(el)||!visible(el))continue;seen.add(el);const st=getComputedStyle(el);if(el.scrollHeight>el.clientHeight+40&&/(auto|scroll|overlay)/i.test(st.overflowY||''))return el}for(const el of candidates){if(el.scrollHeight>el.clientHeight+40)return el}return null}
 function mailBusy(){return[...document.querySelectorAll('[aria-busy="true"],[role="progressbar"],[aria-label*="loading" i],[title*="loading" i]')].some(visible)}
 function hasExplicitEmptyFolderWitness(){
@@ -203,7 +221,7 @@ async function stableEmptyFolder(timeout=5200){
     }
     return false;
 }
-function readingPaneCandidates(){const selectors=['[role="main"] [aria-label*="message" i]','[role="main"] [aria-label*="reading pane" i]','[aria-label*="reading pane" i]','[data-app-section="MailReadCompose"]','[role="document"]'];const out=[];for(const sel of selectors)for(const el of document.querySelectorAll(sel))if(visible(el)&&!out.includes(el))out.push(el);return out}
+function readingPaneCandidates(){const selectors=['[role="main"] [aria-label*="message" i]','[role="main"] [aria-label*="reading pane" i]','[aria-label*="reading pane" i]','[data-app-section="MailReadCompose"]','[role="document"]'];const out=[];for(const sel of selectors)for(const el of document.querySelectorAll(sel))if(visible(el)&&!nativeMessageListRegion(el)&&!containsNativeMessageList(el)&&!out.includes(el))out.push(el);return out}
 function scorePane(el){const text=rawText(el.innerText||el.textContent||'');if(text.length<40)return-1;let score=Math.min(30,text.length/500);if(el.querySelector('[role="document"]'))score+=15;if(el.querySelector('time,[datetime]'))score+=5;if(el.querySelector('[aria-label*="From" i],[title*="From" i],a[href^="mailto:"]'))score+=5;if(el.closest('[role="listbox"],[role="grid"]'))score-=30;return score}
 function findReadingPane(){return readingPaneCandidates().map(el=>({el,score:scorePane(el)})).filter(x=>x.score>0).sort((a,b)=>b.score-a.score)[0]?.el||null}
 function firstText(selectors,root=document){for(const sel of selectors){for(const el of root.querySelectorAll(sel)){const t=clean(attr(el,'aria-label')||attr(el,'title')||el.textContent||'');if(t)return t}}return''}
@@ -287,7 +305,7 @@ function ensureUi(){
     if(!styleEl){
         styleEl=document.createElement('style');
         styleEl.id='pm-style';
-        styleEl.textContent=`:host{all:initial}.mount{font-family:Arial,sans-serif;color:#263746;pointer-events:auto}.mount *{box-sizing:border-box}.orb{width:54px;height:54px;border-radius:50%;border:2px solid #173e63;background:#fff;color:#173e63;box-shadow:0 6px 20px #0004;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;font:800 14px/1 Arial,sans-serif;letter-spacing:.5px}.orb.header-orb{width:38px;height:38px;min-width:38px;border-color:rgba(255,255,255,.7);box-shadow:none}.orb.header-orb img{width:30px!important;height:30px!important}.p{width:410px;max-width:calc(100vw - 24px);margin-bottom:8px;background:#f6f8f9;border:1px solid #cbd8df;border-radius:10px;box-shadow:0 10px 30px #0005;overflow:hidden}.h{background:#173e63;color:#fff;padding:12px 14px;display:flex;justify-content:space-between;gap:10px}.b{padding:12px}.a{width:100%;padding:10px;border-radius:8px;border:1px solid #173e63;background:#173e63;color:#fff;font-weight:800;cursor:pointer;margin-top:8px}.s{padding:8px;border-radius:8px;border:1px solid #cbd8df;background:#fff;color:#263746;cursor:pointer}.mount button:disabled{opacity:.45;cursor:not-allowed}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.m{margin-top:8px;padding:8px;border:1px solid #dce5ea;border-radius:8px;background:#fff;font-size:11px;line-height:1.4}.ok{border-color:#a7d9bd;background:#f0fbf5;color:#216340}.err{border-color:#efb2b2;background:#fff4f4;color:#8b2c2c}.note{margin-top:8px;font-size:10px;line-height:1.35;color:#607682}`;
+        styleEl.textContent=`:host{all:initial}.mount{font-family:Arial,sans-serif;color:#263746;pointer-events:auto}.mount *{box-sizing:border-box}.orb{width:54px;height:54px;min-width:54px;flex:none;box-sizing:border-box;border:2px solid #1b5a7a;border-radius:50%;background:#fff;color:#153e5c;box-shadow:0 5px 18px rgba(13,50,72,.28);cursor:pointer;padding:0;margin:0;display:flex;align-items:center;justify-content:center;overflow:hidden}.orb.header-orb{width:43px;height:43px;min-width:43px;border:2px solid rgba(255,255,255,.72);box-shadow:0 2px 8px rgba(0,0,0,.18)}.p{width:410px;max-width:calc(100vw - 24px);margin-bottom:8px;background:#f6f8f9;border:1px solid #cbd8df;border-radius:10px;box-shadow:0 10px 30px #0005;overflow:hidden}.h{background:#173e63;color:#fff;padding:12px 14px;display:flex;justify-content:space-between;gap:10px}.b{padding:12px}.a{width:100%;padding:10px;border-radius:8px;border:1px solid #173e63;background:#173e63;color:#fff;font-weight:800;cursor:pointer;margin-top:8px}.s{padding:8px;border-radius:8px;border:1px solid #cbd8df;background:#fff;color:#263746;cursor:pointer}.mount button:disabled{opacity:.45;cursor:not-allowed}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.m{margin-top:8px;padding:8px;border:1px solid #dce5ea;border-radius:8px;background:#fff;font-size:11px;line-height:1.4}.ok{border-color:#a7d9bd;background:#f0fbf5;color:#216340}.err{border-color:#efb2b2;background:#fff4f4;color:#8b2c2c}.note{margin-top:8px;font-size:10px;line-height:1.35;color:#607682}`;
         uiRoot.appendChild(styleEl);
     }
     uiMount=uiRoot.getElementById('pm-mount');
@@ -329,7 +347,7 @@ function render(){
     state.last=snapshot();const r=ensureUi();r.replaceChildren();const cs=crawlState(),same=crawlMatchesPage(cs),ms=mailboxState(),mb=mailboxSummary(ms),scopeOk=mailboxMatches(ms),needsVerification=mailboxHasUnverifiedEmpty(ms),retryNeeded=mailboxNeedsRetry(ms);
     if(state.open){
         const p=add(r,'div',null,'p'),h=add(p,'div',null,'h'),title=add(h,'div');add(title,'b','REBEL POSTMASTER');
-        const sub=add(title,'div','v1.2.18 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
+        const sub=add(title,'div','v1.2.19 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
         const close=add(h,'button','','orb header-orb');close.type='button';close.dataset.pmAction='close';close.title='Minimize Rebel Postmaster';close.setAttribute('aria-label','Minimize Rebel Postmaster');close.innerHTML=REBEL_SYMBOL_HTML;
         const b=add(p,'div',null,'b');
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');

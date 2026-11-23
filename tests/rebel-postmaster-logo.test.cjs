@@ -29,3 +29,14 @@ test('Rebel branding retains read-only Outlook scope across later version bumps'
   assert.match(source, /@match\s+https:\/\/outlook\.cloud\.microsoft\/\*/);
   assert.match(source, /Postmaster never opens unread mail for you/);
 });
+
+test('Postmaster launcher matches Vector Rebel and Rebel IQ sizing and emblem',()=>{
+  const vector=fs.readFileSync(path.join(__dirname,'../beta/vector-rebel.user.js'),'utf8');
+  const iq=fs.readFileSync(path.join(__dirname,'../beta/rebel-iq.user.js'),'utf8');
+  const emblem=s=>s.match(/data:image\/png;base64,([A-Za-z0-9+/=]+)/)[1];
+  assert.equal(emblem(source),emblem(vector));assert.equal(emblem(source),emblem(iq));
+  assert.match(source,/\.orb\{width:54px;height:54px;min-width:54px/);
+  assert.match(source,/\.orb\.header-orb\{width:43px;height:43px;min-width:43px/);
+  assert.doesNotMatch(source,/\.orb\.header-orb img\{/);
+  assert.match(source,/box-shadow:0 2px 8px rgba\(0,0,0,\.18\)/);
+});
