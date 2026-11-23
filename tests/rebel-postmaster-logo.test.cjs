@@ -20,10 +20,12 @@ test('Postmaster retains the original Rebel PNG emblem in both launcher states',
   assert.match(source, /orb\.innerHTML=REBEL_SYMBOL_HTML/);
 });
 
-test('logo-only version bump retains read-only Outlook scope', () => {
-  assert.match(source, /@version\s+1\.2\.13/);
-  assert.match(source, /const VERSION='rebel-postmaster-1\.2\.13'/);
-  assert.match(source, /v1\.2\.13 · read-only Outlook collector/);
+test('Rebel branding retains read-only Outlook scope across later version bumps', () => {
+  const metadata=source.match(/@version\s+(\d+\.\d+\.\d+)/)?.[1];
+  assert.ok(metadata,'version metadata is required');
+  assert.match(source,new RegExp("const VERSION='rebel-postmaster-"+metadata.replace(/\./g,'\\.')+"'"));
+  assert.ok(Number(metadata.split('.')[2])>=13,'logo first shipped in 1.2.13');
+  assert.ok(source.includes('v'+metadata+' · read-only Outlook collector'));
   assert.match(source, /@match\s+https:\/\/outlook\.cloud\.microsoft\/\*/);
   assert.match(source, /Postmaster never opens unread mail for you/);
 });
