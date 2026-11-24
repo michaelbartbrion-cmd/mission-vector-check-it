@@ -120,7 +120,7 @@ test('PPE bridge protects an active Captain check and completes only after nativ
   sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},
   URLSearchParams,Date,Math,JSON,TAB_ID:'vcppe-enterprise-test',
   GM_xmlhttpRequest:t.request,
-  isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:()=>({}),
+  isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>k==='Equipment'?{}:null,
   getRun:()=>null,getCaptainDailyCheck:()=>captainBusy?{}:null,
   captainDailyBusy:false,
   startCShiftPilotNativeRecheck:async()=>{started++;captainBusy=true;return true},
@@ -197,7 +197,7 @@ test('Enterprise PPE bridge auto-maps captain-confirmed unmapped gear as invento
     sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},
     URLSearchParams,Date,Math,JSON,TAB_ID:'mvci-autmap-pass',
     GM_xmlhttpRequest:t.request,
-    isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:()=>({}),
+    isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>k==='Equipment'?{}:null,
     getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
     cPilotFetch:async()=>({activeTour:true,tourStart:'2026-11-21',
       people:[{name:'Working Firefighter',attendance:'working',knownItems:0},
@@ -228,7 +228,7 @@ test('Enterprise PPE auto-map refuses to invent work or a completed inspection w
     sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},
     URLSearchParams,Date,Math,JSON,TAB_ID:'mvci-automap-fail',
     GM_xmlhttpRequest:t.request,
-    isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:()=>({}),
+    isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>k==='Equipment'?{}:null,
     getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
     cPilotFetch:async()=>({activeTour:true,tourStart:'2026-11-21',
       people:[{name:'Not yet confirmed',attendance:'unconfirmed',knownItems:0},
@@ -248,7 +248,7 @@ test('paired Vector login screen cannot claim a PPE lease and reports not ready'
  const tab=storage(),t=transport(),callbacks=[],intervals=[];
  const context={sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/login'},
   URLSearchParams,Date,Math,JSON,TAB_ID:'ppe-login-test',
-  GM_xmlhttpRequest:t.request,isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:()=>({}),
+  GM_xmlhttpRequest:t.request,isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>k==='Equipment'?{}:null,
   findVectorNavigationTarget:()=>null,getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
   setTimeout:f=>callbacks.push(f),setInterval:f=>intervals.push(f)};
  vm.runInNewContext(ppeScript,context);
@@ -267,7 +267,7 @@ test('PPE keeps its existing broker heartbeat live during a long native owner lo
  const ctx={sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},
   URLSearchParams,Date,Math,JSON,TAB_ID:'ppe-slow-lookup',
   GM_xmlhttpRequest:t.request,isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,
-  findVectorNavigationTarget:()=>({}),getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
+  findVectorNavigationTarget:k=>k==='Equipment'?{}:null,getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
   departmentAutoScanBurst:async()=>{entered++;return lookup},
   setTimeout:f=>callbacks.push(f),setInterval:f=>intervals.push(f)};
  vm.runInNewContext(ppeScript,ctx);callbacks[0]();await flush();assert.equal(entered,1);
@@ -285,7 +285,7 @@ test('inactive C tour never consumes department rotation or reports an idle C-to
  tab.setItem('mvciEnterprisePpeDepartmentTurnV1','2');
  let scans=0,pilot=0;
  const ctx={sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},URLSearchParams,Date,Math,JSON,TAB_ID:'inactive-c-test',
- GM_xmlhttpRequest:t.request,isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:()=>({}),getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
+ GM_xmlhttpRequest:t.request,isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>k==='Equipment'?{}:null,getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
  cPilotFetch:async()=>({activeTour:false,people:[]}),departmentAutoScanBurst:async()=>{scans++;return 'none'},startCShiftPilotNativeRecheck:async()=>{pilot++;return false},
  setTimeout:f=>tasks.push(f),setInterval:()=>{}};
  vm.runInNewContext(ppeScript,ctx);tasks[0]();await flush();
@@ -294,9 +294,22 @@ test('inactive C tour never consumes department rotation or reports an idle C-to
 test('inactive C tour preserves a genuine department source failure as error',async()=>{
  const t=transport(),tab=storage(),tasks=[];
  const ctx={sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},URLSearchParams,Date,Math,JSON,TAB_ID:'inactive-c-error',GM_xmlhttpRequest:t.request,
- isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:()=>({}),getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
+ isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>k==='Equipment'?{}:null,getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
  cPilotFetch:async()=>({activeTour:false,people:[]}),departmentAutoScanBurst:async()=>{throw Error('native search unresolved')},clean:x=>String(x),
  startCShiftPilotNativeRecheck:async()=>assert.fail('inactive C fallback invoked'),setTimeout:f=>tasks.push(f),setInterval:()=>{}};
  vm.runInNewContext(ppeScript,ctx);tasks[0]();await flush();
  assert.equal(t.calls.find(c=>c.route==='/v1/complete')?.outcome,'error');
+});
+
+test('native Login control at normal asset-manager URL prevents new PPE claim even behind stale Equipment nav',async()=>{
+ const t=transport(),tab=storage(),tasks=[];tab.setItem('mvciEnterpriseDedicatedRoleV1','ppe');
+ const ctx={sessionStorage:tab,location:{search:'',pathname:'/main/asset-manager'},URLSearchParams,Date,Math,JSON,TAB_ID:'ppe-login-overlay',GM_xmlhttpRequest:t.request,
+ isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>['Login','Equipment'].includes(k)?{}:null,getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,setTimeout:f=>tasks.push(f),setInterval:()=>{}};
+ vm.runInNewContext(ppeScript,ctx);tasks[0]();await flush();assert.equal(t.calls.find(c=>c.route==='/v1/heartbeat')?.ready,false);assert.equal(t.calls.filter(c=>c.route==='/v1/claim').length,0);
+});
+test('expired native session releases existing lease as auth_required despite retained Captain checkpoint',async()=>{
+ const t=transport(),tab=storage(),tasks=[];tab.setItem('mvciEnterpriseDedicatedRoleV1','ppe');tab.setItem('mvciEnterprisePpeLeaseV1',JSON.stringify({id:'3ab60fd7-5be9-4a1c-aacb-110000000001',claimedAt:Date.now()-8000}));
+ const ctx={sessionStorage:tab,location:{search:'',pathname:'/main/asset-manager'},URLSearchParams,Date,Math,JSON,TAB_ID:'ppe-login-held-lease',GM_xmlhttpRequest:t.request,
+ isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>k==='Login'?{}:null,getRun:()=>null,getCaptainDailyCheck:()=>({status:'running'}),captainDailyBusy:false,setTimeout:f=>tasks.push(f),setInterval:()=>{}};
+ vm.runInNewContext(ppeScript,ctx);tasks[0]();await flush();assert.equal(t.calls.find(c=>c.route==='/v1/complete')?.outcome,'auth_required');assert.equal(tab.getItem('mvciEnterprisePpeLeaseV1'),null);assert.equal(t.calls.filter(c=>c.route==='/v1/claim').length,0);
 });

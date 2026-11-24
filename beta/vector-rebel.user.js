@@ -19461,11 +19461,21 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 onerror:()=>reject(Error('Enterprise worker offline')),
                 ontimeout:()=>reject(Error('Enterprise worker timed out'))
             }));
+        function sourceRequiresAuthentication(){
+            const path=String(location.pathname||'');
+            // Live Vector can render its Login button at the ordinary
+            // /main/asset-manager URL after session expiry. Do not treat
+            // paired RC or a stale navigation layer behind it as auth.
+            return /^\/(?:login|signin|sign-in)(?:\/|$)/i.test(path)||
+                !!findVectorNavigationTarget('Login')||
+                !!findVectorNavigationTarget('Log in')||
+                !!findVectorNavigationTarget('Sign in');
+        }
         function sourceIsReady(){
             const path=String(location.pathname||'');
             // Equipment navigation is evidence of an authenticated native
             // screen; RC pairing alone is not evidence of source login.
-            return /^\/main(?:\/|$)/i.test(path)&&
+            return !sourceRequiresAuthentication()&&/^\/main(?:\/|$)/i.test(path)&&
                 !!findVectorNavigationTarget('Equipment')&&
                 isMasterOwnerInstallation()&&rebelCommandPaired();
         }
@@ -19483,7 +19493,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             // before the final acknowledgement; never fake success.
             await broker('heartbeat',{dedicated:true,
                 ready:sourceIsReady(),busy:true});
-            await broker('complete',{id,outcome});
+            await broker('complete',{id,outcome:outcome!=='success'&&sourceRequiresAuthentication()?'auth_required':outcome});
         }
         async function poll(){
             if(polling){await pulseDuringWork();return;}
@@ -19500,16 +19510,16 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     ready:auth,busy});
                 const lease=readLease();
                 if(lease){
+                    if(sourceRequiresAuthentication()){
+                        try{await finishLease(lease.id,'auth_required');}
+                        finally{clearResult();putLease(null);}
+                        return; // Retain local read checkpoint, no new source work.
+                    }
                     // A real native Item Log read may navigate away from
                     // Equipment; finish its receipt even without the nav.
                     if(busy)return; // Existing native read is not complete.
                     const result=takeResult();
                     if(!result||result.at<lease.claimedAt){
-                        if(!auth&&/^\/(?:login|signin|sign-in)(?:\/|$)/i.test(path)){
-                            try{await finishLease(lease.id,'auth_required');}
-                            finally{clearResult();putLease(null);}
-                            return;
-                        }
                         if(Date.now()-lease.claimedAt<60000)return;
                         // Stopped/aborted item read is an error, NOT PASS.
                         try{await finishLease(lease.id,'error');}finally{
