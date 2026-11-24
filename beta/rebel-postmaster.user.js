@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Postmaster
 // @namespace    mission-vector-check-it-rebel-postmaster
-// @version      1.2.33
+// @version      1.2.34
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @description  Minimal read-only Outlook Web collector for Rebel Command with whole-mailbox indexing and automatic capture of messages the user opens.
@@ -22,7 +22,7 @@
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_POSTMASTER)return;
-const VERSION='rebel-postmaster-1.2.33';
+const VERSION='rebel-postmaster-1.2.34';
 const DEFAULT_ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const MANAGED_UPDATE_URL='https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js';
 function openManagedUpdate(){
@@ -407,7 +407,29 @@ async function reportMailboxProgress(ms,target=null){
     catch(e){trace('mailbox_progress_report_error',{error:clean(e?.message||e)});return false;}
 }
 function findFolderNavTarget(target){const candidates=folderCandidates(),exact=candidates.find(c=>c.key===target.key);if(exact)return exact;if(String(target?.key||'').startsWith('name:'))return candidates.find(c=>clean(c.name).toLowerCase()===clean(target.name).toLowerCase())||null;return null}
-async function navigateToFolder(target){const c=findFolderNavTarget(target);if(c?.href){try{const u=new URL(c.href,location.href);if(u.href!==location.href){location.assign(u.href);return false}}catch(_){}}const el=c?._el;if(!el||!isFolderTreeNode(el))throw new Error(`Folder navigation target not found for ${target.name}. Expand the Outlook folder tree and resume.`);const before=folderName();el.click();const started=Date.now();while(Date.now()-started<8000){await wait(250);if(targetMatchesPage(target))return true}throw new Error(`Outlook did not navigate to ${target.name} after the safe folder-tree click (started from ${before}).`)}
+async function navigateToFolder(target){
+    const c=findFolderNavTarget(target),el=c?._el,account=mailboxId();
+    if(!account||!el||!isFolderTreeNode(el))
+        throw Error('Folder navigation target not found for '+target.name+'. Expand the Outlook folder tree and resume.');
+    // Use Outlook's own native folder selection; never force a full page
+    // navigation just to switch a folder in an authenticated mailbox.
+    const before=folderName();el.click();
+    const started=Date.now();
+    for(let i=0;i<33;i++){
+        if(mailboxAbort)throw Error('Mailbox sync paused before folder navigation completed.');
+        if(mailboxId()!==account)throw Error('Outlook account changed during folder navigation.');
+        const selected=selectedFolderCandidate();
+        if(selected&&selected.key===target.key)return true;
+        if(selected&&String(target.key||'').startsWith('name:')&&
+            clean(selected.name).toLowerCase()===clean(target.name).toLowerCase()){
+            const matches=folderCandidates(true).filter(x=>clean(x.name).toLowerCase()===clean(target.name).toLowerCase());
+            if(matches.length===1&&matches[0].key===selected.key)return true;
+        }
+        if(i===32||Date.now()-started>=8*60000)break;
+        await wait(250);
+    }
+    throw Error('Outlook did not confirm selected folder '+target.name+' after native folder-tree activation (started from '+before+').');
+}
 function statePayload(s){return{version:VERSION,workEmailIngestionState:{provider:'outlook_web_rendered_ui',mailboxId:s.mailboxId,folderId:s.folderId,folderName:s.folderName,syncStatus:s.status,lastPageCursor:s.nonMailWitness==='outlook_notes_view'?'non_mail:outlook_notes_view':String(s.lastTop??''),deltaCursor:s.nonMailWitness==='outlook_notes_view'?'non_mail_excluded':s.lastKey||'',indexedCount:Number(s.seen?.length||0),lastSuccessAt:s.lastSuccessAt||undefined,lastError:s.lastError||'',updatedAt:new Date().toISOString()}}}
 async function reportCrawl(s){try{await request(statePayload(s))}catch(_){/* Local checkpoint remains authoritative until bridge state ingestion is enabled. */}}
 let crawlAbort=false;
@@ -692,7 +714,7 @@ function render(){
     state.last=snapshot();const r=ensureUi();r.replaceChildren();const cs=crawlState(),same=crawlMatchesPage(cs),ms=mailboxState(),mb=mailboxSummary(ms),scopeOk=mailboxMatches(ms),needsVerification=mailboxHasUnverifiedEmpty(ms),retryNeeded=mailboxNeedsRetry(ms);
     if(state.open){
         const p=add(r,'div',null,'p'),h=add(p,'div',null,'h'),title=add(h,'div');add(title,'b','REBEL POSTMASTER');
-        const sub=add(title,'div','v1.2.33 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
+        const sub=add(title,'div','v1.2.34 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
         const close=add(h,'button','','orb header-orb');close.type='button';close.dataset.pmAction='close';close.title='Minimize Rebel Postmaster';close.setAttribute('aria-label','Minimize Rebel Postmaster');close.innerHTML=REBEL_SYMBOL_HTML;
         const b=add(p,'div',null,'b');
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');
