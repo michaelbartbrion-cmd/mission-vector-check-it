@@ -19443,16 +19443,39 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 onerror:()=>reject(Error('Enterprise worker offline')),
                 ontimeout:()=>reject(Error('Enterprise worker timed out'))
             }));
+        function sourceIsReady(){
+            const path=String(location.pathname||'');
+            // Equipment navigation is evidence of an authenticated native
+            // screen; RC pairing alone is not evidence of source login.
+            return /^\/main(?:\/|$)/i.test(path)&&
+                !!findVectorNavigationTarget('Equipment')&&
+                isMasterOwnerInstallation()&&rebelCommandPaired();
+        }
+        let heartbeatPending=false;
+        async function pulseDuringWork(){
+            if(heartbeatPending)return;
+            heartbeatPending=true;
+            try{await broker('heartbeat',{dedicated:true,
+                ready:sourceIsReady(),busy:true});}
+            catch{}finally{heartbeatPending=false;}
+        }
+        async function finishLease(id,outcome){
+            // The local broker requires a recent heartbeat even for a
+            // completed long native operation. Refresh it immediately
+            // before the final acknowledgement; never fake success.
+            await broker('heartbeat',{dedicated:true,
+                ready:sourceIsReady(),busy:true});
+            await broker('complete',{id,outcome});
+        }
         async function poll(){
-            if(polling)return;polling=true;
+            if(polling){await pulseDuringWork();return;}
+            polling=true;
             try{
                 // Rebel Command pairing is not proof that the native Vector
                 // session is authenticated. SSO can redirect this designated
                 // tab to /login, while the userscript still has its pairing.
                 const path=String(location.pathname||'');
-                const sourceReady=/^\/main(?:\/|$)/i.test(path)&&
-                    !!findVectorNavigationTarget('Equipment');
-                const auth=isMasterOwnerInstallation()&&rebelCommandPaired()&&sourceReady;
+                const auth=sourceIsReady();
                 const busy=!!getRun()||!!getCaptainDailyCheck()||
                     captainDailyBusy;
                 await broker('heartbeat',{dedicated:true,
@@ -19465,21 +19488,20 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     const result=takeResult();
                     if(!result||result.at<lease.claimedAt){
                         if(!auth&&/^\/(?:login|signin|sign-in)(?:\/|$)/i.test(path)){
-                            try{await broker('complete',{id:lease.id,outcome:'auth_required'});}
+                            try{await finishLease(lease.id,'auth_required');}
                             finally{clearResult();putLease(null);}
                             return;
                         }
                         if(Date.now()-lease.claimedAt<60000)return;
                         // Stopped/aborted item read is an error, NOT PASS.
-                        try{await broker('complete',{id:lease.id,
-                            outcome:'error'});}finally{
+                        try{await finishLease(lease.id,'error');}finally{
                             clearResult();putLease(null);
                         }
                         return;
                     }
                     const outcome=result.queued>Number(result.unreadable||0)&&result.delivered===true?
                         'success':result.unreadable>0?'error':'no_work';
-                    try{await broker('complete',{id:lease.id,outcome});}
+                    try{await finishLease(lease.id,outcome);}
                     finally{clearResult();putLease(null);}
                     return;
                 }
@@ -19503,8 +19525,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         const result=await departmentAutoScanBurst();
                         if(result==='started')return; // Native Item Log navigation.
                         if(result==='mapped'){
-                            try{await broker('complete',{id:answer.id,
-                                outcome:'no_work'});}finally{putLease(null);}
+                            try{await finishLease(answer.id,'no_work');}finally{putLease(null);}
                             return;
                         }
                     }catch(error){
@@ -19561,15 +19582,13 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     let mapped=false;
                     try{mapped=await cPilotMapWorkingGear(autoMapTour,true);}
                     catch{}
-                    try{await broker('complete',{id:answer.id,
-                        outcome:mapped?'no_work':'error'});}
+                    try{await finishLease(answer.id,mapped?'no_work':'error');}
                     finally{putLease(null);}
                     return;
                 }
                 const started=await startCShiftPilotNativeRecheck(true);
                 if(!started){
-                    try{await broker('complete',{id:answer.id,
-                        outcome:'no_work'});}finally{putLease(null);}
+                    try{await finishLease(answer.id,'no_work');}finally{putLease(null);}
                 }
             }catch{
                 // Broker exposes offline health; no crew-facing error spam.

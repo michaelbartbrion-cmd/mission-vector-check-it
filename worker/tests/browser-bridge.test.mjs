@@ -259,3 +259,24 @@ test('paired Vector login screen cannot claim a PPE lease and reports not ready'
  intervals[0]();await flush();
  assert.equal(t.calls.filter(c=>c.route==='/v1/claim').length,0,'blank authenticated route is not sufficient either');
 });
+
+test('PPE keeps its existing broker heartbeat live during a long native owner lookup without claiming another lease',async()=>{
+ const t=transport(),tab=storage(),callbacks=[],intervals=[];
+ let resolveLookup;const lookup=new Promise(r=>{resolveLookup=r});
+ let entered=0;
+ const ctx={sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},
+  URLSearchParams,Date,Math,JSON,TAB_ID:'ppe-slow-lookup',
+  GM_xmlhttpRequest:t.request,isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,
+  findVectorNavigationTarget:()=>({}),getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
+  departmentAutoScanBurst:async()=>{entered++;return lookup},
+  setTimeout:f=>callbacks.push(f),setInterval:f=>intervals.push(f)};
+ vm.runInNewContext(ppeScript,ctx);callbacks[0]();await flush();assert.equal(entered,1);
+ intervals[0]();await flush();
+ assert.equal(t.calls.filter(c=>c.route==='/v1/claim').length,1);
+ assert.equal(t.calls.filter(c=>c.route==='/v1/heartbeat').at(-1).busy,true);
+ resolveLookup('mapped');await flush();
+ assert.equal(t.calls.at(-2).route,'/v1/heartbeat');
+ assert.equal(t.calls.at(-1).route,'/v1/complete');
+ assert.equal(t.calls.at(-1).outcome,'no_work');
+ assert.equal(t.calls.filter(c=>c.route==='/v1/complete').length,1);
+});
