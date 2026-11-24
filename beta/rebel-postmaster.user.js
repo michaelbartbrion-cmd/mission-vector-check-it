@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Postmaster
 // @namespace    mission-vector-check-it-rebel-postmaster
-// @version      1.2.32
+// @version      1.2.33
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @description  Minimal read-only Outlook Web collector for Rebel Command with whole-mailbox indexing and automatic capture of messages the user opens.
@@ -22,7 +22,7 @@
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_POSTMASTER)return;
-const VERSION='rebel-postmaster-1.2.32';
+const VERSION='rebel-postmaster-1.2.33';
 const DEFAULT_ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const MANAGED_UPDATE_URL='https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js';
 function openManagedUpdate(){
@@ -190,7 +190,23 @@ function folderId(){const key=currentFolderKey();return `${mailboxId()}:${key||`
 function credibleMessageRow(m){return!!m?._strongId&&clean(m.senderName).length>=2&&clean(m.subject).length>=1&&!symbolOnly(m.senderName)&&!timeLike(m.senderName)&&!timeLike(m.subject)}
 function assess(messages){const strong=messages.filter(m=>m._strongId).length,valid=messages.filter(credibleMessageRow).length,positions=messages.every((m,i)=>Number(m.listPosition)===i);return{quality:messages.length&&strong===messages.length&&valid===messages.length&&positions?'good':'partial',total:messages.length,strongIdRows:strong,validRows:valid,positionsValid:positions}}
 function snapshot(){const messages=candidateRows().map(parseRow),assessment=assess(messages);return{messages,assessment,folder:folderName(),mailbox:mailboxHint()}}
-async function stableSnapshot(timeout=2200){const started=Date.now();let best=snapshot(),last='',stable=0;while(Date.now()-started<timeout){const x=snapshot();if(x.messages.length>best.messages.length)best=x;const sig=x.messages.map(m=>`${m.listPosition}:${m.messageKey}`).join('|');if(sig&&sig===last)stable++;else stable=0;last=sig;if(stable>=2)return x;await wait(220)}return best}
+// A background Chromium timer can wake a minute late. Count actual
+// source observations rather than abandoning the wait before sampling again.
+async function stableSnapshot(timeout=2200){
+    const attempts=Math.max(3,Math.min(16,Math.ceil(timeout/220)+1));
+    const started=Date.now();let last='',stable=0,x;
+    for(let i=0;i<attempts;i++){
+        x=snapshot();
+        const sig=JSON.stringify(x.messages.map(m=>[m.listPosition,m.messageKey]));
+        if(x.messages.length&&!mailBusy()){
+            stable=sig===last?stable+1:1;last=sig;
+            if(stable>=3)return {...x,settled:true};
+        }else{last='';stable=0;}
+        if(i+1===attempts||Date.now()-started>=8*60000)break;
+        await wait(220);
+    }
+    return {...x,settled:false};
+}
 function mailListHosts(){const out=[];for(const sel of ['[role="listbox"]','[role="grid"]','[aria-label*="message list" i]','[aria-label*="mail list" i]','[role="list"][aria-labelledby]','[role="list"][aria-label]'])for(const el of document.querySelectorAll(sel))if(el instanceof HTMLElement&&visible(el)&&!el.closest('[role="tree"]')&&(!el.matches('[role="list"]')||isNativeMessageListRegion(el))&&!out.includes(el))out.push(el);return out}
 function listScroller(){
     const rows=candidateRows(),candidates=[];
@@ -222,7 +238,7 @@ async function stableCrawlRows(s,scroller){
         if(!scroller.isConnected)throw new Error('Native message list replaced during viewport collection.');
         const snap=await stableSnapshot(2200);
         const strong=snap.messages.filter(credibleMessageRow);
-        if(strong.length&&!mailBusy())return strong;
+        if(snap.settled===true&&strong.length&&!mailBusy())return strong;
         if(attempt<2)await wait(1200);
     }
     return null;
@@ -309,7 +325,9 @@ async function stableNonMailNotesView(){
 }
 async function stableEmptyFolder(timeout=5200){
     const started=Date.now();let witnessPasses=0;
-    while(Date.now()-started<timeout){
+    const attempts=Math.max(6,Math.min(20,Math.ceil(timeout/350)+1));
+    for(let i=0;i<attempts;i++){
+        if(i>0&&Date.now()-started>=8*60000)return false;
         if(candidateRows().length||mailBusy()||!hasExplicitEmptyFolderWitness()){
             witnessPasses=0;await wait(350);continue;
         }
@@ -452,7 +470,7 @@ function newCrawl(){return{version:2,mailboxId:mailboxId(),folderId:folderId(),f
 function crawlMatchesPage(s){if(!s||s.mailboxId!==mailboxId())return false;const key=currentFolderKey();if(s.folderKey&&key)return s.folderKey===key;return s.folderId===folderId()}
 async function paceIndexBatch(count){const key='mvciPostmasterIndexNextAtV1';const now=Date.now();const pending=Math.max(0,Math.min(65000,Number(GM_getValue(key,0)||0)-now));if(pending>0)await wait(pending);GM_setValue(key,Date.now()+3000+1200*Math.min(50,Math.max(1,count)));}
 async function uploadNewRows(rows,s){const acknowledged=new Set(s.seen);const fresh=[...new Map(rows.filter(m=>m._strongId&&m.messageKey&&!acknowledged.has(m.messageKey)).map(m=>[m.messageKey,m])).values()];if(!fresh.length)return 0;let total=0;for(let i=0;i<fresh.length;i+=50){const batch=fresh.slice(i,i+50);const msgs=batch.map(({_strongId,...m})=>m);await paceIndexBatch(msgs.length);if(!crawlMatchesPage(s))throw new Error('Mailbox or folder changed during index pacing; no batch submitted.');if(crawlAbort)throw new Error('Folder sync paused before next batch.');const res=await request(makeCapture(msgs,'good',`Whole-folder index batch for ${s.folderName}; stable Outlook message IDs only. Read-only virtual-list crawl; no messages opened or mailbox state changed.`,s.folderName));if(!res?.workEmail?.accepted)throw new Error(res?.workEmail?.error||res?.workEmail?.reason||'Rebel Command did not accept the folder-index batch.');if(res.workEmail.messages!==msgs.length)throw new Error('Folder-index receipt did not acknowledge every unique native message; checkpoint unchanged.');for(const m of batch)if(!s.seen.includes(m.messageKey))s.seen.push(m.messageKey);s.lastKey=msgs[msgs.length-1]?.messageKey||s.lastKey;s.lastSuccessAt=new Date().toISOString();s.updatedAt=s.lastSuccessAt;if(s.seen.length>MAX_FOLDER_MESSAGES)throw new Error(`Folder crawl safety ceiling of ${MAX_FOLDER_MESSAGES} unique messages reached.`);saveCrawl(s);await reportCrawl(s);total+=msgs.length;}return total}
-async function runFolderSync({fresh=false,managed=false}={}){if(!paired())throw new Error('Pairing not configured.');if(state.busy&&!managed)throw new Error('Postmaster is already busy.');if(!managed)state.busy=true;crawlAbort=false;render();let s=crawlState();try{if(fresh||!crawlMatchesPage(s)||s?.status==='complete'){s=newCrawl();clearCrawl();saveCrawl(s)}resetFailedCrawlCursor(s);s.status='running';s.lastError='';s.updatedAt=new Date().toISOString();noteFolderCoverage(s);saveCrawl(s);await reportCrawl(s);if(!s.seen.length&&await stableNonMailNotesView()&&crawlMatchesPage(s)){s.nonMailWitness='outlook_notes_view';s.status='complete';s.lastSuccessAt=new Date().toISOString();s.updatedAt=s.lastSuccessAt;saveCrawl(s);await reportCrawl(s);state.msg='Native Outlook Notes is not a mail folder; excluded from email indexing. Notes were not read or counted.';state.kind='info';return}let initial=await stableSnapshot(2600);if(!initial.messages.length&&await recoverEmptyResumeViewport(s))initial=await stableSnapshot(2600);if(!initial.messages.length){const stableEmpty=await stableEmptyFolder();if(stableEmpty&&crawlMatchesPage(s)){assertFolderCoverage(s);s.emptyWitness=true;s.status='complete';s.lastSuccessAt=new Date().toISOString();s.updatedAt=s.lastSuccessAt;saveCrawl(s);await reportCrawl(s);state.msg=`Folder index complete: 0 messages in ${s.folderName}.`;state.kind='success';return}throw new Error('No credible message rows were found after a stable wait; folder was not marked complete.')}if(initial.assessment.validRows<1)throw new Error('Outlook displayed rows, but none had both a stable message ID and credible sender/subject structure. Folder was not marked complete.');await uploadNewRows(initial.messages.filter(credibleMessageRow),s);let scroller=listScroller();if(!scroller){const confirm=await stableSnapshot(2600),strong=confirm.messages.filter(credibleMessageRow);await uploadNewRows(strong,s);const firstKeys=initial.messages.filter(credibleMessageRow).map(m=>m.messageKey).sort().join('|'),secondKeys=strong.map(m=>m.messageKey).sort().join('|');if(!mailBusy()&&firstKeys&&firstKeys===secondKeys){assertFolderCoverage(s);s.status='complete';s.lastSuccessAt=new Date().toISOString();s.updatedAt=s.lastSuccessAt;saveCrawl(s);await reportCrawl(s);state.msg=`Folder index complete: ${s.seen.length} unique messages indexed from non-scrolling folder ${s.folderName}.`;state.kind='success';return}throw new Error('Outlook message rows were visible but no stable scroll container or stable non-scrolling list could be verified.')}if(fresh||s.steps===0||!Number.isFinite(Number(s.lastTop))){scroller.scrollTop=0;await wait(900)}else{scroller.scrollTop=Math.max(0,Number(s.lastTop)||0);await wait(700)}let noNew=0,noMove=0,lastTop=-1,bottomRetries=0;while(!crawlAbort&&s.steps<MAX_CRAWL_STEPS){if(!crawlMatchesPage(s))throw new Error('Mailbox or folder changed during sync. Return to the original folder and resume.');const activeScroller=listScroller();if(activeScroller&&activeScroller!==scroller){scroller=activeScroller;scroller.scrollTop=Math.min(Math.max(0,scroller.scrollHeight-scroller.clientHeight),Math.max(0,Number(s.lastTop)||0));await wait(650);noMove=0;}if(!scroller.isConnected)throw new Error('Outlook replaced the scrolling list before its new source could be confirmed. Partial coverage retained.');const strong=await stableCrawlViewport(s,scroller);const added=await uploadNewRows(strong,s);noNew=added?0:noNew+1;s.steps++;const before=scroller.scrollTop,max=Math.max(0,scroller.scrollHeight-scroller.clientHeight),nearBottom=before>=max-6;const step=Math.max(40,Math.floor(scroller.clientHeight*0.65));scroller.scrollTop=Math.min(max,before+step);await wait(650);const after=scroller.scrollTop;noMove=Math.abs(after-before)<3?noMove+1:0;s.lastTop=after;s.updatedAt=new Date().toISOString();saveCrawl(s);if(crawlAbort)break;if((nearBottom&&noNew>=3)||(noMove>=3&&noNew>=2)){
+async function runFolderSync({fresh=false,managed=false}={}){if(!paired())throw new Error('Pairing not configured.');if(state.busy&&!managed)throw new Error('Postmaster is already busy.');if(!managed)state.busy=true;crawlAbort=false;render();let s=crawlState();try{if(fresh||!crawlMatchesPage(s)||s?.status==='complete'){s=newCrawl();clearCrawl();saveCrawl(s)}resetFailedCrawlCursor(s);s.status='running';s.lastError='';s.updatedAt=new Date().toISOString();noteFolderCoverage(s);saveCrawl(s);await reportCrawl(s);if(!s.seen.length&&await stableNonMailNotesView()&&crawlMatchesPage(s)){s.nonMailWitness='outlook_notes_view';s.status='complete';s.lastSuccessAt=new Date().toISOString();s.updatedAt=s.lastSuccessAt;saveCrawl(s);await reportCrawl(s);state.msg='Native Outlook Notes is not a mail folder; excluded from email indexing. Notes were not read or counted.';state.kind='info';return}let initial=await stableSnapshot(2600);if(!initial.messages.length&&await recoverEmptyResumeViewport(s))initial=await stableSnapshot(2600);if(!initial.messages.length){const stableEmpty=await stableEmptyFolder();if(stableEmpty&&crawlMatchesPage(s)){assertFolderCoverage(s);s.emptyWitness=true;s.status='complete';s.lastSuccessAt=new Date().toISOString();s.updatedAt=s.lastSuccessAt;saveCrawl(s);await reportCrawl(s);state.msg=`Folder index complete: 0 messages in ${s.folderName}.`;state.kind='success';return}throw new Error('No credible message rows were found after a stable wait; folder was not marked complete.')}if(initial.settled!==true||initial.assessment.validRows<1)throw new Error('Outlook displayed rows, but none had both a stable message ID and credible sender/subject structure. Folder was not marked complete.');await uploadNewRows(initial.messages.filter(credibleMessageRow),s);let scroller=listScroller();if(!scroller){const confirm=await stableSnapshot(2600),strong=confirm.messages.filter(credibleMessageRow);if(confirm.settled!==true)throw Error('Native non-scrolling list did not settle; partial coverage retained.');await uploadNewRows(strong,s);const firstKeys=initial.messages.filter(credibleMessageRow).map(m=>m.messageKey).sort().join('|'),secondKeys=strong.map(m=>m.messageKey).sort().join('|');if(confirm.settled===true&&!mailBusy()&&firstKeys&&firstKeys===secondKeys){assertFolderCoverage(s);s.status='complete';s.lastSuccessAt=new Date().toISOString();s.updatedAt=s.lastSuccessAt;saveCrawl(s);await reportCrawl(s);state.msg=`Folder index complete: ${s.seen.length} unique messages indexed from non-scrolling folder ${s.folderName}.`;state.kind='success';return}throw new Error('Outlook message rows were visible but no stable scroll container or stable non-scrolling list could be verified.')}if(fresh||s.steps===0||!Number.isFinite(Number(s.lastTop))){scroller.scrollTop=0;await wait(900)}else{scroller.scrollTop=Math.max(0,Number(s.lastTop)||0);await wait(700)}let noNew=0,noMove=0,lastTop=-1,bottomRetries=0;while(!crawlAbort&&s.steps<MAX_CRAWL_STEPS){if(!crawlMatchesPage(s))throw new Error('Mailbox or folder changed during sync. Return to the original folder and resume.');const activeScroller=listScroller();if(activeScroller&&activeScroller!==scroller){scroller=activeScroller;scroller.scrollTop=Math.min(Math.max(0,scroller.scrollHeight-scroller.clientHeight),Math.max(0,Number(s.lastTop)||0));await wait(650);noMove=0;}if(!scroller.isConnected)throw new Error('Outlook replaced the scrolling list before its new source could be confirmed. Partial coverage retained.');const strong=await stableCrawlViewport(s,scroller);const added=await uploadNewRows(strong,s);noNew=added?0:noNew+1;s.steps++;const before=scroller.scrollTop,max=Math.max(0,scroller.scrollHeight-scroller.clientHeight),nearBottom=before>=max-6;const step=Math.max(40,Math.floor(scroller.clientHeight*0.65));scroller.scrollTop=Math.min(max,before+step);await wait(650);const after=scroller.scrollTop;noMove=Math.abs(after-before)<3?noMove+1:0;s.lastTop=after;s.updatedAt=new Date().toISOString();saveCrawl(s);if(crawlAbort)break;if((nearBottom&&noNew>=3)||(noMove>=3&&noNew>=2)){
 const expected=noteFolderCoverage(s);
 if(expected!==null&&s.seen.length<expected&&bottomRetries<3){
     bottomRetries++;
@@ -674,7 +692,7 @@ function render(){
     state.last=snapshot();const r=ensureUi();r.replaceChildren();const cs=crawlState(),same=crawlMatchesPage(cs),ms=mailboxState(),mb=mailboxSummary(ms),scopeOk=mailboxMatches(ms),needsVerification=mailboxHasUnverifiedEmpty(ms),retryNeeded=mailboxNeedsRetry(ms);
     if(state.open){
         const p=add(r,'div',null,'p'),h=add(p,'div',null,'h'),title=add(h,'div');add(title,'b','REBEL POSTMASTER');
-        const sub=add(title,'div','v1.2.32 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
+        const sub=add(title,'div','v1.2.33 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
         const close=add(h,'button','','orb header-orb');close.type='button';close.dataset.pmAction='close';close.title='Minimize Rebel Postmaster';close.setAttribute('aria-label','Minimize Rebel Postmaster');close.innerHTML=REBEL_SYMBOL_HTML;
         const b=add(p,'div',null,'b');
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');
