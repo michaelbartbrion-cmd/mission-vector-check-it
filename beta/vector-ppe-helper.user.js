@@ -17351,10 +17351,26 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         try{sessionStorage.setItem('mvciDepartmentPpeAttemptsV1',
             JSON.stringify(state));}catch{}
     }
-    function departmentNextCandidate(board){
+    function departmentPilotCovered(board,pilot){
+        // Membership in the Station 4 C-shift roster does NOT mean the
+        // firefighter is covered by that pilot every day. They may be
+        // working overtime on another shift/station.
+        if(!pilot?.activeTour||!Array.isArray(pilot.people)||
+           !/^\d{4}-\d{2}-\d{2}$/.test(pilot.tourStart||''))return new Set();
+        const date=Date.parse(board.date+'T12:00:00Z');
+        const start=Date.parse(pilot.tourStart+'T12:00:00Z');
+        if(!Number.isFinite(date)||!Number.isFinite(start)||date<start||
+           date-start>=2*86400000)return new Set();
+        const day=date===start?'dutyDay1':'dutyDay2';
+        return new Set(pilot.people.filter(p=>p.attendance==='working'&&
+            p[day]==='working'&&Number(p.knownItems)>0&&
+            Number(p.maskKnownItems)>0&&C_PILOT_NAMES.has(masterNameKey(p.name)))
+            .map(p=>masterNameKey(p.name)));
+    }
+    function departmentNextCandidate(board,pilotCovered=new Set()){
         const now=Date.now(),attempts=departmentAutoAttempts(board.date).people;
         const outside=(board.people||[]).filter(p=>
-            !C_PILOT_NAMES.has(masterNameKey(p.name))&&
+            !pilotCovered.has(masterNameKey(p.name))&&
             p.sourceStatus==='scheduled_unconfirmed'&&
             p.attendanceConfirmed===false&&
             /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(p.prefix||''));
@@ -17395,6 +17411,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         if(!isMasterOwnerInstallation()||!rebelCommandPaired()||
            getRun()||getCaptainDailyCheck()||captainDailyBusy)return'none';
         const board=await departmentFetch();
+        let pilotCovered=new Set();
+        try{if(typeof cPilotFetch==='function')pilotCovered=departmentPilotCovered(board,await cPilotFetch(false));}catch{}
         // Avoid repeatedly using a fragile Responsible Party autocomplete
         // for someone whose OWN equipment was already authenticated in a
         // prior native Item Log. Only reuse exact approved owner/asset paths
@@ -17408,7 +17426,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         // After that owner has one successful read, rotate back to safely
         // map remaining scheduled people from their archived native paths.
         const hasFirstNativeReadPending=(board.people||[]).some(p=>
-            !C_PILOT_NAMES.has(masterNameKey(p.name))&&
+            !pilotCovered.has(masterNameKey(p.name))&&
             p.sourceStatus==='scheduled_unconfirmed'&&
             p.attendanceConfirmed===false&&
             Number(p.knownItems)>0&&
@@ -17423,7 +17441,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                !Array.isArray(archive.people))
                 throw Error('Verified prior native PPE inventory source unavailable.');
             const picked=archive.people.find(p=>
-                !C_PILOT_NAMES.has(masterNameKey(p.personName))&&
+                !pilotCovered.has(masterNameKey(p.personName))&&
                 Number(p.knownHistoryItems)>0&&
                 (board.people||[]).some(x=>x.prefix===p.personPrefix&&
                     masterNameKey(x.name)===masterNameKey(p.personName)&&
@@ -17447,7 +17465,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 }
             }
         }
-        const target=departmentNextCandidate(board);
+        const target=departmentNextCandidate(board,pilotCovered);
         if(!target)return'none';
         departmentMarkAttempt(board.date,target.prefix);
         const roster=getActiveMasterRoster();

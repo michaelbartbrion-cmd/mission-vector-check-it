@@ -21,6 +21,7 @@ function harness(board){
   Date,Math,JSON,URL,URLSearchParams,
   sessionStorage:localStore,
   C_PILOT_NAMES:new Set(['michael brion']),
+  cPilotFetch:async()=>r.pilotBoard??{activeTour:true,tourStart:r.date,people:[{name:'Michael Brion',attendance:'working',dutyDay1:'working',knownItems:10,maskKnownItems:1}]},
   C_PILOT_PENDING_KEY:'test-pending',
   TAB_ID:'ppe-isolated',
   localTodayKey:()=>r.date,
@@ -367,4 +368,23 @@ test('per-person read attempts are throttled without marking any PASS',async()=>
  assert.equal(await h.context.departmentAutoOnePass(),'mapped');
  assert.equal(await h.context.departmentAutoOnePass(),'none');
  assert.equal(h.out.scans,1);
+});
+
+test('scheduled C-roster firefighter working a different tour remains eligible for department archive reuse',async()=>{
+ const h=harness({...unmapped,date:'2026-11-23',pilotBoard:{activeTour:false,people:[]},people:[
+   {name:'Michael Brion',prefix:'BRION',sourceStatus:'scheduled_unconfirmed',attendanceConfirmed:false,knownItems:0,outstandingItems:0}
+ ],archiveCandidates:[{personName:'Michael Brion',personPrefix:'BRION',knownHistoryItems:12}]});
+ assert.equal(await h.context.departmentAutoOnePass(),'mapped');
+ assert.equal(h.out.reusePosts.length,1);
+ assert.equal(h.out.reusePosts[0].personPrefix,'BRION');
+ assert.equal(h.out.reusePosts[0].inspectionSubmitted,false);
+ assert.equal(h.out.nav.length,0);
+});
+test('only confirmed working same-day C pilot with mapped PPE and mask is excluded from duplicate department work',()=>{
+ const h=harness(unmapped);const f=h.context.departmentPilotCovered;
+ const p={name:'Michael Brion',attendance:'working',dutyDay1:'working',dutyDay2:'off',knownItems:10,maskKnownItems:1};
+ assert.equal(f({date:'2026-11-21'},{activeTour:true,tourStart:'2026-11-21',people:[p]}).has('michael brion'),true);
+ assert.equal(f({date:'2026-11-22'},{activeTour:true,tourStart:'2026-11-21',people:[p]}).size,0);
+ assert.equal(f({date:'2026-11-23'},{activeTour:true,tourStart:'2026-11-21',people:[p]}).size,0);
+ assert.equal(f({date:'2026-11-21'},{activeTour:true,tourStart:'2026-11-21',people:[{...p,maskKnownItems:0}]}).size,0);
 });
