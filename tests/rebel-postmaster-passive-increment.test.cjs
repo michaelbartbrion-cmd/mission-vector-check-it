@@ -61,3 +61,20 @@ test('read-only increment uses existing timer and per-mailbox browser lock; no n
  assert.doesNotMatch(code,/\.click\(|location\.(?:assign|replace)|scrollTop\s*=|runFolderSync\(|runMailboxSync\(/);
 });
 
+
+test('automatic one-minute timer triggers collection under exact mailbox browser lock without any click',async()=>{
+ const h=fixture();let tick,lockName,options,started=0,pending;
+ h.ctx.setInterval=(fn,ms)=>{assert.equal(ms,60000);tick=fn;started++;return 1};
+ h.ctx.navigator={locks:{request:(name,opts,fn)=>{lockName=name;options=opts;pending=Promise.resolve(fn({name}));return pending}}};
+ h.ctx.startPassiveWatcher();h.ctx.startPassiveWatcher();
+ assert.equal(started,1);tick();await pending;
+ assert.equal(lockName,'mvci-postmaster-visible-a');assert.equal(options.ifAvailable,true);assert.equal(h.calls.length,1);
+ tick();await pending;assert.equal(h.calls.length,1);
+});
+test('another tab owning the mailbox lock prevents the automatic upload',async()=>{
+ const h=fixture();let tick,pending;
+ h.ctx.setInterval=fn=>{tick=fn;return 1};
+ h.ctx.navigator={locks:{request:(_name,_opts,fn)=>{pending=Promise.resolve(fn(null));return pending}}};
+ h.ctx.startPassiveWatcher();tick();await pending;assert.equal(h.calls.length,0);
+});
+
