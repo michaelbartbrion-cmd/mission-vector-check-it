@@ -68,3 +68,20 @@ test('same native one-person surname lookup actually invokes PPE Search after in
  assert.match(body,/nativeSetInput\(search, term\);\s*submitNativePpeSearch\(search\)/);
  assert.match(body,/masterNameKey\(item.ownerName\) === ownerKey/);
 });
+
+test('actual native search__icon inside search__container is used even when not an HTML button',()=>{
+ const x=factory({buttons:['Submit PPE inspection']});
+ let clicked=0;
+ const icon={disabled:false,getAttribute:()=>'',classList:{contains:v=>v==='search__icon'},click:()=>clicked++};
+ x.field.closest=sel=>sel==='.search__container'?{querySelectorAll:()=>[icon]}:null;
+ x.api.submit(x.field);
+ assert.equal(clicked,1);assert.equal(x.events().length,0);assert.equal(x.clicked(),0);
+});
+test('ambiguous scoped magnifier controls stop without any native clicks',()=>{
+ const x=factory({buttons:['Search']});
+ let clicked=0;
+ const icon=()=>({disabled:false,getAttribute:()=>'',classList:{contains:v=>v==='search__icon'},click:()=>clicked++});
+ x.field.closest=()=>({querySelectorAll:()=>[icon(),icon()]});
+ assert.throws(()=>x.api.submit(x.field),/ambiguous Search buttons/);
+ assert.equal(clicked,0);assert.equal(x.clicked(),0);
+});

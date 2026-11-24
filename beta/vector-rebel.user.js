@@ -10421,7 +10421,17 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         if(!search||!visible(search)||!ppe||!vectorControlLooksActive(ppe)||
            !isConfirmedPpeEquipmentPage())
             throw Error('Native PPE search controls not confirmed; lookup stopped.');
-        const candidates=[...document.querySelectorAll('button')].filter(btn=>
+        // Live Enterprise accessibility tree: #search-input (search__input)
+        // and a native Search button (search__icon) share search__container.
+        // That magnifier is not necessarily an HTML BUTTON. Scope to the
+        // confirmed input's own wrapper, never an inspection/submit action.
+        const wrapper=search.closest?.('.search__container');
+        const scoped=wrapper?[...wrapper.querySelectorAll('button,[role="button"],.search__icon')].filter(btn=>
+            btn!==search&&visible(btn)&&!btn.disabled&&btn.getAttribute('aria-disabled')!=='true'&&
+            (btn.classList?.contains('search__icon')||
+             uiEquals(btn.getAttribute('aria-label')||btn.getAttribute('title')||
+                 btn.innerText||btn.textContent||'','Search'))):[];
+        const candidates=scoped.length?scoped:[...document.querySelectorAll('button')].filter(btn=>
             visible(btn)&&!btn.disabled&&
             uiEquals(btn.getAttribute('aria-label')||btn.innerText||
                 btn.textContent||'','Search'));
