@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Postmaster
 // @namespace    mission-vector-check-it-rebel-postmaster
-// @version      1.2.26
+// @version      1.2.27
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @description  Minimal read-only Outlook Web collector for Rebel Command with whole-mailbox indexing and automatic capture of messages the user opens.
@@ -22,7 +22,7 @@
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_POSTMASTER)return;
-const VERSION='rebel-postmaster-1.2.26';
+const VERSION='rebel-postmaster-1.2.27';
 const DEFAULT_ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const MANAGED_UPDATE_URL='https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js';
 function openManagedUpdate(){
@@ -311,12 +311,12 @@ function explicitFolderItemCount(el){
     // Chromium may build the accessible folder name from a child count
     // badge rather than a single aria-label on the tree item. Read ONLY
     // the selected tree item's own labels, never its nested folder counts.
-    const labels=[attr(el,'aria-label'),attr(el,'title')];
+    const labels=[attr(el,'aria-label'),attr(el,'title'),attr(el,'aria-description')];
     // Outlook may put a total in an aria-describedby reference rather
     // than its accessible-name text. Unread counts remain ineligible.
-    for(const node of el?.querySelectorAll?.('[aria-label],[title],[aria-describedby],span')||[]){
+    for(const node of el?.querySelectorAll?.('[aria-label],[title],[aria-description],[aria-describedby],span')||[]){
         if(node.closest?.('[role="treeitem"]')!==el)continue;
-        labels.push(attr(node,'aria-label'),attr(node,'title'));
+        labels.push(attr(node,'aria-label'),attr(node,'title'),attr(node,'aria-description'));
         if(!node.children?.length){const t=clean(node.innerText||node.textContent||'');if(/^\[?[0-9,]+\]?\s+items?$/i.test(t))labels.push(t);}
         const desc=attr(node,'aria-describedby').split(/\s+/).filter(Boolean);
         if(desc.length)labels.push(desc.map(id=>clean(document.getElementById(id)?.textContent||'')).join(' '));
@@ -325,7 +325,9 @@ function explicitFolderItemCount(el){
     if(ids.length)labels.push(ids.map(id=>clean(document.getElementById(id)?.textContent||'')).join(' '));
     const counts=new Set();
     for(const label of labels){
-        const match=label.match(/(?:\[([0-9,]+)\]|(?:^|[ ,])([0-9,]+))\s+items?\s*$/i);
+        // Live Outlook UIA HelpText: Junk Email - 747 items (728 unread).
+        // The total is explicitly labeled items; the unread suffix is not the total.
+        const match=label.match(/(?:\[([0-9,]+)\]|(?:^|[ ,])([0-9,]+))\s+items?(?:\s*\([0-9,]+\s+unread\))?\s*$/i);
         if(!match)continue;
         const n=Number((match[1]||match[2]).replaceAll(',',''));
         if(Number.isSafeInteger(n)&&n>=0)counts.add(n);
@@ -494,7 +496,7 @@ function render(){
     state.last=snapshot();const r=ensureUi();r.replaceChildren();const cs=crawlState(),same=crawlMatchesPage(cs),ms=mailboxState(),mb=mailboxSummary(ms),scopeOk=mailboxMatches(ms),needsVerification=mailboxHasUnverifiedEmpty(ms),retryNeeded=mailboxNeedsRetry(ms);
     if(state.open){
         const p=add(r,'div',null,'p'),h=add(p,'div',null,'h'),title=add(h,'div');add(title,'b','REBEL POSTMASTER');
-        const sub=add(title,'div','v1.2.26 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
+        const sub=add(title,'div','v1.2.27 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
         const close=add(h,'button','','orb header-orb');close.type='button';close.dataset.pmAction='close';close.title='Minimize Rebel Postmaster';close.setAttribute('aria-label','Minimize Rebel Postmaster');close.innerHTML=REBEL_SYMBOL_HTML;
         const b=add(p,'div',null,'b');
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');
@@ -514,7 +516,7 @@ function render(){
 }
 async function configure(){try{const old=cfg();if(old.deviceId&&old.token){const a=prompt('Rebel Postmaster is paired. Type TEST, REPAIR, CLEAR, or leave blank to cancel.','TEST');if(a==null||!clean(a))return;const u=clean(a).toUpperCase();if(u==='TEST'){await verify();state.msg='Connection verified.';state.kind='success';render();return}if(u==='CLEAR'){GM_deleteValue(CFG_KEY);state.msg='Pairing cleared.';state.kind='info';render();return}if(u!=='REPAIR')return}const endpoint=prompt('Rebel Command telemetry endpoint',old.endpoint||DEFAULT_ENDPOINT);if(endpoint==null)return;const deviceId=prompt('Rebel Command device ID',old.deviceId||'');if(deviceId==null)return;const token=prompt('Private device token (stored only in Tampermonkey userscript storage)','');if(token==null)return;const next={endpoint:normalizeEndpoint(endpoint),deviceId:clean(deviceId),token:clean(token)};saveCfg(next);await verify();state.msg='Pairing saved and verified.';state.kind='success'}catch(e){state.msg=`Connection failed: ${clean(e?.message||e)}`;state.kind='error'}render()}
 state.last=snapshot();render();startOpenWatcher();startUiWatchdog();
-const aliasErrorState=mailboxState();if(aliasErrorState?.status!=='running')requeueShortCompletedFolders(aliasErrorState);if(aliasErrorState?.status==='error'&&/multiple folders named/i.test(clean(aliasErrorState.lastError||'')))clearMailbox();
+const aliasErrorState=mailboxState();if(!state.busy&&aliasErrorState?.status!=='running'&&requeueShortCompletedFolders(aliasErrorState)){void reportMailboxManifest(aliasErrorState).catch(e=>trace('coverage_manifest_report_failed',{error:clean(e?.message||e)}));}if(aliasErrorState?.status==='error'&&/multiple folders named/i.test(clean(aliasErrorState.lastError||'')))clearMailbox();
 const bootMailbox=mailboxState(),bootCrawl=crawlState();if(bootMailbox?.status==='complete'&&mailboxHasUnverifiedEmpty(bootMailbox)&&mailboxMatches(bootMailbox)){bootMailbox.status='complete_with_errors';bootMailbox.lastError='Zero-message folders require explicit empty-state evidence.';saveMailbox(bootMailbox);reportMailboxManifest(bootMailbox).catch(()=>{});}if(bootMailbox?.status==='running'&&mailboxMatches(bootMailbox))setTimeout(()=>runMailboxSync({fresh:false}),1800);else if(bootCrawl?.status==='running'&&crawlMatchesPage(bootCrawl))setTimeout(()=>runFolderSync({fresh:false}),1800);
 window.MVCI_REBEL_POSTMASTER={version:VERSION,snapshot,stableSnapshot,parseOpenMessage,captureList,captureOpen,runFolderSync,pauseFolderSync,runMailboxSync,pauseMailboxSync,discoverMailboxFolders,mailboxManifestPayload,configure,crawlState,mailboxState,traceRows,traceExport,clearTrace,status:()=>({paired:paired(),folder:folderName(),messages:state.last?.messages?.length||0,quality:state.last?.assessment?.quality||'unknown',crawl:crawlState(),mailbox:mailboxState(),traceCount:traceRows().length,url:location.href})};
 })();

@@ -61,3 +61,12 @@ test('same-treeitem explicit item-count text and described total are recognized,
  parent.querySelectorAll=()=>[leaf,unread,nested];
  assert.equal(h.ctx.explicitFolderItemCount(parent),747);
 });
+
+test('observed Outlook accessible description with unread suffix exposes total, not unread count',()=>{
+ const h=harness();
+ assert.equal(h.ctx.explicitFolderItemCount({'aria-description':'Junk Email - 747 items (728 unread)'}),747);
+ assert.equal(h.ctx.explicitFolderItemCount({title:'Junk Email - 747 items (728 unread)'}),747);
+ assert.equal(h.ctx.explicitFolderItemCount({'aria-description':'Junk Email - 728 unread'}),null);
+ assert.equal(h.ctx.explicitFolderItemCount({'aria-description':'Inbox - 1,203 items (998 unread)'}),1203);
+ assert.equal(h.ctx.explicitFolderItemCount({'aria-description':'Junk Email - 747 items (728 unread)','aria-label':'Junk Email 212 items'}),null);
+});
