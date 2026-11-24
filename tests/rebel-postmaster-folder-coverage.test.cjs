@@ -45,3 +45,12 @@ test('native crawler refreshes replaced scroll host, checks bounded lazy loads, 
  assert.match(source,/assertFolderCoverage\(s\);s.status='complete'/);
  assert.match(source,/target.indexedCount=Math.max\(Number\(target.indexedCount\|\|0\),Number\(after.seen\?\.length\|\|0\)\)/);
 });
+
+test('child count badge on the same folder is accepted, nested child folder counts and conflicting totals are not',()=>{
+ const h=harness(),parent={};
+ const child={title:'747 items',closest:()=>parent},nested={title:'900 items',closest:()=>({})};
+ parent.querySelectorAll=()=>[child,nested];
+ assert.equal(h.ctx.explicitFolderItemCount(parent),747);
+ parent['aria-label']='Junk Email 52 items';
+ assert.equal(h.ctx.explicitFolderItemCount(parent),null);
+});
