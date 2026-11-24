@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Postmaster
 // @namespace    mission-vector-check-it-rebel-postmaster
-// @version      1.2.25
+// @version      1.2.26
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @description  Minimal read-only Outlook Web collector for Rebel Command with whole-mailbox indexing and automatic capture of messages the user opens.
@@ -22,7 +22,7 @@
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_POSTMASTER)return;
-const VERSION='rebel-postmaster-1.2.25';
+const VERSION='rebel-postmaster-1.2.26';
 const DEFAULT_ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const MANAGED_UPDATE_URL='https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js';
 function openManagedUpdate(){
@@ -413,6 +413,50 @@ function ensureUi(){
     installUiGuard();
     return uiMount;
 }
+async function syncManualFolderWithManifest(){
+    if(!paired())throw new Error('Pairing not configured.');
+    if(state.busy)throw new Error('Postmaster is already busy.');
+    const cs=crawlState(),same=crawlMatchesPage(cs),fresh=!(same&&cs&&['paused','error','running'].includes(cs.status));
+    const ms=mailboxState(),selected=selectedFolderCandidate();
+    const matches=mailboxMatches(ms)&&selected?.key?(ms.folders||[]).filter(f=>f.key===selected.key):[];
+    if(matches.length!==1){await runFolderSync({fresh});return;}
+    const target=matches[0],mailbox=ms.mailboxId,key=target.key;
+    const priorCount=Number(target.indexedCount||0);
+    state.busy=true;
+    target.status='running';target.lastError='';ms.status='running';ms.currentKey=key;
+    ms.updatedAt=new Date().toISOString();saveMailbox(ms);render();
+    const publish=async()=>{try{await reportMailboxManifest(ms)}catch(e){trace('manual_manifest_report_failed',{error:clean(e?.message||e)})}};
+    let failure='';
+    try{
+        await publish();
+        if(mailboxId()!==mailbox||selectedFolderCandidate()?.key!==key)throw new Error('Folder identity changed before manual sync.');
+        await runFolderSync({fresh,managed:true});
+    }catch(e){failure=clean(e?.message||e);}
+    finally{
+        try{
+            const after=crawlState();
+            const exact=after?.mailboxId===mailbox&&after?.folderKey===key;
+            const n=exact&&Array.isArray(after.seen)?after.seen.length:0;
+            if(!failure&&exact&&after.status==='complete'&&(n>0||after.emptyWitness===true||after.nonMailWitness==='outlook_notes_view')){
+                target.status='complete';target.indexedCount=n;target.emptyWitness=!!after.emptyWitness;
+                target.nonMailWitness=after.nonMailWitness||'';target.lastSuccessAt=after.lastSuccessAt||new Date().toISOString();
+                target.lastError='';delete target.crawlCheckpoint;
+            }else{
+                target.status=exact&&after.status==='paused'?'paused':'error';
+                target.indexedCount=Math.max(priorCount,n);
+                target.lastError=failure||(exact?after.lastError:'')||'Manual folder coverage not confirmed.';
+                if(exact){const partial=scopedPartialCheckpoint(after,target);if(partial)target.crawlCheckpoint=partial;}
+            }
+            const summary=mailboxSummary(ms);
+            ms.status=summary.complete===summary.folders?'complete':summary.errors?'complete_with_errors':ms.folders.some(f=>f.status==='paused')?'paused':'error';
+            ms.lastError=ms.status==='complete'?'':target.lastError||'Mailbox coverage incomplete.';
+            ms.updatedAt=new Date().toISOString();
+            if(ms.status==='complete')ms.lastSuccessAt=ms.updatedAt;
+            saveMailbox(ms);await publish();
+            if(failure){state.msg='Manual folder sync stopped: '+failure;state.kind='error';}
+        }finally{state.busy=false;render()}
+    }
+}
 async function handleUiAction(action){
     if(action==='toggle'){state.open=!state.open;render();return}
     if(action==='close'){state.open=false;render();return}
@@ -426,8 +470,7 @@ async function handleUiAction(action){
     if(action==='clear-diagnostics'){clearTrace();state.msg='Postmaster diagnostic trace cleared.';state.kind='info';render();return}
     if(action==='mailbox-sync'){const ms=mailboxState(),retryErrors=mailboxMatches(ms)&&mailboxNeedsRetry(ms);await runMailboxSync({fresh:!(mailboxMatches(ms)&&(['paused','error','running','complete_with_errors'].includes(ms?.status)||retryErrors)),retryErrors});return}
     if(action==='sync'){
-        const cs=crawlState(),same=crawlMatchesPage(cs);
-        await runFolderSync({fresh:!(same&&cs&&['paused','error','running'].includes(cs.status))});
+        await syncManualFolderWithManifest();
     }
 }
 function installUiGuard(){
@@ -451,7 +494,7 @@ function render(){
     state.last=snapshot();const r=ensureUi();r.replaceChildren();const cs=crawlState(),same=crawlMatchesPage(cs),ms=mailboxState(),mb=mailboxSummary(ms),scopeOk=mailboxMatches(ms),needsVerification=mailboxHasUnverifiedEmpty(ms),retryNeeded=mailboxNeedsRetry(ms);
     if(state.open){
         const p=add(r,'div',null,'p'),h=add(p,'div',null,'h'),title=add(h,'div');add(title,'b','REBEL POSTMASTER');
-        const sub=add(title,'div','v1.2.25 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
+        const sub=add(title,'div','v1.2.26 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
         const close=add(h,'button','','orb header-orb');close.type='button';close.dataset.pmAction='close';close.title='Minimize Rebel Postmaster';close.setAttribute('aria-label','Minimize Rebel Postmaster');close.innerHTML=REBEL_SYMBOL_HTML;
         const b=add(p,'div',null,'b');
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');
