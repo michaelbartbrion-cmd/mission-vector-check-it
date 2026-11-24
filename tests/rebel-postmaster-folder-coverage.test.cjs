@@ -7,7 +7,7 @@ const a=source.indexOf('function explicitFolderItemCount('),b=source.indexOf('fu
 assert.ok(a>0&&b>a);
 function harness(){
  let active=null,candidates=[],saved=0;
- const ctx={attr:(el,k)=>el?.[k]||'',selectedFolderCandidate:()=>active,
+ const ctx={clean:x=>String(x||'').trim(),attr:(el,k)=>el?.[k]||'',selectedFolderCandidate:()=>active,
  folderCandidates:()=>candidates,mailboxMatches:ms=>!!ms&&ms.mailboxId==='mailbox-A',
  saveMailbox:()=>saved++};
  vm.createContext(ctx);vm.runInContext(source.slice(a,b),ctx);
@@ -53,4 +53,11 @@ test('child count badge on the same folder is accepted, nested child folder coun
  assert.equal(h.ctx.explicitFolderItemCount(parent),747);
  parent['aria-label']='Junk Email 52 items';
  assert.equal(h.ctx.explicitFolderItemCount(parent),null);
+});
+
+test('same-treeitem explicit item-count text and described total are recognized, unread badge excluded',()=>{
+ const h=harness(),parent={};
+ const leaf={textContent:'747 items',closest:()=>parent},unread={textContent:'78 unread',closest:()=>parent},nested={textContent:'900 items',closest:()=>({})};
+ parent.querySelectorAll=()=>[leaf,unread,nested];
+ assert.equal(h.ctx.explicitFolderItemCount(parent),747);
 });

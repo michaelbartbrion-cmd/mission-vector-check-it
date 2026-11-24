@@ -15,6 +15,7 @@ function setup({notices=[],rows=[],busy=false,searchText='',heading='',groups=[]
    document:{querySelectorAll:selector=>selector.startsWith('input[')?(searchText?[{value:searchText}]:[]):selector.startsWith('[role="heading"]')?(heading?[{visible:true,innerText:heading}]:[]):selector.startsWith('[role="group"]')?groups:notices},
    Date:{now:()=>elapsed},
    visible:el=>!!el.visible,
+   attr:(el,k)=>el?.[k]||'',
    clean:txt=>String(txt||'').trim(),
    candidateRows:()=>rows,
    mailBusy:()=>busy,
@@ -74,4 +75,11 @@ test('native phrase outside Message list, hidden, unselected or filtered cannot 
  const group={visible:true,inList:true,innerText:'Nothing in folder Looks empty over here.'};
  for(const opts of [{groups:[{...group,inList:false}]},{groups:[{...group,visible:false}]},{groups:[group],selected:false},{groups:[group],searchText:'from someone'},{groups:[group],rows:[{}]},{groups:[group],busy:true}])
    assert.equal(await setup(opts).checkEmpty(2200),false);
+});
+
+test('native MailList id under observed region works even with no explicit role',async()=>{
+ const group={visible:true,id:'MailList',closest:sel=>sel==='[id="Skip to message list-region"]'?{}:null,innerText:'Nothing in folder Looks empty over here.'};
+ assert.equal(await setup({groups:[group]}).checkEmpty(),true);
+ assert.equal(await setup({groups:[{...group,closest:()=>null}]}).checkEmpty(2200),false);
+ assert.equal(await setup({groups:[{...group,innerText:'Nothing in folder Looks empty over here. Some other text'}]}).checkEmpty(2200),false);
 });

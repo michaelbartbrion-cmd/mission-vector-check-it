@@ -78,9 +78,9 @@ test('repeated rate limits stop after four bounded attempts',async()=>{
  assert.deepEqual(h.delays,[2000,4000,8000]);
 });
 test('source retains canonical logo, only authorized endpoint and read-only policy',()=>{
- assert.match(source,/@version\s+1\.2\.23/);
- assert.match(source,/const VERSION='rebel-postmaster-1\.2\.23'/);
- assert.match(source,/v1\.2\.23 · read-only Outlook collector/);
+ assert.match(source,/@version\s+1\.2\.24/);
+ assert.match(source,/const VERSION='rebel-postmaster-1\.2\.24'/);
+ assert.match(source,/v1\.2\.24 · read-only Outlook collector/);
  assert.match(source,/const REBEL_SYMBOL_HTML="<img/);
  assert.match(source,/data:image\/png;base64/);
  assert.doesNotMatch(source,/\.click\(\).*sendMessage/);
