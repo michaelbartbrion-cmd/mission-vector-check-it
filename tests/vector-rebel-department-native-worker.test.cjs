@@ -7,7 +7,7 @@ const b=source.indexOf('    async function startCShiftPilotNativeRecheck(',a);
 assert.ok(a>0&&b>a);
 const feature=source.slice(a,b);
 function harness(board){
- const queue=[],state=new Map(),out={mapped:[],nav:[],saved:[],queries:[],errors:[],scans:0,fallback:[],clears:0,opens:0,lookupPosts:[],reusePosts:[]};
+ const queue=[],state=new Map(),out={mapped:[],nav:[],saved:[],queries:[],errors:[],scans:0,fallback:[],clears:0,opens:0,applies:0,lookupPosts:[],reusePosts:[]};
  const r={...board};let filterOpen=!r.clearInitiallyHidden;
  const localStore={
   getItem:k=>state.get(k)||null,
@@ -56,9 +56,9 @@ function harness(board){
      type:'Bunker Coat',pool:'300045',url:'https://checkitapp.targetsolutions.com/app/equipment/PPE/pool/300045/111/item'}]};},
 
    crewPpeSearchPrefix:owner=>({prefix:owner.name.split(' ').at(-1).toUpperCase()}),
-   document:{querySelectorAll:selector=>selector.startsWith('button')?
+   document:{querySelectorAll:selector=>selector==='.asset-filter-modal.show'&&filterOpen&&r.clearLeavesModal?[{querySelectorAll:()=>r.applyMissing?[]:[{getAttribute:()=>'',innerText:'Apply Filters',click:()=>{out.applies++;filterOpen=false}}]}]:selector.startsWith('button')?
   (filterOpen?
-    (r.clearMissingForever?[]:[{getAttribute:()=>'',innerText:'Clear Filters',click:()=>{out.clears++;filterOpen=false}}]):
+    (r.clearMissingForever?[]:[{getAttribute:()=>'',innerText:'Clear Filters',click:()=>{out.clears++;filterOpen=!!r.clearLeavesModal}}]):
     [{getAttribute:()=>'',innerText:'Open filter options',click:()=>{out.opens++;filterOpen=true}}]):[]},
    visible:()=>true,uiEquals:(a,b)=>a===b,sleep:async()=>{},
    responsiblePartySelectionLabels:()=>[],
@@ -413,4 +413,15 @@ test('known pending Item Log takes priority over partial inventory rediscovery',
  assert.equal(await h.context.departmentAutoOnePass(),'started');
  assert.equal(h.out.scans,0);
  assert.equal(h.out.nav.length,1);
+});
+
+test('live Clear Filters leaves modal open: apply cleared draft before surname search',async()=>{
+ const h=harness({...unmapped,failPrimaryFor:['Austin Fox'],clearLeavesModal:true,people:[unmapped.people[0]]});
+ assert.equal(await h.context.departmentAutoOnePass(),'mapped');
+ assert.equal(h.out.applies,1);assert.equal(h.out.fallback.length,1);assert.equal(h.out.nav.length,0);
+});
+test('cannot search behind a cleared filter modal with no unique Apply Filters',async()=>{
+ const h=harness({...unmapped,failPrimaryFor:['Austin Fox'],clearLeavesModal:true,applyMissing:true,people:[unmapped.people[0]]});
+ await assert.rejects(h.context.departmentAutoOnePass(),/no unique Apply Filters/);
+ assert.equal(h.out.fallback.length,0);assert.equal(h.out.nav.length,0);
 });

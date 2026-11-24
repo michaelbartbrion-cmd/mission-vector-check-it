@@ -10423,14 +10423,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             throw Error('Native PPE search controls not confirmed; lookup stopped.');
         // Live Enterprise accessibility tree: #search-input (search__input)
         // and a native Search button (search__icon) share search__container.
-        // That magnifier is not necessarily an HTML BUTTON. Scope to the
+        // The same native icon changes to Clear search input when populated.
+        // Require an explicit Search label, not the icon class alone. Scope to the
         // confirmed input's own wrapper, never an inspection/submit action.
         const wrapper=search.closest?.('.search__container');
         const scoped=wrapper?[...wrapper.querySelectorAll('button,[role="button"],.search__icon')].filter(btn=>
             btn!==search&&visible(btn)&&!btn.disabled&&btn.getAttribute('aria-disabled')!=='true'&&
-            (btn.classList?.contains('search__icon')||
-             uiEquals(btn.getAttribute('aria-label')||btn.getAttribute('title')||
-                 btn.innerText||btn.textContent||'','Search'))):[];
+            uiEquals(btn.getAttribute('aria-label')||btn.getAttribute('title')||
+                 btn.innerText||btn.textContent||'','Search')):[];
         const candidates=scoped.length?scoped:[...document.querySelectorAll('button')].filter(btn=>
             visible(btn)&&!btn.disabled&&
             uiEquals(btn.getAttribute('aria-label')||btn.innerText||
@@ -17545,6 +17545,22 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     .find(el=>visible(el)&&/filter-equip-.*-responsibleParty/i.test(el.id));
                 if(selected&&responsiblePartySelectionLabels(selected).length)
                     throw Error('Previous Responsible Party remains selected; alternate PPE search blocked.');
+                // Live source evidence: Clear Filters leaves the asset-filter
+                // modal open. Apply only the cleared draft; never search behind
+                // a modal or with a previous owner's filter still committed.
+                const openModal=()=>[...document.querySelectorAll('.asset-filter-modal.show')]
+                    .find(visible);
+                if(openModal()){
+                    const modal=openModal();
+                    const apply=[...modal.querySelectorAll('button,[role="button"]')]
+                        .filter(b=>visible(b)&&!b.disabled&&
+                            uiEquals(b.getAttribute('aria-label')||b.innerText||b.textContent||'','Apply Filters'));
+                    if(apply.length!==1)throw Error('Cleared native PPE filter modal has no unique Apply Filters control.');
+                    apply[0].click();
+                    const closedAt=Date.now();
+                    while(openModal()&&Date.now()-closedAt<5000)await sleep(120);
+                    if(openModal())throw Error('Cleared native PPE filter modal did not close before surname lookup.');
+                }
                 inventory=await scanPpeOwnerSearch({name:owner.name,prefix:candidate});
                 if(!inventory.items.length||
                    inventory.items.some(i=>masterNameKey(i.ownerName)!==

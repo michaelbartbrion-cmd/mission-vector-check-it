@@ -72,7 +72,7 @@ test('same native one-person surname lookup actually invokes PPE Search after in
 test('actual native search__icon inside search__container is used even when not an HTML button',()=>{
  const x=factory({buttons:['Submit PPE inspection']});
  let clicked=0;
- const icon={disabled:false,getAttribute:()=>'',classList:{contains:v=>v==='search__icon'},click:()=>clicked++};
+ const icon={disabled:false,getAttribute:k=>k==='aria-label'?'Search':'',classList:{contains:v=>v==='search__icon'},click:()=>clicked++};
  x.field.closest=sel=>sel==='.search__container'?{querySelectorAll:()=>[icon]}:null;
  x.api.submit(x.field);
  assert.equal(clicked,1);assert.equal(x.events().length,0);assert.equal(x.clicked(),0);
@@ -80,8 +80,15 @@ test('actual native search__icon inside search__container is used even when not 
 test('ambiguous scoped magnifier controls stop without any native clicks',()=>{
  const x=factory({buttons:['Search']});
  let clicked=0;
- const icon=()=>({disabled:false,getAttribute:()=>'',classList:{contains:v=>v==='search__icon'},click:()=>clicked++});
+ const icon=()=>({disabled:false,getAttribute:k=>k==='aria-label'?'Search':'',classList:{contains:v=>v==='search__icon'},click:()=>clicked++});
  x.field.closest=()=>({querySelectorAll:()=>[icon(),icon()]});
  assert.throws(()=>x.api.submit(x.field),/ambiguous Search buttons/);
  assert.equal(clicked,0);assert.equal(x.clicked(),0);
+});
+
+test('populated native search__icon is Clear search input, never search submit',()=>{
+ const x=factory({buttons:[]});let clicked=0;
+ const clear={disabled:false,getAttribute:k=>k==='aria-label'?'Clear search input':'',classList:{contains:v=>v==='search__icon'},click:()=>clicked++};
+ x.field.closest=()=>({querySelectorAll:()=>[clear]});x.api.submit(x.field);
+ assert.equal(clicked,0);assert.equal(x.field.value,'FOX');assert.equal(x.events().length,2);
 });
