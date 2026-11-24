@@ -58,8 +58,8 @@ test('a mismatched account or unresolved native crawl never advances another fol
 });
 test('actual paused mailbox RESUME handler uses common retry predicate and does not force full reset',()=>{
  assert.match(source,/const ms=mailboxState\(\),retryErrors=mailboxMatches\(ms\)&&mailboxNeedsRetry\(ms\);await runMailboxSync/);
- assert.match(source,/reconcileCompletedCrawl\(ms,crawlState\(\)\);if\(retryErrors\)/);
+ assert.match(source,/reconcileCompletedCrawl\(ms,crawlState\(\)\);requeueShortCompletedFolders\(ms\);if\(retryErrors\)/);
  assert.match(source,/if\(retryErrors\)\{for\(const f of ms\.folders\)if\(f\.status==='error'/);
  assert.match(source,/scopeOk&&retryNeeded&&ms\?\.status!=='running'\?'RETRY MAIL ERRORS'/);
- assert.match(source,/@version\s+1\.2\.19/);
+ assert.match(source,/@version\s+1\.2\.20/);
 });
