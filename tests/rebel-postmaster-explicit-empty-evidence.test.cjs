@@ -9,15 +9,17 @@ const start=source.indexOf('function hasExplicitEmptyFolderWitness(){');
 const end=source.indexOf('function readingPaneCandidates(){',start);
 assert.ok(start>=0&&end>start,'Expected real empty-state reader');
 const reader=source.slice(start,end);
-function setup({notices=[],rows=[],busy=false,searchText='',heading=''}={}){
+function setup({notices=[],rows=[],busy=false,searchText='',heading='',groups=[],selected=true}={}){
  let elapsed=0;
  const ctx={
-   document:{querySelectorAll:selector=>selector.startsWith('input[')?(searchText?[{value:searchText}]:[]):selector.startsWith('[role="heading"]')?(heading?[{visible:true,innerText:heading}]:[]):notices},
+   document:{querySelectorAll:selector=>selector.startsWith('input[')?(searchText?[{value:searchText}]:[]):selector.startsWith('[role="heading"]')?(heading?[{visible:true,innerText:heading}]:[]):selector.startsWith('[role="group"]')?groups:notices},
    Date:{now:()=>elapsed},
    visible:el=>!!el.visible,
    clean:txt=>String(txt||'').trim(),
    candidateRows:()=>rows,
    mailBusy:()=>busy,
+   selectedFolderCandidate:()=>selected?{key:'exact-folder'}:null,
+   nativeMessageListRegion:el=>el.inList?{}:null,
    wait:async ms=>{elapsed+=ms}
  };
  vm.createContext(ctx);
@@ -62,4 +64,14 @@ test('older zero-count complete folder without proof is flagged for recheck',()=
  assert.match(source,/s\.emptyWitness=true;s\.status='complete'/);
  assert.doesNotMatch(source,/phraseEmpty\|\|await stableEmptyFolder/);
  assert.match(source,/scopeOk&&needsVerification&&ms\?\.status!=='running'\?'VERIFY FOLDER INDEX'/);
+});
+
+test('live native empty group within Message list certifies stable empty folder',async()=>{
+ const group={visible:true,inList:true,innerText:'Nothing in folder Looks empty over here.'};
+ assert.equal(await setup({groups:[group]}).checkEmpty(),true);
+});
+test('native phrase outside Message list, hidden, unselected or filtered cannot certify empty',async()=>{
+ const group={visible:true,inList:true,innerText:'Nothing in folder Looks empty over here.'};
+ for(const opts of [{groups:[{...group,inList:false}]},{groups:[{...group,visible:false}]},{groups:[group],selected:false},{groups:[group],searchText:'from someone'},{groups:[group],rows:[{}]},{groups:[group],busy:true}])
+   assert.equal(await setup(opts).checkEmpty(2200),false);
 });
