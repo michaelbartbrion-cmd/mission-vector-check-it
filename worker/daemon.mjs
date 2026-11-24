@@ -4,7 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import {initialState,retireExpiredLease,claim,complete,health} from './scheduler.mjs';
+import {initialState,recoverLostState,retireExpiredLease,claim,complete,health} from './scheduler.mjs';
 
 const HOST='127.0.0.1',PORT=Number(process.env.MVCI_WORKER_PORT||18764);
 const HOME=process.env.MVCI_WORKER_HOME||
@@ -19,7 +19,7 @@ async function save(){
   persist=persist.catch(()=>{}).then(async()=>{
     await fs.mkdir(HOME,{recursive:true});
     const tmp=STATE_FILE+'.tmp';
-    await fs.writeFile(tmp,data,{encoding:'utf8',mode:0o600});
+    await fs.writeFile(tmp,data,{encoding:'utf8',mode:0o600,flush:true});
     await fs.rename(tmp,STATE_FILE);
     lastSave=Date.now();
   });
@@ -28,9 +28,20 @@ async function save(){
 async function restore(){
   await fs.mkdir(HOME,{recursive:true});
   try{
-    const x=JSON.parse(await fs.readFile(STATE_FILE,'utf8'));
-    if(x.schema===1&&x.staffing&&x.ppe&&Array.isArray(x.events))
-      state=x;
+    const raw=await fs.readFile(STATE_FILE,'utf8');
+    let x;
+    try{x=JSON.parse(raw)}catch(e){if(!(e instanceof SyntaxError))throw e;}
+    const valid=x?.schema===1&&x.staffing&&x.ppe&&Array.isArray(x.events)&&
+      Number.isSafeInteger(x.seq)&&x.seq>=0&&
+      (x.lease===null||(x.lease&&['ppe','staffing'].includes(x.lease.role)&&Number.isFinite(x.lease.deadlineMs)));
+    if(valid)state=x;
+    else{
+      // Preserve the unreadable bytes. Never claim old native work succeeded.
+      // The quarantine exceeds any potentially outstanding old lease.
+      const backup=STATE_FILE+'.corrupt-'+new Date().toISOString().replace(/[:.]/g,'-');
+      await fs.copyFile(STATE_FILE,backup,1);
+      state=recoverLostState();
+    }
   }catch(e){if(e.code!=='ENOENT')throw e}
   retireExpiredLease(state);
   await save();
