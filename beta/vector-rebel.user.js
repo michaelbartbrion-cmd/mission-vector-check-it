@@ -17640,7 +17640,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 return await departmentAutoOnePass();
             }catch(error){
                 const reason=clean(error?.message||error).slice(0,170);
-                const uiUnsettled=/^Vector did not confirm a settled PPE search for "[A-Z0-9._-]{2,60}"\.?$/.test(reason);
+                const uiUnsettled=/^Vector did not confirm a settled PPE search for "[A-Z0-9._-]{2,60}"(?:\. Scoped PPE search stopped before any inspection or audit\.)?\.?$/.test(reason);
                 // Native search may fail to settle for one surname. Rotate
                 // ONCE to another exact approved owner rather than leave the
                 // whole department behind that row. Two independent settled

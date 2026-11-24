@@ -65,7 +65,7 @@ function harness(board){
    scanPpeOwnerSearch:async owner=>{
      out.fallback.push(owner);
       if(r.failSearchSettleFor?.includes(owner.name))
-        throw Error('Vector did not confirm a settled PPE search for "'+owner.prefix+'".');
+        throw Error('Vector did not confirm a settled PPE search for "'+owner.prefix+'". Scoped PPE search stopped before any inspection or audit.');
      if(owner.name==='Aaron No Gear')
        throw Error('No PPE could be verified for Aaron No Gear with PPE prefix GEAR and Responsible Party.');
      return{items:[{assetId:'FOX-COAT-01',
