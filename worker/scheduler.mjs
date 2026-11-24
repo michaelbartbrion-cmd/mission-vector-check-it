@@ -28,6 +28,18 @@ export function initialState(){
   return{schema:1,startedAt:new Date().toISOString(),lease:null,
     staffing:{},ppe:{},events:[],seq:0};
 }
+// After an unreadable persisted file, the prior rotation count is unknown.
+// Reserve an upper bound instead of inventing completed rotations.
+export function recoverLostState(now=new Date()){
+  const state=initialState(),clock=chicagoClock(now);
+  const elapsed=clock.minutes<420?clock.minutes+1020:clock.minutes-420;
+  const reserve=Math.min(POLICY.ppeDailyLimit,Math.floor(elapsed/(POLICY.ppeMinGapMs/60000))+1);
+  state.recovery={at:now.toISOString(),holdUntilMs:now.getTime()+Math.max(POLICY.ppeLeaseMs,POLICY.staffingLeaseMs),
+    countDate:clock.opDate,ppeBudgetReserve:reserve};
+  state.ppe={countDate:clock.opDate,count:0};
+  state.events.push({at:now.toISOString(),role:'worker',event:'state_recovered',detail:'Corrupt local state preserved; prior rotation count unknown.'});
+  return state;
+}
 const dateAsMillis=x=>Number.isFinite(Date.parse(x||''))?
   Date.parse(x):0;
 export function currentTask(state,now=Date.now()){
@@ -53,6 +65,7 @@ export function eligible(state,role,tab,now=new Date()){
   if(!['staffing','ppe'].includes(role))return{allowed:false,why:'invalid_role'};
   const at=now.getTime(), clock=chicagoClock(now),lane=state[role]||{};
   if(currentTask(state,at))return{allowed:false,why:'one_global_lease_active'};
+  if(at<Number(state.recovery?.holdUntilMs||0))return{allowed:false,why:'state_recovery_lease_quarantine'};
   if(!tab||tab.role!==role||tab.ready!==true||tab.dedicated!==true||
       at-Number(tab.seenAtMs)>POLICY.heartbeatTtlMs)
     return{allowed:false,why:'authenticated_dedicated_tab_offline'};
@@ -73,7 +86,8 @@ export function eligible(state,role,tab,now=new Date()){
       slot,leaseMs:POLICY.staffingLeaseMs};
   }
   const day=clock.opDate;
-  if(lane.countDate===day&&lane.count>=POLICY.ppeDailyLimit)
+  const reserve=state.recovery?.countDate===day?Number(state.recovery.ppeBudgetReserve||0):0;
+  if((lane.countDate===day?Number(lane.count||0):0)+reserve>=POLICY.ppeDailyLimit)
     return{allowed:false,why:'daily_ppe_budget_exhausted'};
   if(at-Number(lane.lastClaimMs||0)<POLICY.ppeMinGapMs)
     return{allowed:false,why:'ppe_cooldown'};
@@ -141,8 +155,9 @@ export function health(state,tabs=[],now=new Date()){
       lastFailure:lane.lastFailure||null,
       lastClaimAt:lane.lastClaimMs?
         new Date(lane.lastClaimMs).toISOString():null,
-      completedToday:role==='ppe'&&lane.countDate===clock.opDate?
-        lane.count||0:null};
+      completedToday:role==='ppe'&&lane.countDate===clock.opDate&&state.recovery?.countDate!==clock.opDate?
+        lane.count||0:null,
+      ...(role==='ppe'&&state.recovery?.countDate===clock.opDate?{recoveredRotationCount:lane.count||0,priorRotationCountUnknown:true,budgetReserve:state.recovery.ppeBudgetReserve}:{})};
   };
   return{ok:true,project:'Mission Vector Check It',mode:'read_only',
     computerRole:'local_worker_portable',now:new Date(at).toISOString(),
@@ -151,6 +166,7 @@ export function health(state,tabs=[],now=new Date()){
         startedAt:new Date(state.lease.startedMs).toISOString(),
         deadlineAt:new Date(state.lease.deadlineMs).toISOString()}:null,
     staffing:summarize('staffing'),ppe:summarize('ppe'),
+    ...(state.recovery?{stateRecovery:state.recovery}:{}),
     limits:{concurrency:1,ppeReadGapMinutes:POLICY.ppeMinGapMs/60000,
       ppeDailyCeiling:POLICY.ppeDailyLimit,
       staffingWindows:'After 07:05 and after 13:00 Central',
