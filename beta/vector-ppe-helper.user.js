@@ -17377,6 +17377,18 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             Number(p.maskKnownItems)>0&&C_PILOT_NAMES.has(masterNameKey(p.name)))
             .map(p=>masterNameKey(p.name)));
     }
+    // Revisit partial archived gear once current mapped logs are read.
+    // A scoped native inventory lookup is not a claim of completeness.
+    function departmentNeedsInventoryDiscovery(p){
+        if(!Number(p.knownItems))return true;
+        if(p.nextItem?.assetPath&&Number(p.outstandingItems)>0)return false;
+        if(p.lookupStatus==='native_inventory_mapped')return false;
+        const last=Date.parse(p.lookupAt||'');
+        if(Number.isFinite(last)&&Date.now()-last<30*60000)return false;
+        return Number(p.knownItems)<11||
+            (p.maskKnownItems!=null&&Number(p.maskKnownItems)===0)||
+            (p.structuralKnownItems!=null&&Number(p.structuralKnownItems)<10);
+    }
     function departmentNextCandidate(board,pilotCovered=new Set()){
         const now=Date.now(),attempts=departmentAutoAttempts(board.date).people;
         const outside=(board.people||[]).filter(p=>
@@ -17390,7 +17402,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         // soon as a native path exists, before mapping an entire station.
         const mapped=sorted.filter(p=>Number(p.outstandingItems)>0&&
             p.nextItem?.assetPath);
-        const unmapped=sorted.filter(p=>Number(p.knownItems)===0);
+        const unmapped=sorted.filter(departmentNeedsInventoryDiscovery);
         const cursorKey='mvciDepartmentPpeOrderV1';
         let index=0;try{index=Number(sessionStorage.getItem(cursorKey)||0);}catch{}
         const order=Number.isFinite(index)&&index>=0?index:0;
@@ -17484,7 +17496,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             masterNameKey(x.name)===masterNameKey(target.name));
         if(!owner)throw Error('Approved Vector Responsible Party identity unavailable: '+
             clean(target.name).slice(0,70));
-        if(!Number(target.knownItems)){
+        if(departmentNeedsInventoryDiscovery(target)){
             // No whole-department census: search exactly one approved owner
             // in the browser's existing authenticated PPE equipment UI.
             await ensurePpeEquipmentPage(null,false);
@@ -17580,6 +17592,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             queue.push(receipt);saveJSON(C_PILOT_PENDING_KEY,queue);
             const delivered=await cPilotFlushReceipts();
             if(!delivered)throw Error('Department native PPE inventory receipt delivery pending.');
+            const lookup=await cPilotBridge('POST','vr-ppe-department-lookup-status',{
+                workDate:board.date,personName:owner.name,personPrefix:owner.prefix,
+                status:'native_inventory_mapped',
+                reason:'Current native owner inventory receipt accepted; completeness not asserted.',
+                source:'vector_responsible_party_readonly_lookup',observedAt:new Date().toISOString()
+            });
+            if(lookup?.scope!=='department-ppe-lookup-status'||lookup?.readOnly!==true)
+                throw Error('Native inventory stored; lookup status receipt not acknowledged.');
             setStatus('Background PPE: native inventory mapped for '+owner.name+
                 '. Inspection status remains unknown pending Item Log reads.');
             return'mapped';

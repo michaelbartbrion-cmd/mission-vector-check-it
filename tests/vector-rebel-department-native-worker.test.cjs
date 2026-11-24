@@ -223,8 +223,9 @@ test('same safe broker lease skips unresolved owners and maps next verified fire
  const h=harness(board);
  assert.equal(await h.context.departmentAutoScanBurst(),'mapped');
  assert.equal(h.out.scans,2);
- assert.equal(h.out.lookupPosts.length,1);
+ assert.equal(h.out.lookupPosts.length,2);
  assert.equal(h.out.lookupPosts[0].status,'owner_not_found');
+ assert.equal(h.out.lookupPosts[1].status,'native_inventory_mapped');
  assert.equal(h.out.mapped[0][0].name,'Aaron No Gear');
  assert.equal(h.out.mapped[1][0].name,'Austin Fox');
  assert.equal(h.queue.length,1);
@@ -239,8 +240,9 @@ test('one Vector PPE search timeout advances another real approved owner without
  ],failSearchSettleFor:['Aaron No Gear']});
  assert.equal(await h.context.departmentAutoScanBurst(),'mapped');
  assert.equal(h.out.scans,2);
- assert.equal(h.out.lookupPosts.length,1);
+ assert.equal(h.out.lookupPosts.length,2);
  assert.equal(h.out.lookupPosts[0].status,'source_error');
+ assert.equal(h.out.lookupPosts[1].status,'native_inventory_mapped');
  assert.equal(h.out.mapped[1][0].name,'Austin Fox');
  assert.equal(h.queue.length,1);
  assert.equal(h.out.nav.length,0);
@@ -387,4 +389,28 @@ test('only confirmed working same-day C pilot with mapped PPE and mask is exclud
  assert.equal(f({date:'2026-11-22'},{activeTour:true,tourStart:'2026-11-21',people:[p]}).size,0);
  assert.equal(f({date:'2026-11-23'},{activeTour:true,tourStart:'2026-11-21',people:[p]}).size,0);
  assert.equal(f({date:'2026-11-21'},{activeTour:true,tourStart:'2026-11-21',people:[{...p,maskKnownItems:0}]}).size,0);
+});
+
+test('partial archived mapping gets current native inventory discovery after known logs are read',async()=>{
+ const h=harness({...unmapped,people:[{...unmapped.people[0],knownItems:8,
+   nativeReadItems:8,outstandingItems:0,maskKnownItems:0,lookupStatus:'not_attempted'}]});
+ assert.equal(await h.context.departmentAutoOnePass(),'mapped');
+ assert.equal(h.out.scans,1);
+ assert.equal(h.out.nav.length,0);
+ assert.equal(h.out.lookupPosts.at(-1).status,'native_inventory_mapped');
+ assert.match(h.out.lookupPosts.at(-1).reason,/completeness not asserted/);
+});
+test('successful current inventory lookup avoids repeated partial searches during same day',async()=>{
+ const h=harness({...unmapped,people:[{...unmapped.people[0],knownItems:8,
+   nativeReadItems:8,outstandingItems:0,maskKnownItems:0,lookupStatus:'native_inventory_mapped'}]});
+ assert.equal(await h.context.departmentAutoOnePass(),'none');
+ assert.equal(h.out.scans,0);
+});
+test('known pending Item Log takes priority over partial inventory rediscovery',async()=>{
+ const h=harness({...unmapped,people:[{...unmapped.people[0],knownItems:8,
+   nativeReadItems:7,outstandingItems:1,maskKnownItems:0,
+   nextItem:{assetId:'FOX-COAT-01',assetPath:'/app/equipment/PPE/pool/300045/111/item',inspectionMode:'tour'}}]});
+ assert.equal(await h.context.departmentAutoOnePass(),'started');
+ assert.equal(h.out.scans,0);
+ assert.equal(h.out.nav.length,1);
 });
