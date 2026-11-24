@@ -99,14 +99,14 @@ const bc=part('    const BC_DAILY_ROSTER_KEY=',
   '    function showBcDepartmentCheck(){');
 const C=new Set(['michael brion','jared weston','jerry weems']);
 const f=new Function('clean','masterNameKey','C_PILOT_NAMES',
- 'getCaptainPersonOptions','addDateKeyDays',bc+
- '\nreturn {bcDepartmentDailyRows,bcCShiftHistoryCell,bcDepartmentStationRank,bcDepartmentStationName,bcDepartmentAttendanceCell};')(
+ 'getCaptainPersonOptions','addDateKeyDays','CAPTAIN_TOUR_ANCHOR_DATE','CAPTAIN_TOUR_CYCLE_DAYS','CAPTAIN_TOUR_SHIFT_DAYS','CAPTAIN_SHIFT_OFFSETS',bc+
+ '\nreturn {bcDepartmentDailyRows,bcCShiftHistoryCell,bcDepartmentStationRank,bcDepartmentStationName,bcDepartmentAttendanceCell,bcDepartmentCurrentDayCell,bcOperationalShift};')(
  x=>String(x||'').trim(),normalize,C,
  ()=>[{name:'Current OT',prefix:'NEWOT'},
      {name:'Michael Brion',prefix:'BRION'},
      {name:'Austin Fox',prefix:'FOX'}],
  (day,n)=>new Date(Date.parse(day+'T00:00:00Z')+n*86400000)
-  .toISOString().slice(0,10)
+  .toISOString().slice(0,10), '2026-09-22',6,2,{C:0,A:2,B:4}
 );
 test('BC includes department workers and explicit OFF staff while excluding previous-tour OT',()=>{
  const date='2026-11-21';
@@ -261,4 +261,23 @@ test('BC uses verified full-tour OFF and work evidence for employees without a C
  records.get('nicole duncan|2026-10-28').sourceQuality='unverified';
  assert.equal(f.bcDepartmentAttendanceCell(records,'Nicole Duncan',tour,unknown).label,'UNKNOWN',
   'one untrusted day cannot falsely establish two full days OFF');
+});
+
+test('BC current native receipts are date scoped and not excluded for C-roster overtime',()=>{
+ const board={readOnly:true,date:'2026-11-23',people:[
+  {name:'Michael Brion',knownItems:8,nativeReadItems:8,nativeDatedItems:8},
+  {name:'Other',knownItems:11,nativeDatedItems:0,nativeReadItems:0},
+  {name:'Unresolved',knownItems:0,lookupStatus:'source_error',lookupReason:'search timeout'}
+ ]};
+ const actual=f.bcDepartmentCurrentDayCell(board,'Michael Brion','2026-11-23');
+ assert.equal(actual.label,'8 RECORDED');assert.equal(actual.tone,'recorded');
+ assert.match(actual.detail,/Full inventory/);
+ assert.equal(f.bcDepartmentCurrentDayCell(board,'Michael Brion','2026-11-22'),null);
+ assert.equal(f.bcDepartmentCurrentDayCell({...board,readOnly:false},'Michael Brion','2026-11-23'),null);
+ assert.equal(f.bcDepartmentCurrentDayCell(board,'Other','2026-11-23').label,'GEAR FOUND');
+ assert.equal(f.bcDepartmentCurrentDayCell(board,'Unresolved','2026-11-23').label,'LOOKUP ISSUE');
+});
+test('BC applies existing C/A/B 48-96 rotation on both tour days',()=>{
+ for(const [date,shift] of [['2026-11-21','C'],['2026-11-22','C'],['2026-11-23','A'],['2026-11-24','A'],['2026-11-25','B'],['2026-11-26','B']])
+  assert.equal(f.bcOperationalShift(date),shift);
 });

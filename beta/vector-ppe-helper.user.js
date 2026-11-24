@@ -17978,6 +17978,30 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             detail:'No trustworthy native PPE record or two-day absence evidence.'};
     }
 
+    // Use the existing established 48/96 rotation rather than hardcoding
+    // Station 4's C shift into a department-wide current-duty BC view.
+    function bcOperationalShift(date){
+        const day=Date.parse(date+'T12:00:00Z');
+        const anchor=Date.parse(CAPTAIN_TOUR_ANCHOR_DATE+'T12:00:00Z');
+        if(!Number.isFinite(day)||!Number.isFinite(anchor))return null;
+        const offset=((Math.round((day-anchor)/86400000)%CAPTAIN_TOUR_CYCLE_DAYS)+CAPTAIN_TOUR_CYCLE_DAYS)%CAPTAIN_TOUR_CYCLE_DAYS;
+        return Object.keys(CAPTAIN_SHIFT_OFFSETS).find(s=>offset>=CAPTAIN_SHIFT_OFFSETS[s]&&
+            offset<CAPTAIN_SHIFT_OFFSETS[s]+CAPTAIN_TOUR_SHIFT_DAYS)||null;
+    }
+    function bcDepartmentCurrentDayCell(board,name,date){
+        if(board?.readOnly!==true||board?.date!==date)return null;
+        const p=(board.people||[]).find(row=>masterNameKey(row.name)===masterNameKey(name));
+        if(!p)return null;
+        const mapped=Number(p.knownItems)||0,dated=Number(p.nativeDatedItems)||0,read=Number(p.nativeReadItems)||0;
+        if(dated>0)return{label:dated+' RECORDED',tone:'recorded',
+            detail:dated+' of '+mapped+' mapped PPE items have a native inspection date for '+date+
+                '. Full inventory and inspection answer outcomes are not established by dates alone.'};
+        if(read>0)return{label:'LOG READ',tone:'unknown',detail:read+' native Item Logs read; no current-date inspection record confirmed.'};
+        if(mapped>0)return{label:'GEAR FOUND',tone:'unknown',detail:mapped+' equipment items mapped; current native inspection dates not yet verified.'};
+        if(['source_error','owner_not_found'].includes(p.lookupStatus))return{label:'LOOKUP ISSUE',tone:'unknown',detail:
+            'Native source lookup unresolved. '+clean(p.lookupReason||'')+'. Not a failed or missed inspection.'};
+        return null;
+    }
     function showBcDepartmentCheck(){
         const {overlay,box}=makeOverlayBox('97vw');
         box.style.maxWidth='98vw';
@@ -18066,7 +18090,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         const manualAll=loadJSON(BC_DAILY_ROSTER_KEY,{})||{};
         let manual=manualAll?.date===date?manualAll:null;
         let choices=new Set();
-        const windows=captainAuditWindow(date,'C');
+        const activeShift=bcOperationalShift(date)||'C';
+        const windows=captainAuditWindow(date,activeShift);
+        note.textContent='Shift '+activeShift+' tours | All stations | Current and previous month history.';
         const current=windows.tours.slice();
         const months=windows.months.slice();
         let historyMode='both';
@@ -18281,7 +18307,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     const sub=document.createElement('th');
                     sub.textContent=Number(tour.startDate.slice(8))+
                         '–'+Number(tour.endDate.slice(8));
-                    sub.title='C-shift tour '+tour.startDate+' through '+tour.endDate;
+                    sub.title=activeShift+'-shift tour '+tour.startDate+' through '+tour.endDate;
                     sub.style.cssText='padding:5px 1px;text-align:center;position:sticky;top:30px;'+
                         'background:#e2edf4;color:#153b56;white-space:nowrap;'+
                         'font-size:9px;border-bottom:1px solid #aec8d6;';
@@ -18300,7 +18326,9 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 future:'background:#f6f7f8;color:#8a969d;'
             };
             const departmentCell=(name,tour)=>{
-                if(C_PILOT_NAMES.has(masterNameKey(name)))return null;
+                if(activeShift==='C'&&C_PILOT_NAMES.has(masterNameKey(name))&&
+                    bcCShiftHistoryCell(report,name,tour.startDate,historyBoards.get(tour.startDate)||
+                        (pilot?.tourStart===tour.startDate?pilot:null)).tone!=='unknown')return null;
                 const archived=departmentItemArchiveBoards.get(tour.startDate);
                 const historic=departmentTourBoards.get(tour.startDate);
                 const archivePerson=(archived?.people||[]).find(p=>
@@ -18373,20 +18401,27 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 }
                 const history=visibleTours.map(t=>
                     t.startDate>date?
-                        {label:'NOT DUE',detail:'Future C-shift tour',tone:'future'}:
+                        {label:'NOT DUE',detail:'Future '+activeShift+'-shift tour',tone:'future'}:
                         bcDepartmentAttendanceCell(attendance,person.name,t,
                             departmentCell(person.name,t)||
                             bcCShiftHistoryCell(report,person.name,t.startDate,
                                 historyBoards.get(t.startDate)||
                                 (t.startDate===pilot?.tourStart?pilot:null))));
                 const active=current.find(t=>t.startDate<=date&&t.endDate>=date);
+                const currentDay=bcDepartmentCurrentDayCell(department,person.name,date);
+                const tourCell=active?(departmentCell(person.name,active)||
+                    bcCShiftHistoryCell(report,person.name,active.startDate,
+                        historyBoards.get(active.startDate)||(pilot?.tourStart===active.startDate?pilot:null))):null;
+                // An actual dated current-day receipt is visible even when
+                // the firefighter normally belongs to another shift. Do not
+                // downgrade explicit failures or a richer tour result.
+                const nativeToday=tourCell?.tone==='issue'||tourCell?.tone==='failed'?
+                    tourCell:currentDay?.tone==='recorded'&&(!tourCell||tourCell.tone==='unknown')?
+                    currentDay:tourCell?.tone!=='unknown'&&tourCell?tourCell:currentDay||tourCell;
                 const today=person.duty==='off'?
                     {label:'OFF',detail:'Confirmed off today',tone:'off'}:
-                    active?bcDepartmentAttendanceCell(attendance,person.name,active,
-                        departmentCell(person.name,active)||
-                        bcCShiftHistoryCell(report,person.name,active.startDate,
-                            historyBoards.get(active.startDate)||pilot)):
-                    {label:'UNKNOWN',detail:'No native tour record for this date',tone:'unknown'};
+                    active?bcDepartmentAttendanceCell(attendance,person.name,active,nativeToday):
+                    currentDay||{label:'UNKNOWN',detail:'No native tour record for this date',tone:'unknown'};
                 const duty=person.duty==='off'?
                     {label:'OFF',tone:'off',detail:'Captain/BC explicitly confirmed off today'}:
                     person.confirmed?
@@ -18541,8 +18576,8 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
             // Read two full calendar months, limited to tours already started.
             // Bounded pairs keep the interface responsive and preserve the
             // authenticated browser; no native PPE forms are submitted.
-            const older=current.filter(t=>
-                t.startDate<=date&&t.startDate!==pilot?.tourStart);
+            const older=activeShift==='C'?current.filter(t=>
+                t.startDate<=date&&t.startDate!==pilot?.tourStart):[];
             void (async()=>{
                 for(let i=0;i<older.length;i+=2){
                     if(!overlay.isConnected||token!==historyLoadId)return;

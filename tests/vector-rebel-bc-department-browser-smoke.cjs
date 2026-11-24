@@ -20,9 +20,11 @@ const STORE=new Map();
 const clean=x=>String(x||'').trim(),masterNameKey=x=>clean(x).toLowerCase();
 const validDateKey=x=>typeof x==='string'&&x.length===10&&
  Number.isFinite(Date.parse(x+'T12:00:00Z'))?x:'';
+const CAPTAIN_TOUR_ANCHOR_DATE='2026-09-22',CAPTAIN_TOUR_CYCLE_DAYS=6,CAPTAIN_TOUR_SHIFT_DAYS=2,CAPTAIN_SHIFT_OFFSETS={C:0,A:2,B:4};
 const C_PILOT_NAMES=new Set(['michael brion','jerry weems','jared weston','michael baldree']);
-const localTodayKey=()=> '2026-11-22';
-const departmentOperationalKey=()=> '2026-11-22';
+let operationalDate='2026-11-22';
+const localTodayKey=()=>operationalDate;
+const departmentOperationalKey=()=>operationalDate;
 const getCaptainPersonOptions=()=>[
  {name:'Michael Brion',prefix:'PERSON-BRION'},
  {name:'Austin Fox',prefix:'PERSON-FOX'},
@@ -39,7 +41,7 @@ const makeOverlayBox=()=>{
 const loadJSON=(k,def)=>STORE.has(k)?STORE.get(k):def;
 const saveJSON=(k,v)=>STORE.set(k,structuredClone(v));
 const displayMonthKey=x=>x==='2026-10'?'October 2026':'November 2026';
-const captainAuditWindow=()=>({months:['2026-10','2026-11'],tours:[
+const cWindow=()=>({months:['2026-10','2026-11'],tours:[
  {month:'2026-10',startDate:'2026-10-04',endDate:'2026-10-05'},
  {month:'2026-10',startDate:'2026-10-10',endDate:'2026-10-11'},
  {month:'2026-10',startDate:'2026-10-16',endDate:'2026-10-17'},
@@ -50,7 +52,12 @@ const captainAuditWindow=()=>({months:['2026-10','2026-11'],tours:[
  {month:'2026-11',startDate:'2026-11-15',endDate:'2026-11-16'},
  {month:'2026-11',startDate:'2026-11-21',endDate:'2026-11-22'},
  {month:'2026-11',startDate:'2026-11-27',endDate:'2026-11-28'}
-]});
+ ]});
+const captainAuditWindow=(date,shift='C')=>{
+ const b=cWindow(),n=CAPTAIN_SHIFT_OFFSETS[shift]||0;
+ const plus=d=>new Date(Date.parse(d+'T12:00:00Z')+n*86400000).toISOString().slice(0,10);
+ return {...b,tours:b.tours.map(t=>({...t,startDate:plus(t.startDate),endDate:plus(t.endDate),month:plus(t.startDate).slice(0,7)}))};
+};
 const report={
  sourceNativeReadAt:'2026-11-21T19:00:00Z',
  currentTourCrewConfirmedAt:'2026-11-21T15:00:00Z',
@@ -94,8 +101,8 @@ let requests=0,attendanceRequests=0,monitorOpened=0;
 const cPilotBridge=async(method,action,data,query)=>{
  if(method!=='GET')throw Error('Unexpected method');
  if(action==='vr-bc-department-roster'){
-  if(query.date!=='2026-11-22')throw Error('Wrong roster date');
-  requests++;return scheduled;
+  if(query.date!==operationalDate)throw Error('Wrong roster date');
+  requests++;return operationalDate==='2026-11-23'?{...scheduled,date:operationalDate,people:[{name:'Michael Brion',prefix:'PERSON-BRION',units:['Engine 502'],sourceStatus:'scheduled_work_evidence'},scheduled.people[3]]}:scheduled;
  }
  if(action==='vr-captain-attendance'){
   attendanceRequests++;
@@ -110,8 +117,8 @@ const cPilotBridge=async(method,action,data,query)=>{
  }
  throw Error('Unexpected BC network call '+action);
 };
-const cPilotFetch=async()=>pilot;
- const departmentFetch=async()=>({scope:'department-ppe-readonly',readOnly:true,
+const cPilotFetch=async()=>operationalDate==='2026-11-23'?{activeTour:false,people:[]}:pilot;
+ const departmentFetch=async()=>operationalDate==='2026-11-23'?({scope:'department-ppe-readonly',readOnly:true,date:operationalDate,people:[{name:'Michael Brion',prefix:'PERSON-BRION',knownItems:8,nativeReadItems:8,nativeDatedItems:8}],totals:{mappedPeople:1,nativeReadItems:8,nativeDatedItems:8}}):({scope:'department-ppe-readonly',readOnly:true,
  date:'2026-11-22',attendanceConfirmed:false,
   people:[{name:'Nicole Duncan',prefix:'PERSON-DUNCAN',knownItems:0,
     nativeDatedItems:0,lookupStatus:'owner_not_found',
@@ -235,6 +242,15 @@ try{
   completedAndPartial:true,offVisible:true,bcFirst:true,
   attendanceReadOnly:true,stationGroups:true,allColumnsFit:true,
   noOldOt:true,localReview:true,monitorHidden:true};
+ overlay.remove();STORE.clear();operationalDate='2026-11-23';
+ showBcDepartmentCheck();await new Promise(r=>setTimeout(r,90));
+ const aOverlay=document.querySelector('.test-overlay'),aTable=aOverlay.querySelector('table[data-bc-department-grid]');
+ const aRow=[...aTable.querySelectorAll('tr')].find(x=>x.textContent.includes('Michael Brion'));
+ if(!aOverlay.textContent.includes('Shift A tours')||!aRow||aRow.cells[3]?.textContent!=='8 RECORDED'||!aRow.textContent.includes('Engine 502'))
+  throw Error('A-shift current-date PPE receipt lost behind C-shift history: '+(aRow?.textContent||'NO ROW'));
+ if(![...aTable.querySelectorAll('th')].some(th=>th.title.startsWith('A-shift tour 2026-11-23')))
+  throw Error('BC date columns must follow active A shift');
+ result.offShiftOvertime=true;
 }catch(error){result={pass:false,error:String(error.message)}}
 document.body.dataset.bcDepartment=result.pass?'PASS':'FAIL';
 const pre=document.createElement('pre');pre.id='result';pre.textContent=JSON.stringify(result);
