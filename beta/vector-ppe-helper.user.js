@@ -19446,16 +19446,29 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
         async function poll(){
             if(polling)return;polling=true;
             try{
-                const auth=isMasterOwnerInstallation()&&rebelCommandPaired();
+                // Rebel Command pairing is not proof that the native Vector
+                // session is authenticated. SSO can redirect this designated
+                // tab to /login, while the userscript still has its pairing.
+                const path=String(location.pathname||'');
+                const sourceReady=/^\/main(?:\/|$)/i.test(path)&&
+                    !!findVectorNavigationTarget('Equipment');
+                const auth=isMasterOwnerInstallation()&&rebelCommandPaired()&&sourceReady;
                 const busy=!!getRun()||!!getCaptainDailyCheck()||
                     captainDailyBusy;
                 await broker('heartbeat',{dedicated:true,
                     ready:auth,busy});
                 const lease=readLease();
                 if(lease){
+                    // A real native Item Log read may navigate away from
+                    // Equipment; finish its receipt even without the nav.
                     if(busy)return; // Existing native read is not complete.
                     const result=takeResult();
                     if(!result||result.at<lease.claimedAt){
+                        if(!auth&&/^\/(?:login|signin|sign-in)(?:\/|$)/i.test(path)){
+                            try{await broker('complete',{id:lease.id,outcome:'auth_required'});}
+                            finally{clearResult();putLease(null);}
+                            return;
+                        }
                         if(Date.now()-lease.claimedAt<60000)return;
                         // Stopped/aborted item read is an error, NOT PASS.
                         try{await broker('complete',{id:lease.id,

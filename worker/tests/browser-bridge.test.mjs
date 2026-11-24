@@ -117,10 +117,10 @@ test('PPE bridge protects an active Captain check and completes only after nativ
  const t=transport(),tab=storage(),callbacks=[],intervals=[];
  let captainBusy=true,started=0;
  const context={
-  sessionStorage:tab,location:{search:'?mvci_worker=ppe'},
+  sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},
   URLSearchParams,Date,Math,JSON,TAB_ID:'vcppe-enterprise-test',
   GM_xmlhttpRequest:t.request,
-  isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,
+  isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:()=>({}),
   getRun:()=>null,getCaptainDailyCheck:()=>captainBusy?{}:null,
   captainDailyBusy:false,
   startCShiftPilotNativeRecheck:async()=>{started++;captainBusy=true;return true},
@@ -194,10 +194,10 @@ test('Enterprise PPE bridge auto-maps captain-confirmed unmapped gear as invento
   const t=transport(),tab=storage(),callbacks=[],intervals=[];
   let mapped=0,native=0;
   const context={
-    sessionStorage:tab,location:{search:'?mvci_worker=ppe'},
+    sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},
     URLSearchParams,Date,Math,JSON,TAB_ID:'mvci-autmap-pass',
     GM_xmlhttpRequest:t.request,
-    isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,
+    isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:()=>({}),
     getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
     cPilotFetch:async()=>({activeTour:true,tourStart:'2026-11-21',
       people:[{name:'Working Firefighter',attendance:'working',knownItems:0},
@@ -225,10 +225,10 @@ test('Enterprise PPE auto-map refuses to invent work or a completed inspection w
   const t=transport(),tab=storage(),callbacks=[],intervals=[];
   let mapped=0,native=0;
   vm.runInNewContext(ppeScript,{
-    sessionStorage:tab,location:{search:'?mvci_worker=ppe'},
+    sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},
     URLSearchParams,Date,Math,JSON,TAB_ID:'mvci-automap-fail',
     GM_xmlhttpRequest:t.request,
-    isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,
+    isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:()=>({}),
     getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
     cPilotFetch:async()=>({activeTour:true,tourStart:'2026-11-21',
       people:[{name:'Not yet confirmed',attendance:'unconfirmed',knownItems:0},
@@ -242,4 +242,20 @@ test('Enterprise PPE auto-map refuses to invent work or a completed inspection w
   assert.equal(native,0,'never claim native inspection success from failed mapping');
   assert.equal(t.calls.find(c=>c.route==='/v1/complete')?.outcome,'error');
   assert.ok(!tab.getItem('mvciEnterprisePpeLeaseV1'));
+});
+
+test('paired Vector login screen cannot claim a PPE lease and reports not ready',async()=>{
+ const tab=storage(),t=transport(),callbacks=[],intervals=[];
+ const context={sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/login'},
+  URLSearchParams,Date,Math,JSON,TAB_ID:'ppe-login-test',
+  GM_xmlhttpRequest:t.request,isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:()=>({}),
+  findVectorNavigationTarget:()=>null,getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
+  setTimeout:f=>callbacks.push(f),setInterval:f=>intervals.push(f)};
+ vm.runInNewContext(ppeScript,context);
+ callbacks[0]();await flush();
+ assert.equal(t.calls.find(c=>c.route==='/v1/heartbeat')?.ready,false);
+ assert.equal(t.calls.filter(c=>c.route==='/v1/claim').length,0);
+ context.location.pathname='/main/asset-manager';
+ intervals[0]();await flush();
+ assert.equal(t.calls.filter(c=>c.route==='/v1/claim').length,0,'blank authenticated route is not sufficient either');
 });
