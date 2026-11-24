@@ -9,17 +9,17 @@ const start=source.indexOf('function hasExplicitEmptyFolderWitness(){');
 const end=source.indexOf('function readingPaneCandidates(){',start);
 assert.ok(start>=0&&end>start,'Expected real empty-state reader');
 const reader=source.slice(start,end);
-function setup({notices=[],rows=[],busy=false,searchText='',heading='',groups=[],selected=true}={}){
+function setup({notices=[],rows=[],busy=false,searchText='',heading='',groups=[],selected=true,folderName="fixture",notesRegion=null,mailList=null}={}){
  let elapsed=0;
  const ctx={
-   document:{querySelectorAll:selector=>selector.startsWith('input[')?(searchText?[{value:searchText}]:[]):selector.startsWith('[role="heading"]')?(heading?[{visible:true,innerText:heading}]:[]):selector.startsWith('[role="group"]')?groups:notices},
+   document:{getElementById:id=>id==="Jump to notes list-region"?notesRegion:id==="MailList"?mailList:null,querySelectorAll:selector=>selector.startsWith('input[')?(searchText?[{value:searchText}]:[]):selector.startsWith('[role="heading"]')?(heading?[{visible:true,innerText:heading}]:[]):selector.startsWith('[role="group"]')?groups:notices},
    Date:{now:()=>elapsed},
    visible:el=>!!el.visible,
    attr:(el,k)=>el?.[k]||'',
    clean:txt=>String(txt||'').trim(),
    candidateRows:()=>rows,
    mailBusy:()=>busy,
-   selectedFolderCandidate:()=>selected?{key:'exact-folder'}:null,
+   selectedFolderCandidate:()=>selected?{key:'exact-folder',name:folderName}:null,
    nativeMessageListRegion:el=>el.inList?{}:null,
    wait:async ms=>{elapsed+=ms}
  };
@@ -82,4 +82,19 @@ test('native MailList id under observed region works even with no explicit role'
  assert.equal(await setup({groups:[group]}).checkEmpty(),true);
  assert.equal(await setup({groups:[{...group,closest:()=>null}]}).checkEmpty(2200),false);
  assert.equal(await setup({groups:[{...group,innerText:'Nothing in folder Looks empty over here. Some other text'}]}).checkEmpty(2200),false);
+});
+
+test('Archive empty witness requires exact selected Archive and observed list region',async()=>{
+ const group={visible:true,id:'MailList',closest:()=>({}),innerText:'Nothing in Archive Clean up your inbox by moving messages to Archive.'};
+ assert.equal(await setup({groups:[group],folderName:'Archive'}).checkEmpty(),true);
+ assert.equal(await setup({groups:[group],folderName:'Other'}).checkEmpty(2200),false);
+});
+test('native Notes view is excluded as non-mail, not claimed empty or treated as arbitrary named folder',async()=>{
+ const native={visible:true};
+ const h=setup({folderName:'Notes',notesRegion:native});
+ assert.equal(await h.stableNonMailNotesView(),true);
+ assert.equal(await setup({folderName:'Notes'}).stableNonMailNotesView(),false);
+ assert.equal(await setup({folderName:'Other',notesRegion:native}).stableNonMailNotesView(),false);
+ assert.equal(await setup({folderName:'Notes',notesRegion:native,mailList:{visible:true}}).stableNonMailNotesView(),false);
+ assert.equal(await setup({folderName:'Notes',notesRegion:native,rows:[{}]}).stableNonMailNotesView(),false);
 });
