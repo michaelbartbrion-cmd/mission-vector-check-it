@@ -1,4 +1,4 @@
-﻿
+
 'use strict';
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {spawnSync}=require('node:child_process'),assert=require('node:assert/strict');
@@ -39,6 +39,8 @@ const js=`
 (function(){
 const FIXTURE=__DATA__,requests=[],STORE=new Map(),SESSION=new Map();
 const location={origin:'https://app.vectorcheckit.us',href:'https://app.vectorcheckit.us/main/asset-manager'};
+const SCBA_FACE_MASK_POOL='299947';
+const BUILTIN_MODES={tour:{templates:{'300045':'112411','300036':'118098'}}};
 window.__scanCount=0;
 let HIST_DUTY=null;
 const sessionStorage={getItem:k=>SESSION.has(k)?SESSION.get(k):null,
@@ -50,8 +52,11 @@ let cVisible=true;const TAB_ID='smoke-cshift-tab',getRun=()=>null,
  ensurePpeEquipmentPage=async()=>true,
  scanPpeCrewOwners=async()=>{window.__scanCount++;
   return{items:[{ownerName:'Michael Baldree',assetId:'A-001',type:'Coat',
-   pool:'300082',itemId:'4605913',
-   url:'https://app.vectorcheckit.us/app/equipment/PPE/pool/300082/4605913/item?source=assetManager&sourceTab=PPE'}]};},
+   pool:'300045',itemId:'4605913',
+   url:'https://app.vectorcheckit.us/app/equipment/PPE/pool/300045/4605913/item?source=assetManager&sourceTab=PPE'},
+  {ownerName:'Michael Baldree',assetId:'MASK-001',type:'SCBA Face Mask',
+   pool:'299947',itemId:'55661',
+   url:'https://app.vectorcheckit.us/app/equipment/PPE/pool/299947/55661/item?source=assetManager&sourceTab=PPE'}]};},
  masterNameKey=x=>String(x||'').toLowerCase(),
  inferRegularTourWindow=()=>({isActiveTour:true,startDate:'2026-11-21'}),
  saveCaptainDailyCheck=check=>{window.__nativePilotCheck=check;},
@@ -128,13 +133,21 @@ const cShiftMasterOwner=()=>true,
   if(!overlays[0].textContent.includes('C Shift · PPE Check Status'))throw Error('User crew heading missing');
   if(!overlays[1].textContent.includes('BC Check'))throw Error('Master heading missing');
   for(const overlay of overlays){
-    if(overlay.querySelectorAll('table tr').length<8)throw Error('Seven crew not listed');
     for(const name of __NAMES__)if(!overlay.textContent.includes(name))
       throw Error('Crew member missing '+name);
     if(!overlay.textContent.includes('1 working / 1 off'))
       throw Error('Working/off duty counts missing');
   }
   const user=overlays[0],master=overlays[1];
+  // An ordinary user's roster can include the full crew. BC gets only
+  // confirmed workers in its MAIN summary, not all OFF/unknown firefighters.
+  if(user.querySelector('table').querySelectorAll('tr').length!==8)
+    throw Error('Crew status summary lost seven-person roster');
+  const bcInitial=[...master.querySelector('table').querySelectorAll('tr')];
+  if(bcInitial.length!==2||!bcInitial[1].textContent.includes('Michael Baldree'))
+    throw Error('BC should show only the one confirmed working firefighter');
+  if(/Weston|Brooks|Brion/.test(bcInitial[1].textContent))
+    throw Error('BC showed an off or unconfirmed person as working');
   if(user.querySelectorAll('[data-cshift-duty-editor] select').length)throw Error('Ordinary user can edit duty');
   const initialEditor=master.querySelector('[data-cshift-duty-editor]');
   if(initialEditor.querySelectorAll('select').length!==14)throw Error('Master lacks two day controls');
@@ -166,8 +179,10 @@ const cShiftMasterOwner=()=>true,
   await new Promise(r=>setTimeout(r,100));
   const mapped=requests.find(x=>x.url.includes('vr-ppe-pilot-inventory'));
   if(!mapped||mapped.data.personName!=='Michael Baldree'||
-      mapped.data.items.length!==1||
-      mapped.data.items[0].assetPath!=='/app/equipment/PPE/pool/300082/4605913/item')throw Error('Scoped PPE map not delivered: '+String(window.__nativeStatus)+'; requests='+requests.map(x=>x.url).join(','));
+      mapped.data.items.length!==2||
+      mapped.data.items[0].assetPath!=='/app/equipment/PPE/pool/300045/4605913/item'||
+      !mapped.data.items.some(x=>x.assetId==='MASK-001'&&x.inspectionMode==='scbaTour'&&
+       x.assetPath==='/app/equipment/PPE/pool/299947/55661/item'))throw Error('Scoped PPE map not delivered: '+String(window.__nativeStatus)+'; requests='+requests.map(x=>x.url).join(','));
   const monitor=[...master.querySelectorAll('button')].find(x=>x.textContent.includes('Monitor C Shift in This Tab'));
   if(!monitor)throw Error('Dedicated-tab monitoring button not found');
   const scansAfterMap=window.__scanCount;
@@ -182,7 +197,7 @@ const cShiftMasterOwner=()=>true,
   const session=JSON.parse(SESSION.get('vectorRebelCShiftDedicatedRecheckerV1')||'null');
   if(!session?.enabled||session.tourStart!=='2026-11-21')
     throw Error('Dedicated monitor not bound to one C-shift tour');
-  if(window.__nativePilotCheck.items[0].pool!=='300082'||
+  if(window.__nativePilotCheck.items[0].pool!=='300045'||
      window.__nativePilotCheck.items[0].itemId!=='4605913')
     throw Error('Direct native PPE target did not preserve exact pool and item identity');
   monitor.click(); // Stop live monitor before switching to the completed tour.
@@ -243,8 +258,11 @@ const cShiftMasterOwner=()=>true,
      !captain.textContent.includes('? NOT YET VERIFIED')||
      !captain.textContent.includes('? UNREADABLE'))
     throw Error('Captain full PPE grid has missing statuses or source data');
-  if(master.querySelector('table').querySelectorAll('tr').length!==8)
-    throw Error('BC summary unexpectedly expanded into the full gear audit');
+  const bcFinal=[...master.querySelector('table').querySelectorAll('tr')];
+  if(bcFinal.length!==6)
+    throw Error('BC summary should show only the five confirmed working firefighters: '+bcFinal.length);
+  if(bcFinal.some(row=>/Weston|Brooks/.test(row.textContent)))
+    throw Error('BC summary displayed off-duty firefighters');
   if([...master.querySelectorAll('button')].filter(b=>b.parentElement?.parentElement===master.querySelector('section')).length>4)
     throw Error('Too many primary buttons in battalion view');
   // Reproduce actual Nov 21: confirmed working roster, zero PPE Item
@@ -266,6 +284,23 @@ const cShiftMasterOwner=()=>true,
      !status.includes('UNKNOWN, not an all-clear')||
      !status.includes('original detailed native history'))
     throw Error('Empty Nov 21 inventory misleadingly rendered as zero missing checks: '+status);
+  // No captain-confirmed workers is not "all clear" or seven misleading
+  // BC equipment rows. The empty state must explicitly request staffing.
+  for(const row of FIXTURE.people){
+    row.attendance='unconfirmed';
+    row.dutyDay1='unconfirmed';
+    row.dutyDay2='unconfirmed';
+  }
+  FIXTURE.workingCrew=0;FIXTURE.offCrew=0;FIXTURE.unconfirmedCrew=7;
+  showCShiftPilotBoard(true);
+  await new Promise(r=>setTimeout(r,110));
+  const emptyBc=[...document.querySelectorAll('.pilot-overlay')].at(-1);
+  const emptyBcRows=[...emptyBc.querySelector('table').querySelectorAll('tr')];
+  if(emptyBcRows.length!==2||
+     !emptyBcRows[1].textContent.includes('No confirmed working firefighters')||
+     !emptyBcRows[1].textContent.includes('REVIEW STAFFING')||
+     !emptyBcRows[1].textContent.includes('Unknown'))
+    throw Error('BC did not show a clear unknown-staffing empty state');
   document.body.dataset.cshiftSmoke='PASS';
  }catch(error){document.body.dataset.cshiftSmoke='FAIL';document.body.dataset.reason=error.message;}
  },60);

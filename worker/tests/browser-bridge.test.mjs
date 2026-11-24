@@ -72,14 +72,55 @@ test('Scout on an ordinary CrewSense tab does not use enterprise loopback',()=>{
  assert.equal(callbacks.length,0);
  assert.equal(t.calls.length,0);
 });
+test('tagged dedicated PPE startup cleans the broken Vector Equipment query in the SAME tab',()=>{
+ const tab=storage(),redirects=[],callbacks=[];
+ const location={search:'?mvci_worker=ppe',pathname:'/main/asset-manager',
+  origin:'https://checkitapp.targetsolutions.com',
+  replace:url=>redirects.push(url)};
+ vm.runInNewContext(ppeScript,{
+  sessionStorage:tab,location,URLSearchParams,Date,Math,JSON,
+  TAB_ID:'ppe-tagged-boot',
+  setTimeout:f=>callbacks.push(f),setInterval:f=>callbacks.push(f)
+ });
+ assert.equal(tab.getItem('mvciEnterpriseDedicatedRoleV1'),'ppe');
+ assert.deepEqual(redirects,['https://checkitapp.targetsolutions.com/main/asset-manager']);
+ assert.equal(callbacks.length,0,'the broken page must not claim a lease');
+});
+test('same-tab clean Vector Equipment URL retains the dedicated PPE collector without a second redirect',()=>{
+ const tab=storage(),callbacks=[],intervals=[];
+ tab.setItem('mvciEnterpriseDedicatedRoleV1','ppe');
+ vm.runInNewContext(ppeScript,{
+  sessionStorage:tab,
+  location:{search:'',pathname:'/main/asset-manager',origin:'https://checkitapp.targetsolutions.com',
+   replace:()=>assert.fail('clean page should not redirect again')},
+  URLSearchParams,Date,Math,JSON,TAB_ID:'ppe-clean-boot',
+  setTimeout:f=>callbacks.push(f),setInterval:f=>intervals.push(f)
+ });
+ assert.equal(callbacks.length,1);
+ assert.equal(intervals.length,1);
+});
+test('tagged native Item Log route is not redirected or counted as an inspection',()=>{
+ const tab=storage(),callbacks=[];
+ vm.runInNewContext(ppeScript,{
+  sessionStorage:tab,location:{search:'?mvci_worker=ppe',
+   pathname:'/app/equipment/PPE/pool/300045/111/item',
+   origin:'https://checkitapp.targetsolutions.com',
+   replace:()=>assert.fail('native Item Log must not be redirected')},
+  URLSearchParams,Date,Math,JSON,TAB_ID:'ppe-item-route',
+  setTimeout:f=>callbacks.push(f),setInterval:()=>{}
+ });
+ assert.equal(tab.getItem('mvciEnterpriseDedicatedRoleV1'),'ppe');
+ assert.equal(callbacks.length,1);
+});
+
 test('PPE bridge protects an active Captain check and completes only after native read results',async()=>{
  const t=transport(),tab=storage(),callbacks=[],intervals=[];
  let captainBusy=true,started=0;
  const context={
-  sessionStorage:tab,location:{search:'?mvci_worker=ppe'},
+  sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},
   URLSearchParams,Date,Math,JSON,TAB_ID:'vcppe-enterprise-test',
   GM_xmlhttpRequest:t.request,
-  isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,
+  isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>k==='Equipment'?{}:null,
   getRun:()=>null,getCaptainDailyCheck:()=>captainBusy?{}:null,
   captainDailyBusy:false,
   startCShiftPilotNativeRecheck:async()=>{started++;captainBusy=true;return true},
@@ -147,4 +188,128 @@ test('one-step native PPE scanner accepts only approved mask mode and pool',()=>
   nextRequiredMode:'tour',
   nextRequiredPath:'/app/equipment/PPE/pool/300082/4605913/item'});
  assert.equal(ppe.inspectionModeKey,'tour');
+});
+
+test('Enterprise PPE bridge auto-maps captain-confirmed unmapped gear as inventory, not a native inspection',async()=>{
+  const t=transport(),tab=storage(),callbacks=[],intervals=[];
+  let mapped=0,native=0;
+  const context={
+    sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},
+    URLSearchParams,Date,Math,JSON,TAB_ID:'mvci-autmap-pass',
+    GM_xmlhttpRequest:t.request,
+    isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>k==='Equipment'?{}:null,
+    getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
+    cPilotFetch:async()=>({activeTour:true,tourStart:'2026-11-21',
+      people:[{name:'Working Firefighter',attendance:'working',knownItems:0},
+        {name:'Off Firefighter',attendance:'off',knownItems:0}]}),
+    cPilotMapWorkingGear:async(tour,automated)=>{
+      assert.equal(tour,'2026-11-21');assert.equal(automated,true);
+      mapped++;return true;
+    },
+    startCShiftPilotNativeRecheck:async()=>{native++;return true},
+    setTimeout:fn=>callbacks.push(fn),setInterval:fn=>intervals.push(fn),
+  };
+  vm.runInNewContext(ppeScript,context);
+  callbacks[0]();await flush();
+  assert.equal(mapped,1,'unmapped confirmed worker must be scanned once');
+  assert.equal(native,0,'mapping is not an Item Log read');
+  const complete=t.calls.find(c=>c.route==='/v1/complete');
+  assert.equal(complete?.outcome,'no_work','mapping must not count as verified PPE history');
+  assert.ok(!tab.getItem('mvciEnterprisePpeLeaseV1'));
+  const backoff=JSON.parse(tab.getItem('mvciEnterprisePpeAutoMapV1'));
+  assert.equal(backoff?.tourStart,'2026-11-21');
+  assert.ok(Number(backoff.at)>0);
+});
+
+test('Enterprise PPE auto-map refuses to invent work or a completed inspection when owner scan fails',async()=>{
+  const t=transport(),tab=storage(),callbacks=[],intervals=[];
+  let mapped=0,native=0;
+  vm.runInNewContext(ppeScript,{
+    sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},
+    URLSearchParams,Date,Math,JSON,TAB_ID:'mvci-automap-fail',
+    GM_xmlhttpRequest:t.request,
+    isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>k==='Equipment'?{}:null,
+    getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
+    cPilotFetch:async()=>({activeTour:true,tourStart:'2026-11-21',
+      people:[{name:'Not yet confirmed',attendance:'unconfirmed',knownItems:0},
+        {name:'Real working owner',attendance:'working',knownItems:0}]}),
+    cPilotMapWorkingGear:async()=>{mapped++;return false},
+    startCShiftPilotNativeRecheck:async()=>{native++;return true},
+    setTimeout:fn=>callbacks.push(fn),setInterval:fn=>intervals.push(fn)
+  });
+  callbacks[0]();await flush();
+  assert.equal(mapped,1,'only the working owner makes a scan eligible');
+  assert.equal(native,0,'never claim native inspection success from failed mapping');
+  assert.equal(t.calls.find(c=>c.route==='/v1/complete')?.outcome,'error');
+  assert.ok(!tab.getItem('mvciEnterprisePpeLeaseV1'));
+});
+
+test('paired Vector login screen cannot claim a PPE lease and reports not ready',async()=>{
+ const tab=storage(),t=transport(),callbacks=[],intervals=[];
+ const context={sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/login'},
+  URLSearchParams,Date,Math,JSON,TAB_ID:'ppe-login-test',
+  GM_xmlhttpRequest:t.request,isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>k==='Equipment'?{}:null,
+  findVectorNavigationTarget:()=>null,getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
+  setTimeout:f=>callbacks.push(f),setInterval:f=>intervals.push(f)};
+ vm.runInNewContext(ppeScript,context);
+ callbacks[0]();await flush();
+ assert.equal(t.calls.find(c=>c.route==='/v1/heartbeat')?.ready,false);
+ assert.equal(t.calls.filter(c=>c.route==='/v1/claim').length,0);
+ context.location.pathname='/main/asset-manager';
+ intervals[0]();await flush();
+ assert.equal(t.calls.filter(c=>c.route==='/v1/claim').length,0,'blank authenticated route is not sufficient either');
+});
+
+test('PPE keeps its existing broker heartbeat live during a long native owner lookup without claiming another lease',async()=>{
+ const t=transport(),tab=storage(),callbacks=[],intervals=[];
+ let resolveLookup;const lookup=new Promise(r=>{resolveLookup=r});
+ let entered=0;
+ const ctx={sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},
+  URLSearchParams,Date,Math,JSON,TAB_ID:'ppe-slow-lookup',
+  GM_xmlhttpRequest:t.request,isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,
+  findVectorNavigationTarget:k=>k==='Equipment'?{}:null,getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
+  departmentAutoScanBurst:async()=>{entered++;return lookup},
+  setTimeout:f=>callbacks.push(f),setInterval:f=>intervals.push(f)};
+ vm.runInNewContext(ppeScript,ctx);callbacks[0]();await flush();assert.equal(entered,1);
+ intervals[0]();await flush();
+ assert.equal(t.calls.filter(c=>c.route==='/v1/claim').length,1);
+ assert.equal(t.calls.filter(c=>c.route==='/v1/heartbeat').at(-1).busy,true);
+ resolveLookup('mapped');await flush();
+ assert.equal(t.calls.at(-2).route,'/v1/heartbeat');
+ assert.equal(t.calls.at(-1).route,'/v1/complete');
+ assert.equal(t.calls.at(-1).outcome,'no_work');
+ assert.equal(t.calls.filter(c=>c.route==='/v1/complete').length,1);
+});
+test('inactive C tour never consumes department rotation or reports an idle C-tour error',async()=>{
+ const t=transport(),tab=storage(),tasks=[];
+ tab.setItem('mvciEnterprisePpeDepartmentTurnV1','2');
+ let scans=0,pilot=0;
+ const ctx={sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},URLSearchParams,Date,Math,JSON,TAB_ID:'inactive-c-test',
+ GM_xmlhttpRequest:t.request,isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>k==='Equipment'?{}:null,getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
+ cPilotFetch:async()=>({activeTour:false,people:[]}),departmentAutoScanBurst:async()=>{scans++;return 'none'},startCShiftPilotNativeRecheck:async()=>{pilot++;return false},
+ setTimeout:f=>tasks.push(f),setInterval:()=>{}};
+ vm.runInNewContext(ppeScript,ctx);tasks[0]();await flush();
+ assert.equal(scans,1);assert.equal(pilot,0);assert.equal(t.calls.find(c=>c.route==='/v1/complete')?.outcome,'no_work');
+});
+test('inactive C tour preserves a genuine department source failure as error',async()=>{
+ const t=transport(),tab=storage(),tasks=[];
+ const ctx={sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},URLSearchParams,Date,Math,JSON,TAB_ID:'inactive-c-error',GM_xmlhttpRequest:t.request,
+ isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>k==='Equipment'?{}:null,getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
+ cPilotFetch:async()=>({activeTour:false,people:[]}),departmentAutoScanBurst:async()=>{throw Error('native search unresolved')},clean:x=>String(x),
+ startCShiftPilotNativeRecheck:async()=>assert.fail('inactive C fallback invoked'),setTimeout:f=>tasks.push(f),setInterval:()=>{}};
+ vm.runInNewContext(ppeScript,ctx);tasks[0]();await flush();
+ assert.equal(t.calls.find(c=>c.route==='/v1/complete')?.outcome,'error');
+});
+
+test('native Login control at normal asset-manager URL prevents new PPE claim even behind stale Equipment nav',async()=>{
+ const t=transport(),tab=storage(),tasks=[];tab.setItem('mvciEnterpriseDedicatedRoleV1','ppe');
+ const ctx={sessionStorage:tab,location:{search:'',pathname:'/main/asset-manager'},URLSearchParams,Date,Math,JSON,TAB_ID:'ppe-login-overlay',GM_xmlhttpRequest:t.request,
+ isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>['Login','Equipment'].includes(k)?{}:null,getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,setTimeout:f=>tasks.push(f),setInterval:()=>{}};
+ vm.runInNewContext(ppeScript,ctx);tasks[0]();await flush();assert.equal(t.calls.find(c=>c.route==='/v1/heartbeat')?.ready,false);assert.equal(t.calls.filter(c=>c.route==='/v1/claim').length,0);
+});
+test('expired native session releases existing lease as auth_required despite retained Captain checkpoint',async()=>{
+ const t=transport(),tab=storage(),tasks=[];tab.setItem('mvciEnterpriseDedicatedRoleV1','ppe');tab.setItem('mvciEnterprisePpeLeaseV1',JSON.stringify({id:'3ab60fd7-5be9-4a1c-aacb-110000000001',claimedAt:Date.now()-8000}));
+ const ctx={sessionStorage:tab,location:{search:'',pathname:'/main/asset-manager'},URLSearchParams,Date,Math,JSON,TAB_ID:'ppe-login-held-lease',GM_xmlhttpRequest:t.request,
+ isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:k=>k==='Login'?{}:null,getRun:()=>null,getCaptainDailyCheck:()=>({status:'running'}),captainDailyBusy:false,setTimeout:f=>tasks.push(f),setInterval:()=>{}};
+ vm.runInNewContext(ppeScript,ctx);tasks[0]();await flush();assert.equal(t.calls.find(c=>c.route==='/v1/complete')?.outcome,'auth_required');assert.equal(tab.getItem('mvciEnterprisePpeLeaseV1'),null);assert.equal(t.calls.filter(c=>c.route==='/v1/claim').length,0);
 });
