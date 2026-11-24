@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Postmaster
 // @namespace    mission-vector-check-it-rebel-postmaster
-// @version      1.2.23
+// @version      1.2.24
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @description  Minimal read-only Outlook Web collector for Rebel Command with whole-mailbox indexing and automatic capture of messages the user opens.
@@ -22,7 +22,7 @@
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_POSTMASTER)return;
-const VERSION='rebel-postmaster-1.2.23';
+const VERSION='rebel-postmaster-1.2.24';
 const DEFAULT_ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const MANAGED_UPDATE_URL='https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js';
 function openManagedUpdate(){
@@ -211,10 +211,18 @@ function hasExplicitEmptyFolderWitness(){
     // Live Outlook renders this empty state inside Message list as a group.
     // Require the exact native two-part wording and a selected folder.
     if(!selectedFolderCandidate())return false;
-    const groups=[...document.querySelectorAll('[role="group"],[role="region"],[aria-label]')];
-    return groups.some(el=>visible(el)&&!!nativeMessageListRegion(el)&&
-        /^nothing in folder[.!]?\s+looks empty over here[.!]?$/i.test(
-            clean(el.innerText||el.textContent||'')));
+    const groups=[...document.querySelectorAll('[role="group"],[role="region"],[aria-label],[id="MailList"]')];
+    return groups.some(el=>{
+        // Native accessibility inspection on 2026-11-23 identified
+        // #MailList directly beneath #Skip to message list-region.
+        // Outlook's generic DIVs need not expose an explicit ARIA role.
+        const nativeId=attr(el,'id')==='MailList'&&
+            !!el.closest?.('[id="Skip to message list-region"]');
+        if(!visible(el)||(!nativeId&&!nativeMessageListRegion(el)))return false;
+        const text=clean(el.innerText||el.textContent||'');
+        const label=clean(attr(el,'aria-label'));
+        return [text,label].some(x=>/^nothing in folder[.!]?\s+looks empty over here[.!]?$/i.test(x));
+    });
 }
 async function stableEmptyFolder(timeout=5200){
     const started=Date.now();let witnessPasses=0;
@@ -288,11 +296,16 @@ function explicitFolderItemCount(el){
     // badge rather than a single aria-label on the tree item. Read ONLY
     // the selected tree item's own labels, never its nested folder counts.
     const labels=[attr(el,'aria-label'),attr(el,'title')];
-    for(const node of el?.querySelectorAll?.('[aria-label],[title]')||[]){
+    // Outlook may put a total in an aria-describedby reference rather
+    // than its accessible-name text. Unread counts remain ineligible.
+    for(const node of el?.querySelectorAll?.('[aria-label],[title],[aria-describedby],span')||[]){
         if(node.closest?.('[role="treeitem"]')!==el)continue;
         labels.push(attr(node,'aria-label'),attr(node,'title'));
+        if(!node.children?.length){const t=clean(node.innerText||node.textContent||'');if(/^\[?[0-9,]+\]?\s+items?$/i.test(t))labels.push(t);}
+        const desc=attr(node,'aria-describedby').split(/\s+/).filter(Boolean);
+        if(desc.length)labels.push(desc.map(id=>clean(document.getElementById(id)?.textContent||'')).join(' '));
     }
-    const ids=attr(el,'aria-labelledby').split(/\s+/).filter(Boolean);
+    const ids=(attr(el,'aria-labelledby')+' '+attr(el,'aria-describedby')).split(/\s+/).filter(Boolean);
     if(ids.length)labels.push(ids.map(id=>clean(document.getElementById(id)?.textContent||'')).join(' '));
     const counts=new Set();
     for(const label of labels){
@@ -422,7 +435,7 @@ function render(){
     state.last=snapshot();const r=ensureUi();r.replaceChildren();const cs=crawlState(),same=crawlMatchesPage(cs),ms=mailboxState(),mb=mailboxSummary(ms),scopeOk=mailboxMatches(ms),needsVerification=mailboxHasUnverifiedEmpty(ms),retryNeeded=mailboxNeedsRetry(ms);
     if(state.open){
         const p=add(r,'div',null,'p'),h=add(p,'div',null,'h'),title=add(h,'div');add(title,'b','REBEL POSTMASTER');
-        const sub=add(title,'div','v1.2.23 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
+        const sub=add(title,'div','v1.2.24 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
         const close=add(h,'button','','orb header-orb');close.type='button';close.dataset.pmAction='close';close.title='Minimize Rebel Postmaster';close.setAttribute('aria-label','Minimize Rebel Postmaster');close.innerHTML=REBEL_SYMBOL_HTML;
         const b=add(p,'div',null,'b');
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');
