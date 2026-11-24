@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {spawnSync}=require('node:child_process');
-const src=fs.readFileSync(path.join(__dirname,'../beta/rebel-postmaster.user.js'),'utf8').replace('async function stableEmptyFolder(timeout=5200){','window.__fixtureEmpty=hasExplicitEmptyFolderWitness;window.__fixtureNonMail=hasNativeNonMailNotesView;async function stableEmptyFolder(timeout=5200){');
+const src=fs.readFileSync(path.join(__dirname,'../beta/rebel-postmaster.user.js'),'utf8').replace('async function stableEmptyFolder(timeout=5200){','window.__fixtureEmpty=hasExplicitEmptyFolderWitness;window.__fixtureNonMail=hasNativeNonMailNotesView;window.__fixturePassive=collectPassiveVisible;window.__fixturePair=()=>saveCfg({deviceId:"offline-fixture-device",token:"offline-fixture-token"});async function stableEmptyFolder(timeout=5200){');
 const browser=[process.env.CHROME_PATH,'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe','C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'].filter(Boolean).find(fs.existsSync);
 if(!browser)throw Error('A Chromium executable is required for the rendered launcher acceptance test');
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'postmaster-logo-smoke-'));
@@ -37,17 +37,31 @@ const keyboardOpened=!!root.querySelector('[data-pm-action="close"]');
 const countDiagnostic=root.textContent.includes('native item count: 747');
 root.querySelector('[data-pm-action="close"]').click();await frame();
 const keyboardClosed=!!root.querySelector('[data-pm-action="toggle"]');
+// Exercise the actual parser, passive acknowledgement cache and exact folder
+// identity in Chromium using ONLY an in-memory fake server receipt.
+const account=document.createElement('button');account.setAttribute('aria-label','Account manager for Fixture Owner');account.textContent='Fixture account';document.body.appendChild(account);
+window.__fixturePair();const batches=[];
+window.GM_xmlhttpRequest=o=>{const payload=JSON.parse(o.data);const msgs=payload.workEmailCapture?.messages||[];batches.push(msgs.map(m=>m.messageKey));o.onload({status:200,responseText:JSON.stringify({ok:true,workEmail:{accepted:true,messages:msgs.length}})})};
+const first=await window.__fixturePassive();const second=await window.__fixturePassive();
 const nativeList=document.querySelector('[aria-label="Message list"]');
+const extra=document.createElement('div');extra.setAttribute('role','listitem');extra.id='AgAAA5zpZsgCAAAIy8tVwgAAA-new';extra.innerHTML='<div>Example New Sender</div><div>New fixture email</div><div>Sample preview.</div><div>9:30 AM</div>';nativeList.querySelector('[role="list"]').appendChild(extra);
+// Avoid waiting the real rate budget inside the isolated fixture; keep the
+// production pacing code unchanged.
+storage.set('mvciPostmasterIndexNextAtV1',0);
+const third=await window.__fixturePassive();const fourth=await window.__fixturePassive();
+const passiveIncrement=first&&!second&&third&&!fourth&&batches.length===2&&batches[0].length===10&&batches[1].length===1&&batches[1][0]==='outlook:'+extra.id;
+extra.remove();account.remove();window.GM_xmlhttpRequest=()=>{requests++;throw Error('No network permitted in fixture')};
+
 nativeList.remove();const observed=document.createElement('div');observed.id='Skip to message list-region';observed.innerHTML='<div id="MailList"><div>Nothing in folder</div><div>Looks empty over here.</div></div>';document.querySelector('main').appendChild(observed);
 const nativeEmpty=window.__fixtureEmpty();observed.id='unrelated-region';const unrelatedEmpty=window.__fixtureEmpty();observed.id='Skip to message list-region';observed.style.display='none';const hiddenEmpty=window.__fixtureEmpty();observed.remove();
 const folder=document.querySelector('[role="treeitem"]');folder.setAttribute('data-folder-name','Archive');folder.setAttribute('aria-label','Archive');observed.style.display='';observed.id='Skip to message list-region';observed.innerHTML='<div id="MailList"><div>Nothing in Archive</div><div>Clean up your inbox by moving messages to Archive.</div></div>';document.querySelector('main').appendChild(observed);const archiveEmpty=window.__fixtureEmpty();folder.setAttribute('data-folder-name','Notes');folder.setAttribute('aria-label','Notes');const falseArchive=window.__fixtureEmpty();observed.remove();const notes=document.createElement('div');notes.id='Jump to notes list-region';notes.textContent='Notes list';document.querySelector('main').appendChild(notes);const nativeNotes=window.__fixtureNonMail();folder.setAttribute('data-folder-name','Other');const falseNotes=window.__fixtureNonMail();notes.remove();
-const pass=nativeEmpty&&!unrelatedEmpty&&!hiddenEmpty&&archiveEmpty&&!falseArchive&&nativeNotes&&!falseNotes&&JSON.stringify(floating.button)==='[54,54]'&&JSON.stringify(header.button)==='[43,43]'&&JSON.stringify(floating.image)==='[39,39]'&&JSON.stringify(header.image)==='[39,39]'&&floating.loaded&&header.loaded&&floating.border==='50%'&&header.border==='50%'&&reopened&&requests===0&&nativeRows===10&&validRows===10&&correctIdentity&&rejectedEmptyPane&&keyboardOpened&&keyboardClosed&&countDiagnostic;
-result={pass,floating,header,reopened,requests,nativeRows,validRows,correctIdentity,rejectedEmptyPane,keyboardOpened,keyboardClosed,countDiagnostic,nativeEmpty,unrelatedEmpty,hiddenEmpty,archiveEmpty,falseArchive,nativeNotes,falseNotes};
+const pass=passiveIncrement&&nativeEmpty&&!unrelatedEmpty&&!hiddenEmpty&&archiveEmpty&&!falseArchive&&nativeNotes&&!falseNotes&&JSON.stringify(floating.button)==='[54,54]'&&JSON.stringify(header.button)==='[43,43]'&&JSON.stringify(floating.image)==='[39,39]'&&JSON.stringify(header.image)==='[39,39]'&&floating.loaded&&header.loaded&&floating.border==='50%'&&header.border==='50%'&&reopened&&requests===0&&nativeRows===10&&validRows===10&&correctIdentity&&rejectedEmptyPane&&keyboardOpened&&keyboardClosed&&countDiagnostic;
+result={pass,passiveIncrement,batches:batches.map(x=>x.length),floating,header,reopened,requests,nativeRows,validRows,correctIdentity,rejectedEmptyPane,keyboardOpened,keyboardClosed,countDiagnostic,nativeEmpty,unrelatedEmpty,hiddenEmpty,archiveEmpty,falseArchive,nativeNotes,falseNotes};
 }catch(e){result={pass:false,error:String(e.message)}}const pre=document.createElement('pre');pre.id='result';pre.textContent=JSON.stringify(result);document.body.appendChild(pre);document.body.dataset.smoke=result.pass?'PASS':'FAIL';
 })();
 </script></body></html>`;
 const f=path.join(tmp,'test.html');fs.writeFileSync(f,fixture);
-const r=spawnSync(browser,['--headless=new','--window-size=1440,1200','--no-first-run','--disable-background-networking','--disable-extensions','--disable-gpu','--user-data-dir='+path.join(tmp,'profile'),'--virtual-time-budget=6500','--dump-dom',require('node:url').pathToFileURL(f).href],{encoding:'utf8',timeout:25000,maxBuffer:4*1024*1024,windowsHide:true});
+const r=spawnSync(browser,['--headless=new','--window-size=1440,1200','--no-first-run','--disable-background-networking','--disable-extensions','--disable-gpu','--user-data-dir='+path.join(tmp,'profile'),'--virtual-time-budget=15000','--dump-dom',require('node:url').pathToFileURL(f).href],{encoding:'utf8',timeout:25000,maxBuffer:4*1024*1024,windowsHide:true});
 if(r.error)throw r.error;
 const state=r.stdout.match(/data-smoke="([^"]+)"/)?.[1];
 const detail=r.stdout.match(/<pre id="result">([^<]+)<\/pre>/)?.[1];

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Postmaster
 // @namespace    mission-vector-check-it-rebel-postmaster
-// @version      1.2.29
+// @version      1.2.30
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @description  Minimal read-only Outlook Web collector for Rebel Command with whole-mailbox indexing and automatic capture of messages the user opens.
@@ -22,7 +22,7 @@
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_POSTMASTER)return;
-const VERSION='rebel-postmaster-1.2.29';
+const VERSION='rebel-postmaster-1.2.30';
 const DEFAULT_ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const MANAGED_UPDATE_URL='https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js';
 function openManagedUpdate(){
@@ -452,10 +452,101 @@ let mailboxAbort=false;
 async function runMailboxSync({fresh=false,retryErrors=false}={}){if(!paired())throw new Error('Pairing not configured.');if(!mailboxId())throw new Error('Outlook account identity not confirmed. Finish signing in and reload Outlook.');if(state.busy)throw new Error('Postmaster is already busy.');state.busy=true;mailboxAbort=false;crawlAbort=false;render();let ms=mailboxState();trace('mailbox_start',{fresh:!!fresh,retryErrors:!!retryErrors,priorStatus:ms?.status||'',priorFolderCount:Array.isArray(ms?.folders)?ms.folders.length:0});try{if(fresh||!mailboxMatches(ms)||!Array.isArray(ms?.folders)||!ms.folders.length){const folders=await discoverMailboxFolders();if(!folders.length)throw new Error('No Outlook mail folders could be discovered. Expand the folder tree and try again.');trace('mailbox_discovered',{folderCount:folders.length,folders:folders.map(f=>({key:f.key,name:f.name,hasHref:!!f.href,hasDomId:!!f.domId})).slice(0,120)});ms=newMailbox(folders);reconcileCompletedCrawl(ms,crawlState());clearMailbox();saveMailbox(ms)}reconcileCompletedCrawl(ms,crawlState());requeueShortCompletedFolders(ms);if(retryErrors){for(const f of ms.folders)if(f.status==='error'||(f.status==='complete'&&Number(f.indexedCount||0)===0&&f.emptyWitness!==true&&f.nonMailWitness!=='outlook_notes_view')){f.status='pending';f.navAttempts=0;f.crawlAttempts=0;f.lastError='';f.emptyWitness=false}const prior=crawlState();if(prior?.status==='error'){prior.status='paused';prior.steps=0;prior.lastTop=0;prior.lastError='';prior.updatedAt=new Date().toISOString();saveCrawl(prior)}}ms.status='running';ms.lastError='';ms.updatedAt=new Date().toISOString();saveMailbox(ms);await reportMailboxManifest(ms);let guard=0;const orchestrationCeiling=MAX_MAILBOX_FOLDERS*4+20;for(;guard<orchestrationCeiling&&!mailboxAbort;guard++){const target=ms.folders.find(f=>['pending','navigating','running'].includes(f.status))||ms.folders.find(f=>f.status==='error'&&Number(f.navAttempts||0)<MAX_FOLDER_NAV_ATTEMPTS&&Number(f.crawlAttempts||0)<3);if(!target){const summary=mailboxSummary(ms);ms.status=summary.errors?'complete_with_errors':'complete';ms.updatedAt=new Date().toISOString();ms.lastSuccessAt=ms.updatedAt;saveMailbox(ms);state.msg=`Mailbox index ${summary.errors?'finished with errors':'complete'}: ${summary.indexed} indexed across ${summary.complete}/${summary.folders} folders${summary.errors?` · ${summary.errors} folder errors`:''}.`;state.kind=summary.errors?'error':'success';await reportMailboxManifest(ms);trace('mailbox_complete',{status:ms.status,folders:summary.folders,complete:summary.complete,errors:summary.errors,indexed:summary.indexed});return}if(!targetMatchesPage(target)){if(Number(target.navAttempts||0)>=MAX_FOLDER_NAV_ATTEMPTS){target.status='error';target.lastError=`Folder navigation stopped after ${MAX_FOLDER_NAV_ATTEMPTS} attempts for ${target.name}.`;ms.lastError=target.lastError;ms.updatedAt=new Date().toISOString();saveMailbox(ms);continue}target.status='navigating';target.navAttempts=Number(target.navAttempts||0)+1;ms.currentKey=target.key;ms.updatedAt=new Date().toISOString();saveMailbox(ms);state.msg=`Mailbox sync: opening ${target.name} (${mailboxSummary(ms).complete}/${ms.folders.length} folders complete).`;state.kind='info';render();trace('folder_navigate_attempt',{key:target.key,name:target.name,navAttempt:target.navAttempts,currentFolder:folderName()});try{const stayed=await navigateToFolder(target);if(!stayed)return;if(!targetMatchesPage(target))throw new Error(`Folder ${target.name} did not become active.`)}catch(e){target.status='error';target.lastError=clean(e?.message||e);trace('folder_navigate_error',{key:target.key,name:target.name,error:target.lastError,navAttempts:target.navAttempts});ms.lastError=target.lastError;ms.updatedAt=new Date().toISOString();saveMailbox(ms);continue}}target.status='running';target.lastError='';ms.currentKey=target.key;ms.updatedAt=new Date().toISOString();saveMailbox(ms);let prior=crawlState();if(!crawlMatchesTarget(prior,target)){const saved=scopedPartialCheckpoint(target.crawlCheckpoint,target);if(saved&&crawlMatchesPage(saved)){saveCrawl(saved);prior=saved}}if(prior?.status==='complete'&&(Number(prior.seen?.length||0)>0||prior.emptyWitness===true||prior.nonMailWitness==='outlook_notes_view')&&crawlMatchesTarget(prior,target)&&(!Number.isSafeInteger(target.nativeItemCount)||prior.seen.length>=target.nativeItemCount)){target.status='complete';delete target.crawlCheckpoint;target.indexedCount=Number(prior.seen?.length||0);target.emptyWitness=!!prior.emptyWitness;target.nonMailWitness=prior.nonMailWitness||'';target.lastSuccessAt=prior.lastSuccessAt||new Date().toISOString();saveMailbox(ms);continue}const resumeExisting=!!prior&&['running','paused','error'].includes(prior.status)&&crawlMatchesTarget(prior,target)&&crawlMatchesPage(prior);target.crawlAttempts=Number(target.crawlAttempts||0)+1;saveMailbox(ms);await runFolderSync({fresh:!resumeExisting,managed:true});const after=crawlState();trace('folder_crawl_result',{key:target.key,name:target.name,status:after?.status||'missing',indexedCount:Number(after?.seen?.length||0),steps:Number(after?.steps||0),error:clean(after?.lastError||'')});if(after?.status==='complete'&&crawlMatchesTarget(after,target)){target.status='complete';delete target.crawlCheckpoint;target.indexedCount=Number(after.seen?.length||0);target.emptyWitness=!!after.emptyWitness;target.nonMailWitness=after.nonMailWitness||'';target.lastSuccessAt=after.lastSuccessAt||new Date().toISOString()}else{target.status='error';if(after&&crawlMatchesTarget(after,target)){const partial=scopedPartialCheckpoint(after,target);if(partial)target.crawlCheckpoint=partial;target.indexedCount=Math.max(Number(target.indexedCount||0),Number(after.seen?.length||0));if(Number.isSafeInteger(after.nativeItemCount))target.nativeItemCount=after.nativeItemCount;}target.lastError=after?.lastError||'Folder crawl did not complete.';ms.lastError=target.lastError}ms.updatedAt=new Date().toISOString();saveMailbox(ms)}if(mailboxAbort){ms.status='paused';ms.updatedAt=new Date().toISOString();saveMailbox(ms);await reportMailboxManifest(ms);state.msg='Mailbox sync paused safely.';state.kind='info'}else if(guard>=orchestrationCeiling){ms.status='error';ms.lastError=`Mailbox orchestration safety ceiling of ${orchestrationCeiling} folder attempts reached.`;ms.updatedAt=new Date().toISOString();saveMailbox(ms);await reportMailboxManifest(ms);state.msg=`Mailbox sync stopped: ${ms.lastError}`;state.kind='error'}}catch(e){trace('mailbox_error',{error:clean(e?.message||e),status:ms?.status||'',currentKey:ms?.currentKey||''});if(ms){ms.status='error';ms.lastError=clean(e?.message||e);ms.updatedAt=new Date().toISOString();saveMailbox(ms);try{await reportMailboxManifest(ms)}catch(_){}}state.msg=`Mailbox sync stopped: ${clean(e?.message||e)}`;state.kind='error'}finally{state.busy=false;render()}}
 function pauseMailboxSync(){mailboxAbort=true;crawlAbort=true;const ms=mailboxState();if(ms&&ms.status==='running'){ms.status='paused';ms.updatedAt=new Date().toISOString();saveMailbox(ms)}state.msg='Mailbox pause requested. Postmaster will stop after the current safe batch.';state.kind='info';render()}
 async function captureList(){state.busy=true;render();try{const snap=await stableSnapshot();state.last=snap;if(!snap.messages.length)throw new Error('No credible visible message rows were found.');const messages=snap.messages.map(({_strongId,...m})=>m),a=snap.assessment,res=await request(makeCapture(messages,a.quality,`Production visible-list capture; ${a.validRows}/${a.total} structurally valid rows, ${a.strongIdRows}/${a.total} strong Outlook DOM IDs. No mailbox mutations performed.`));if(!res?.workEmail?.accepted)throw new Error(res?.workEmail?.error||res?.workEmail?.reason||'Rebel Command did not accept the capture.');state.msg=`Captured ${res.workEmail.messages??messages.length} visible messages as ${a.quality.toUpperCase()} evidence.`;state.kind='success'}catch(e){state.msg=`Capture stopped: ${clean(e?.message||e)}`;state.kind='error'}finally{state.busy=false;render()}}
-async function captureOpen({automatic=false}={}){if(!paired()||state.busy)return false;try{await wait(260);const msg=parseOpenMessage(),seen=openedKeys();if(automatic&&seen.has(msg.messageKey))return false;const res=await request(makeCapture([msg],'good',`${automatic?'Automatic':'Manual'} opened-message capture. Body was read only from the message already displayed in Outlook; Postmaster did not open, send, move, flag, delete, or otherwise mutate the mailbox.`));if(!res?.workEmail?.accepted)throw new Error(res?.workEmail?.error||res?.workEmail?.reason||'Rebel Command did not accept the open message.');seen.add(msg.messageKey);saveOpened(seen);if(!automatic){state.msg=`Captured open message${msg.subject?`: ${msg.subject}`:''} including body text.`;state.kind='success';render()}return true}catch(e){if(!automatic){state.msg=`Open-message capture stopped: ${clean(e?.message||e)}`;state.kind='error';render()}return false}}
+async function captureOpen({automatic=false}={}){if(!paired()||state.busy)return false;try{await wait(260);const msg=parseOpenMessage(),seen=openedKeys();if(automatic&&seen.has(msg.messageKey))return true;const res=await request(makeCapture([msg],'good',`${automatic?'Automatic':'Manual'} opened-message capture. Body was read only from the message already displayed in Outlook; Postmaster did not open, send, move, flag, delete, or otherwise mutate the mailbox.`));if(!res?.workEmail?.accepted)throw new Error(res?.workEmail?.error||res?.workEmail?.reason||'Rebel Command did not accept the open message.');seen.add(msg.messageKey);saveOpened(seen);if(!automatic){state.msg=`Captured open message${msg.subject?`: ${msg.subject}`:''} including body text.`;state.kind='success';render()}return true}catch(e){if(!automatic){state.msg=`Open-message capture stopped: ${clean(e?.message||e)}`;state.kind='error';render()}return false}}
+
+const PASSIVE_KEY='mvciPostmasterPassiveAckV1',PASSIVE_INTERVAL_MS=60000;
+let passiveTimer=null,passiveBusy=false,passiveLastAt=0,passiveState='Waiting for an authenticated Outlook folder.';
+function passiveScope(){
+    const mailbox=mailboxId(),key=currentFolderKey(),folder=folderId();
+    return mailbox&&key&&folder?{mailbox,key,folder}:null;
+}
+function passiveScopeSame(s){
+    const now=passiveScope();
+    return !!s&&!!now&&now.mailbox===s.mailbox&&now.key===s.key&&now.folder===s.folder;
+}
+function passiveAllowed(s){
+    if(!paired()||state.busy||!passiveScopeSame(s)||mailBusy())return false;
+    const ms=mailboxState(),cs=crawlState();
+    return !(ms?.mailboxId===s.mailbox&&ms.status==='running')&&
+        !(cs?.mailboxId===s.mailbox&&cs.status==='running');
+}
+function passiveAckKeys(s){
+    const entries=GM_getValue(PASSIVE_KEY,[])||[];
+    return new Set(Array.isArray(entries)?entries.filter(x=>x?.scope===s.mailbox+'|'+s.key).map(x=>x.key):[]);
+}
+function savePassiveAcks(s,keys){
+    const scope=s.mailbox+'|'+s.key,entries=GM_getValue(PASSIVE_KEY,[])||[];
+    const merged=new Map();
+    for(const x of Array.isArray(entries)?entries:[])if(x?.scope&&x?.key)merged.set(x.scope+'\u0000'+x.key,x);
+    for(const key of keys){const id=scope+'\u0000'+key;merged.delete(id);merged.set(id,{scope,key})}
+    GM_setValue(PASSIVE_KEY,[...merged.values()].slice(-10000));
+}
+async function settledPassiveRows(s){
+    let previous='',stable=0;
+    for(let i=0;i<5;i++){
+        if(!passiveAllowed(s))return [];
+        const rows=snapshot().messages.filter(m=>credibleMessageRow(m)&&m.messageKey);
+        const sig=JSON.stringify(rows.map(m=>m.messageKey));
+        if(rows.length&&sig===previous)stable++;else stable=0;
+        previous=sig;
+        if(stable>=2)return rows;
+        await wait(300);
+    }
+    return [];
+}
+async function collectPassiveVisible(){
+    if(passiveBusy||openWatchBusy)return false;
+    const scope=passiveScope();
+    if(!passiveAllowed(scope))return false;
+    passiveBusy=true;let sending=false;
+    try{
+        const rows=await settledPassiveRows(scope);
+        if(!rows.length||!passiveAllowed(scope))return false;
+        const known=passiveAckKeys(scope),cs=crawlState();
+        // An exact folder crawl already acknowledged these IDs. Do not
+        // upload them again or count this passive sample as folder coverage.
+        if(cs?.mailboxId===scope.mailbox&&cs.folderKey===scope.key&&Array.isArray(cs.seen))
+            for(const key of cs.seen)known.add(key);
+        const fresh=[...new Map(rows.filter(m=>!known.has(m.messageKey)).map(m=>[m.messageKey,m])).values()].slice(0,50);
+        if(!fresh.length){passiveState='Visible list up to date (not whole-mailbox coverage).';return false;}
+        await paceIndexBatch(fresh.length);
+        if(!passiveAllowed(scope))return false;
+        // Reconfirm the exact visible IDs after network pacing: a user can
+        // change folders or Outlook can recycle virtual rows in the interim.
+        const current=await settledPassiveRows(scope);
+        const present=new Set(current.map(m=>m.messageKey));
+        if(!passiveAllowed(scope)||fresh.some(m=>!present.has(m.messageKey)))return false;
+        const wanted=new Set(fresh.map(m=>m.messageKey));
+        const msgs=[...new Map(current.filter(m=>wanted.has(m.messageKey)).map(m=>[m.messageKey,m])).values()].map(({_strongId,...m})=>m);
+        state.busy=true;sending=true;
+        const res=await request(makeCapture(msgs,'good','Automatic visible-list increment; exact Outlook account and folder, stable native message IDs. No folder navigation, opened messages, or mailbox mutations.'));
+        const ack=res?.workEmail;
+        if(!ack?.accepted||ack.messages!==msgs.length)throw Error('Visible-list receipt did not acknowledge every message.');
+        savePassiveAcks(scope,msgs.map(m=>m.messageKey));
+        passiveLastAt=Date.now();passiveState='Visible-list increment acknowledged.';
+        trace('passive_list_ack',{count:msgs.length});
+        return true;
+    }catch(e){
+        passiveState='Visible-list increment pending retry.';
+        trace('passive_list_error',{error:clean(e?.message||e)});
+        return false;
+    }finally{if(sending)state.busy=false;passiveBusy=false;}
+}
+function startPassiveWatcher(){
+    if(passiveTimer)return;
+    // One existing Outlook userscript timer; no new tab, external worker,
+    // folder navigation or changes to the native mailbox.
+    passiveTimer=setInterval(()=>{
+        const s=passiveScope();
+        if(!s||!navigator.locks?.request)return;
+        void navigator.locks.request('mvci-postmaster-visible-'+s.mailbox,{ifAvailable:true},lock=>
+            lock?collectPassiveVisible():false).catch(e=>trace('passive_lock_error',{error:clean(e?.message||e)}));
+    },PASSIVE_INTERVAL_MS);
+}
 let openWatchSig='',openWatchTimer=null,uiWatchTimer=null;
 function readingSignature(){try{const p=findReadingPane();if(!p)return'';const txt=rawText(p.innerText||p.textContent||'');if(txt.length<40)return'';return hash(`${attr(p,'data-itemid')}|${attr(p,'data-convid')}|${txt.slice(0,1800)}`)}catch(_){return''}}
-function startOpenWatcher(){if(openWatchTimer)return;openWatchTimer=setInterval(async()=>{if(state.busy)return;const sig=readingSignature();if(!sig||sig===openWatchSig)return;openWatchSig=sig;await captureOpen({automatic:true})},2200)}
+let openWatchBusy=false,openWatchRetryAt=0;
+function startOpenWatcher(){if(openWatchTimer)return;openWatchTimer=setInterval(async()=>{if(state.busy||passiveBusy||openWatchBusy||Date.now()<openWatchRetryAt)return;const sig=readingSignature();if(!sig||sig===openWatchSig)return;openWatchBusy=true;try{if(await captureOpen({automatic:true}))openWatchSig=sig;else openWatchRetryAt=Date.now()+30000;}finally{openWatchBusy=false}},2200)}
 function startUiWatchdog(){if(uiWatchTimer)return;uiWatchTimer=setInterval(()=>{try{if(!uiHost?.isConnected||!document.getElementById(ROOT_ID))render()}catch(_){/* UI self-heal must never interrupt mail collection. */}},5000)}
 let state={open:false,busy:false,msg:'Ready. Mailbox sync indexes every discoverable Outlook mail folder without opening messages; messages you open yourself are body-captured automatically.',last:null,kind:'info'};
 function add(p,t,txt,c){const e=document.createElement(t);if(txt!=null)e.textContent=txt;if(c)e.className=c;p.appendChild(e);return e}
@@ -563,7 +654,7 @@ function render(){
     state.last=snapshot();const r=ensureUi();r.replaceChildren();const cs=crawlState(),same=crawlMatchesPage(cs),ms=mailboxState(),mb=mailboxSummary(ms),scopeOk=mailboxMatches(ms),needsVerification=mailboxHasUnverifiedEmpty(ms),retryNeeded=mailboxNeedsRetry(ms);
     if(state.open){
         const p=add(r,'div',null,'p'),h=add(p,'div',null,'h'),title=add(h,'div');add(title,'b','REBEL POSTMASTER');
-        const sub=add(title,'div','v1.2.29 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
+        const sub=add(title,'div','v1.2.30 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
         const close=add(h,'button','','orb header-orb');close.type='button';close.dataset.pmAction='close';close.title='Minimize Rebel Postmaster';close.setAttribute('aria-label','Minimize Rebel Postmaster');close.innerHTML=REBEL_SYMBOL_HTML;
         const b=add(p,'div',null,'b');
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');
@@ -576,13 +667,14 @@ function render(){
         const sync=add(toolBody,'button',same&&cs&&['paused','error','running'].includes(cs.status)?(cs.status==='running'?'FOLDER SYNC RUNNING':'RESUME CURRENT FOLDER'):'SYNC CURRENT FOLDER','s');sync.type='button';sync.dataset.pmAction='sync';sync.disabled=state.busy||!paired();sync.style.width='100%';sync.style.marginTop='8px';
         const conf=add(toolBody,'button','CONNECTION','s');conf.type='button';conf.dataset.pmAction='configure';conf.style.width='100%';conf.style.marginTop='8px';
         const upd=add(toolBody,'button','CHECK FOR UPDATE','s');upd.type='button';upd.dataset.pmAction='update';upd.style.width='100%';upd.style.marginTop='8px';
+        add(toolBody,'div',passiveState+(passiveLastAt?' Last acknowledged: '+new Date(passiveLastAt).toLocaleString():''),'note');
         add(b,'div',state.msg,`m ${state.kind==='success'?'ok':state.kind==='error'?'err':''}`);
         add(b,'div','Read-only collector. SYNC MAIL indexes Outlook folders for Rebel Command. Messages you personally open are captured automatically; Postmaster never opens unread mail for you.','note');
     }
     if(!state.open){const orb=add(r,'button','','orb');orb.type='button';orb.dataset.pmAction='toggle';orb.title='Open Rebel Postmaster';orb.setAttribute('aria-label','Open Rebel Postmaster');orb.innerHTML=REBEL_SYMBOL_HTML;}
 }
 async function configure(){try{const old=cfg();if(old.deviceId&&old.token){const a=prompt('Rebel Postmaster is paired. Type TEST, REPAIR, CLEAR, or leave blank to cancel.','TEST');if(a==null||!clean(a))return;const u=clean(a).toUpperCase();if(u==='TEST'){await verify();state.msg='Connection verified.';state.kind='success';render();return}if(u==='CLEAR'){GM_deleteValue(CFG_KEY);state.msg='Pairing cleared.';state.kind='info';render();return}if(u!=='REPAIR')return}const endpoint=prompt('Rebel Command telemetry endpoint',old.endpoint||DEFAULT_ENDPOINT);if(endpoint==null)return;const deviceId=prompt('Rebel Command device ID',old.deviceId||'');if(deviceId==null)return;const token=prompt('Private device token (stored only in Tampermonkey userscript storage)','');if(token==null)return;const next={endpoint:normalizeEndpoint(endpoint),deviceId:clean(deviceId),token:clean(token)};saveCfg(next);await verify();state.msg='Pairing saved and verified.';state.kind='success'}catch(e){state.msg=`Connection failed: ${clean(e?.message||e)}`;state.kind='error'}render()}
-state.last=snapshot();render();startOpenWatcher();startUiWatchdog();
+state.last=snapshot();render();startOpenWatcher();startUiWatchdog();startPassiveWatcher();
 const aliasErrorState=mailboxState();if(!state.busy&&aliasErrorState?.status!=='running'&&requeueShortCompletedFolders(aliasErrorState)){void reportMailboxManifest(aliasErrorState).catch(e=>trace('coverage_manifest_report_failed',{error:clean(e?.message||e)}));}if(aliasErrorState?.status==='error'&&/multiple folders named/i.test(clean(aliasErrorState.lastError||'')))clearMailbox();
 const bootMailbox=mailboxState(),bootCrawl=crawlState();if(bootMailbox?.status==='complete'&&mailboxHasUnverifiedEmpty(bootMailbox)&&mailboxMatches(bootMailbox)){bootMailbox.status='complete_with_errors';bootMailbox.lastError='Zero-message folders require explicit empty-state evidence.';saveMailbox(bootMailbox);reportMailboxManifest(bootMailbox).catch(()=>{});}if(bootMailbox?.status==='running'&&mailboxMatches(bootMailbox))setTimeout(()=>runMailboxSync({fresh:false}),1800);else if(bootCrawl?.status==='running'&&crawlMatchesPage(bootCrawl))setTimeout(()=>runFolderSync({fresh:false}),1800);
 window.MVCI_REBEL_POSTMASTER={version:VERSION,snapshot,stableSnapshot,parseOpenMessage,captureList,captureOpen,runFolderSync,pauseFolderSync,runMailboxSync,pauseMailboxSync,discoverMailboxFolders,mailboxManifestPayload,configure,crawlState,mailboxState,traceRows,traceExport,clearTrace,status:()=>({paired:paired(),folder:folderName(),messages:state.last?.messages?.length||0,quality:state.last?.assessment?.quality||'unknown',crawl:crawlState(),mailbox:mailboxState(),traceCount:traceRows().length,url:location.href})};
