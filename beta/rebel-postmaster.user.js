@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Postmaster
 // @namespace    mission-vector-check-it-rebel-postmaster
-// @version      1.2.20
+// @version      1.2.21
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @description  Minimal read-only Outlook Web collector for Rebel Command with whole-mailbox indexing and automatic capture of messages the user opens.
@@ -22,7 +22,7 @@
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_POSTMASTER)return;
-const VERSION='rebel-postmaster-1.2.20';
+const VERSION='rebel-postmaster-1.2.21';
 const DEFAULT_ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const MANAGED_UPDATE_URL='https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js';
 function openManagedUpdate(){
@@ -276,13 +276,24 @@ async function reportCrawl(s){try{await request(statePayload(s))}catch(_){/* Loc
 let crawlAbort=false;
 // A native folder tree count is a coverage witness, not a fabricated count.
 function explicitFolderItemCount(el){
-    for(const label of [attr(el,'aria-label'),attr(el,'title')]){
+    // Chromium may build the accessible folder name from a child count
+    // badge rather than a single aria-label on the tree item. Read ONLY
+    // the selected tree item's own labels, never its nested folder counts.
+    const labels=[attr(el,'aria-label'),attr(el,'title')];
+    for(const node of el?.querySelectorAll?.('[aria-label],[title]')||[]){
+        if(node.closest?.('[role="treeitem"]')!==el)continue;
+        labels.push(attr(node,'aria-label'),attr(node,'title'));
+    }
+    const ids=attr(el,'aria-labelledby').split(/\s+/).filter(Boolean);
+    if(ids.length)labels.push(ids.map(id=>clean(document.getElementById(id)?.textContent||'')).join(' '));
+    const counts=new Set();
+    for(const label of labels){
         const match=label.match(/(?:\[([0-9,]+)\]|(?:^|[ ,])([0-9,]+))\s+items?\s*$/i);
         if(!match)continue;
         const n=Number((match[1]||match[2]).replaceAll(',',''));
-        if(Number.isSafeInteger(n)&&n>=0)return n;
+        if(Number.isSafeInteger(n)&&n>=0)counts.add(n);
     }
-    return null;
+    return counts.size===1?[...counts][0]:null;
 }
 function currentFolderItemCount(){
     const c=selectedFolderCandidate();
@@ -384,21 +395,25 @@ async function handleUiAction(action){
 function installUiGuard(){
     if(uiGuardInstalled)return;
     const actionFromEvent=e=>(e.composedPath?.()||[]).find(el=>el?.dataset?.pmAction)?.dataset?.pmAction||'';
-    window.addEventListener('pointerdown',e=>{
+    const activate=e=>{
         const action=actionFromEvent(e);if(!action)return;
         const target=(e.composedPath?.()||[]).find(el=>el?.dataset?.pmAction);
-        e.preventDefault();e.stopImmediatePropagation();
         if(target?.disabled)return;
         Promise.resolve(handleUiAction(action)).catch(err=>{state.msg=`Postmaster control failed: ${clean(err?.message||err)}`;state.kind='error';render()});
+    };
+    window.addEventListener('pointerdown',e=>{
+        const action=actionFromEvent(e);if(!action)return;
+        e.preventDefault();e.stopImmediatePropagation();
+        if(e.button===0)activate(e);
     },true);
-    window.addEventListener('click',e=>{if(!actionFromEvent(e))return;e.preventDefault();e.stopImmediatePropagation()},true);
+    window.addEventListener('click',e=>{if(!actionFromEvent(e))return;e.preventDefault();e.stopImmediatePropagation();if(e.detail===0)activate(e)},true);
     uiGuardInstalled=true;
 }
 function render(){
     state.last=snapshot();const r=ensureUi();r.replaceChildren();const cs=crawlState(),same=crawlMatchesPage(cs),ms=mailboxState(),mb=mailboxSummary(ms),scopeOk=mailboxMatches(ms),needsVerification=mailboxHasUnverifiedEmpty(ms),retryNeeded=mailboxNeedsRetry(ms);
     if(state.open){
         const p=add(r,'div',null,'p'),h=add(p,'div',null,'h'),title=add(h,'div');add(title,'b','REBEL POSTMASTER');
-        const sub=add(title,'div','v1.2.20 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
+        const sub=add(title,'div','v1.2.21 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
         const close=add(h,'button','','orb header-orb');close.type='button';close.dataset.pmAction='close';close.title='Minimize Rebel Postmaster';close.setAttribute('aria-label','Minimize Rebel Postmaster');close.innerHTML=REBEL_SYMBOL_HTML;
         const b=add(p,'div',null,'b');
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');
@@ -407,7 +422,7 @@ function render(){
         const mailbox=add(b,'button',scopeOk&&needsVerification&&ms?.status!=='running'?'VERIFY FOLDER INDEX':scopeOk&&retryNeeded&&ms?.status!=='running'?'RETRY MAIL ERRORS':scopeOk&&['paused','error','running','complete_with_errors'].includes(ms?.status)?(ms.status==='running'?'MAIL SYNC RUNNING':'RESUME MAIL SYNC'):'SYNC MAIL','a');
         mailbox.type='button';mailbox.dataset.pmAction='mailbox-sync';mailbox.disabled=state.busy||!paired();
         if(state.busy&&ms?.status==='running'){const mp=add(b,'button','PAUSE AFTER CURRENT BATCH','s');mp.type='button';mp.dataset.pmAction='mailbox-pause';mp.style.width='100%';mp.style.marginTop='8px'}
-        const tools=add(b,'details');tools.style.marginTop='8px';const toolsTitle=add(tools,'summary','DIAGNOSTICS / CONNECTION','note');toolsTitle.style.cursor='pointer';toolsTitle.style.fontWeight='700';const toolBody=add(tools,'div');
+        const tools=add(b,'details');tools.style.marginTop='8px';const toolsTitle=add(tools,'summary','DIAGNOSTICS / CONNECTION','note');toolsTitle.style.cursor='pointer';toolsTitle.style.fontWeight='700';const toolBody=add(tools,'div');const nativeCount=currentFolderItemCount();add(toolBody,'div',`Source rows: ${state.last?.messages?.length||0}; credible: ${state.last?.assessment?.validRows||0}; native item count: ${nativeCount===null?'not exposed':nativeCount}`,'note');
         const sync=add(toolBody,'button',same&&cs&&['paused','error','running'].includes(cs.status)?(cs.status==='running'?'FOLDER SYNC RUNNING':'RESUME CURRENT FOLDER'):'SYNC CURRENT FOLDER','s');sync.type='button';sync.dataset.pmAction='sync';sync.disabled=state.busy||!paired();sync.style.width='100%';sync.style.marginTop='8px';
         const conf=add(toolBody,'button','CONNECTION','s');conf.type='button';conf.dataset.pmAction='configure';conf.style.width='100%';conf.style.marginTop='8px';
         const upd=add(toolBody,'button','CHECK FOR UPDATE','s');upd.type='button';upd.dataset.pmAction='update';upd.style.width='100%';upd.style.marginTop='8px';
