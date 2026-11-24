@@ -19538,7 +19538,11 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     turn=Number(sessionStorage.getItem(turnKey)||0)||0;
                     sessionStorage.setItem(turnKey,String((turn+1)%1000000));
                 }catch{}
-                if(turn%3!==2&&typeof departmentAutoScanBurst==='function'){
+                let pilotBoard=null;
+                try{if(typeof cPilotFetch==='function')pilotBoard=await cPilotFetch(false);}catch{}
+                const pilotInactive=pilotBoard?.activeTour===false;
+                let departmentFailed=false;
+                if((pilotInactive||turn%3!==2)&&typeof departmentAutoScanBurst==='function'){
                     try{
                         const result=await departmentAutoScanBurst();
                         if(result==='started')return; // Native Item Log navigation.
@@ -19549,6 +19553,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                     }catch(error){
                         // A failed department scan must NOT block the existing
                         // functioning C-shift path or create a false receipt.
+                        departmentFailed=true;
                         const problem='Department PPE history collection failed: '+
                             clean(error?.message||error).slice(0,180);
                         if(typeof saveDiagnostic==='function')saveDiagnostic(problem);
@@ -19568,6 +19573,14 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                         }
                     }
                 }
+                // An inactive C tour is not a software error. Every lease on
+                // another shift can service scheduled department candidates.
+                // An actual department failure is an error, not idle work.
+                if(pilotInactive){
+                    try{await finishLease(answer.id,departmentFailed?'error':'no_work');}
+                    finally{putLease(null);}
+                    return;
+                }
                 // A fresh tour starts with zero mapped PPE for some confirmed
                 // working people. Before reading another already-mapped owner,
                 // reuse the existing read-only Responsible Party inventory
@@ -19575,7 +19588,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 // One attempt per 30 minutes prevents repeated Vector crawls.
                 let autoMapTour='';
                 try{
-                    const board=await cPilotFetch(true);
+                    const board=pilotBoard||await cPilotFetch(true);
                     const missing=board.activeTour&&Array.isArray(board.people)?
                         board.people.filter(p=>p.attendance==='working'&&
                             (Number(p.knownItems)===0||
@@ -19606,7 +19619,7 @@ Usage telemetry reports the configured My Tour PPE profile name, version, featur
                 }
                 const started=await startCShiftPilotNativeRecheck(true);
                 if(!started){
-                    try{await finishLease(answer.id,'no_work');}finally{putLease(null);}
+                    try{await finishLease(answer.id,departmentFailed?'error':'no_work');}finally{putLease(null);}
                 }
             }catch{
                 // Broker exposes offline health; no crew-facing error spam.

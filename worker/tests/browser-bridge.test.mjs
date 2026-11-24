@@ -280,3 +280,23 @@ test('PPE keeps its existing broker heartbeat live during a long native owner lo
  assert.equal(t.calls.at(-1).outcome,'no_work');
  assert.equal(t.calls.filter(c=>c.route==='/v1/complete').length,1);
 });
+test('inactive C tour never consumes department rotation or reports an idle C-tour error',async()=>{
+ const t=transport(),tab=storage(),tasks=[];
+ tab.setItem('mvciEnterprisePpeDepartmentTurnV1','2');
+ let scans=0,pilot=0;
+ const ctx={sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},URLSearchParams,Date,Math,JSON,TAB_ID:'inactive-c-test',
+ GM_xmlhttpRequest:t.request,isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:()=>({}),getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
+ cPilotFetch:async()=>({activeTour:false,people:[]}),departmentAutoScanBurst:async()=>{scans++;return 'none'},startCShiftPilotNativeRecheck:async()=>{pilot++;return false},
+ setTimeout:f=>tasks.push(f),setInterval:()=>{}};
+ vm.runInNewContext(ppeScript,ctx);tasks[0]();await flush();
+ assert.equal(scans,1);assert.equal(pilot,0);assert.equal(t.calls.find(c=>c.route==='/v1/complete')?.outcome,'no_work');
+});
+test('inactive C tour preserves a genuine department source failure as error',async()=>{
+ const t=transport(),tab=storage(),tasks=[];
+ const ctx={sessionStorage:tab,location:{search:'?mvci_worker=ppe',pathname:'/main'},URLSearchParams,Date,Math,JSON,TAB_ID:'inactive-c-error',GM_xmlhttpRequest:t.request,
+ isMasterOwnerInstallation:()=>true,rebelCommandPaired:()=>true,findVectorNavigationTarget:()=>({}),getRun:()=>null,getCaptainDailyCheck:()=>null,captainDailyBusy:false,
+ cPilotFetch:async()=>({activeTour:false,people:[]}),departmentAutoScanBurst:async()=>{throw Error('native search unresolved')},clean:x=>String(x),
+ startCShiftPilotNativeRecheck:async()=>assert.fail('inactive C fallback invoked'),setTimeout:f=>tasks.push(f),setInterval:()=>{}};
+ vm.runInNewContext(ppeScript,ctx);tasks[0]();await flush();
+ assert.equal(t.calls.find(c=>c.route==='/v1/complete')?.outcome,'error');
+});
