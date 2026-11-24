@@ -13,7 +13,7 @@ function env(snapshots=[],opts={}){
  preview=new Element(host,'auto'),row1=new Element(preview),row2=new Element(host);
  let idx=0,waits=0;
  const ctx={HTMLElement:Element,document:{body,querySelectorAll:()=>opts.hosts==='ambiguous'?[host,outer]:opts.hosts==='one'?[host]:[]},nativeMessageListRegion:()=>true,containsNativeMessageList:()=>false,candidateRows:()=>[row1,row2],mailListHosts:()=>[outer],visible:()=>true,getComputedStyle:e=>({overflowY:e.overflow}),
-  stableSnapshot:async()=>({messages:snapshots[Math.min(idx++,snapshots.length-1)]||[]}),credibleMessageRow:m=>!!m.valid,mailBusy:()=>opts.busy||false,
+  stableSnapshot:async()=>({settled:true,messages:snapshots[Math.min(idx++,snapshots.length-1)]||[]}),credibleMessageRow:m=>!!m.valid,mailBusy:()=>opts.busy||false,
   crawlMatchesPage:()=>opts.same!==false,crawlAbort:false,wait:async()=>{waits++}};
  vm.createContext(ctx);vm.runInContext(source.slice(a,b),ctx);
  return{ctx,host,outer,preview,waits:()=>waits};
