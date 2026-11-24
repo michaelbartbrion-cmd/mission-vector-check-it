@@ -3,7 +3,7 @@ const source=fs.readFileSync(path.resolve(__dirname,'../beta/rebel-postmaster.us
 const part=source.split('async function paceIndexBatch(')[1].split('\nasync function runFolderSync(')[0];
 function fixture(failAt=0){
  let now=100000,storage=new Map(),delays=[],calls=[],checkpoints=[],reports=0;
- const ctx={crawlMatchesPage:()=>true,crawlAbort:false,Date:class extends Date{static now(){return now}},GM_getValue:(k,d)=>storage.get(k)??d,GM_setValue:(k,v)=>storage.set(k,v),wait:async ms=>{delays.push(ms);now+=ms},request:async p=>{calls.push({p,at:now});if(failAt===calls.length)throw Error('Telemetry unavailable');return{workEmail:{accepted:true}}},makeCapture:msgs=>msgs,MAX_FOLDER_MESSAGES:25000,saveCrawl:s=>checkpoints.push([...s.seen]),reportCrawl:async()=>{reports++}};
+ const ctx={crawlMatchesPage:()=>true,crawlAbort:false,Date:class extends Date{static now(){return now}},GM_getValue:(k,d)=>storage.get(k)??d,GM_setValue:(k,v)=>storage.set(k,v),wait:async ms=>{delays.push(ms);now+=ms},request:async p=>{calls.push({p,at:now});if(failAt===calls.length)throw Error('Telemetry unavailable');return{workEmail:{accepted:true,messages:p.length}}},makeCapture:msgs=>msgs,MAX_FOLDER_MESSAGES:25000,saveCrawl:s=>checkpoints.push([...s.seen]),reportCrawl:async()=>{reports++}};
  vm.createContext(ctx);vm.runInContext('async function paceIndexBatch('+part,ctx);
  return {ctx,calls,delays,checkpoints,storage,getReports:()=>reports};
 }
@@ -47,4 +47,18 @@ test('partial per-folder checkpoint remains exact-mailbox and exact-folder scope
  assert.equal(ctx.scopedPartialCheckpoint(c,{key:'id:wrong'}),null);
  assert.equal(ctx.scopedPartialCheckpoint({...c,mailboxId:'mailbox:wrong'},{key:'id:actual'}),null);
  assert.equal(ctx.scopedPartialCheckpoint({...c,status:'complete'},{key:'id:actual'}),null);
+});
+
+test('same native ID repeated in virtualized viewport is submitted only once',async()=>{
+ const h=fixture(),s={seen:[],folderName:'fixture'};
+ const a=rows(3);assert.equal(await h.ctx.uploadNewRows([...a,a[0],a[1]],s),3);
+ assert.equal(h.calls[0].p.length,3);assert.equal(s.seen.length,3);
+});
+test('accepted but incomplete or duplicate receipt cannot advance checkpoint',async()=>{
+ const h=fixture(),s={seen:['id-previous'],folderName:'fixture'};
+ for(const ack of [{accepted:true,messages:1},{accepted:true,duplicate:true,messages:0},{accepted:true}]){
+  h.ctx.request=async()=>({workEmail:ack});
+  await assert.rejects(h.ctx.uploadNewRows(rows(3),s),/did not acknowledge every unique/);
+  assert.deepEqual(s.seen,['id-previous']);assert.equal(h.checkpoints.length,0);assert.equal(h.getReports(),0);
+ }
 });
