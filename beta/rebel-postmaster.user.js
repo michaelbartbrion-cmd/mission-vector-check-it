@@ -207,7 +207,14 @@ function hasExplicitEmptyFolderWitness(){
     const selectors='[role="status"],[role="alert"],[data-testid*="empty" i],[data-automation-id*="empty" i]';
     const notices=[...document.querySelectorAll(selectors)];
     const exact=/^(?:nothing here(?: yet)?[.!]?|this folder is empty[.!]?|there are no messages(?: in this folder)?[.!]?|no messages in this folder[.!]?|you(?:'|\u2019)re all caught up[.!]?)$/i;
-    return notices.some(el=>visible(el)&&exact.test(clean(el.innerText||el.textContent||'')));
+    if(notices.some(el=>visible(el)&&exact.test(clean(el.innerText||el.textContent||''))))return true;
+    // Live Outlook renders this empty state inside Message list as a group.
+    // Require the exact native two-part wording and a selected folder.
+    if(!selectedFolderCandidate())return false;
+    const groups=[...document.querySelectorAll('[role="group"],[role="region"],[aria-label]')];
+    return groups.some(el=>visible(el)&&!!nativeMessageListRegion(el)&&
+        /^nothing in folder[.!]?\s+looks empty over here[.!]?$/i.test(
+            clean(el.innerText||el.textContent||'')));
 }
 async function stableEmptyFolder(timeout=5200){
     const started=Date.now();let witnessPasses=0;
