@@ -7,7 +7,7 @@ assert.ok(start>0&&end>start);
 function fixture(opts={}){
  const target={key:'name:fixture',name:'Inbox',status:'error',indexedCount:8,lastError:'Navigation unresolved'};
  const ms={mailboxId:'outlook:fixture',folders:[target],status:'running'};
- const calls=[],traces=[];const ctx={VERSION:'rebel-postmaster-1.2.35',mailboxMatches:()=>!opts.wrongAccount,
+ const calls=[],traces=[];const ctx={VERSION:'rebel-postmaster-1.2.36',mailboxMatches:()=>!opts.wrongAccount,
   request:async payload=>{calls.push(payload);if(opts.rejectFolder)throw Error('network');return{workEmailIngestionState:{accepted:true}}},
   reportMailboxManifest:async value=>{calls.push({manifest:value.folders.map(x=>x.status)});if(opts.rejectManifest)throw Error('network');return true},
   trace:(...args)=>traces.push(args),clean:String,Date};

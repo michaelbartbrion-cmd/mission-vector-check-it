@@ -61,5 +61,5 @@ test('actual paused mailbox RESUME handler uses common retry predicate and does 
  assert.match(source,/reconcileCompletedCrawl\(ms,crawlState\(\)\);requeueShortCompletedFolders\(ms\);if\(retryErrors\)/);
  assert.match(source,/if\(retryErrors\)\{for\(const f of ms\.folders\)if\(f\.status==='error'/);
  assert.match(source,/scopeOk&&retryNeeded&&ms\?\.status!=='running'\?'RETRY MAIL ERRORS'/);
- assert.match(source,/@version\s+1\.2\.35/);
+ assert.match(source,/@version\s+1\.2\.36/);
 });
