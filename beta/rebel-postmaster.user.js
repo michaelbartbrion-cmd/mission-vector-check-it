@@ -621,6 +621,20 @@ async function collectPassiveVisible(){
         return false;
     }finally{if(sending)state.busy=false;passiveBusy=false;}
 }
+const PASSIVE_PRESENCE_KEY='mvciPostmasterPresenceAttemptV1',PASSIVE_PRESENCE_INTERVAL_MS=5*60000;
+async function reportIdlePresence(s){
+    if(!passiveAllowed(s)||passiveBusy||openWatchBusy)return false;
+    const availability=sourceAvailability();
+    if(!(availability.nativeRoots>0&&availability.credibleRows>0)&&!hasExplicitEmptyFolderWitness()&&!hasNativeNonMailNotesView())return false;
+    if(!passiveAllowed(s))return false;
+    const now=Date.now(),prior=GM_getValue(PASSIVE_PRESENCE_KEY,{});
+    if(prior?.mailbox===s.mailbox&&Number.isFinite(prior.at)&&now>=prior.at&&now-prior.at<PASSIVE_PRESENCE_INTERVAL_MS)return false;
+    GM_setValue(PASSIVE_PRESENCE_KEY,{mailbox:s.mailbox,at:now});
+    try{
+        const res=await verify();
+        return res?.ok===true;
+    }catch(e){trace('idle_presence_failed',{error:clean(e?.message||e)});return false;}
+}
 function startPassiveWatcher(){
     if(passiveTimer)return;
     // One existing Outlook userscript timer; no new tab, external worker,
@@ -628,8 +642,11 @@ function startPassiveWatcher(){
     passiveTimer=setInterval(()=>{
         const s=passiveScope();
         if(!s||!navigator.locks?.request)return;
-        void navigator.locks.request('mvci-postmaster-visible-'+s.mailbox,{ifAvailable:true},lock=>
-            lock?collectPassiveVisible():false).catch(e=>trace('passive_lock_error',{error:clean(e?.message||e)}));
+        void navigator.locks.request('mvci-postmaster-visible-'+s.mailbox,{ifAvailable:true},async lock=>{
+            if(!lock)return false;
+            const captured=await collectPassiveVisible();
+            return captured||await reportIdlePresence(s);
+        }).catch(e=>trace('passive_lock_error',{error:clean(e?.message||e)}));
     },PASSIVE_INTERVAL_MS);
 }
 let openWatchSig='',openWatchTimer=null,uiWatchTimer=null;
