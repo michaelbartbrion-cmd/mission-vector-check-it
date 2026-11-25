@@ -636,7 +636,39 @@ let openWatchSig='',openWatchTimer=null,uiWatchTimer=null;
 function readingSignature(){try{const p=findReadingPane();if(!p)return'';const txt=rawText(p.innerText||p.textContent||'');if(txt.length<40)return'';return hash(`${attr(p,'data-itemid')}|${attr(p,'data-convid')}|${txt.slice(0,1800)}`)}catch(_){return''}}
 let openWatchBusy=false,openWatchRetryAt=0;
 function startOpenWatcher(){if(openWatchTimer)return;openWatchTimer=setInterval(async()=>{if(state.busy||passiveBusy||openWatchBusy||Date.now()<openWatchRetryAt)return;const sig=readingSignature();if(!sig||sig===openWatchSig)return;openWatchBusy=true;try{if(await captureOpen({automatic:true}))openWatchSig=sig;else openWatchRetryAt=Date.now()+30000;}finally{openWatchBusy=false}},2200)}
-function startUiWatchdog(){if(uiWatchTimer)return;uiWatchTimer=setInterval(()=>{try{if(!uiHost?.isConnected||!document.getElementById(ROOT_ID))render()}catch(_){/* UI self-heal must never interrupt mail collection. */}},5000)}
+function bootResumeIntent(ms,cs){
+    if(ms?.status==='running'&&ms.mailboxId)return {kind:'mailbox',mailbox:ms.mailboxId};
+    if(cs?.status==='running'&&cs.mailboxId&&cs.folderKey&&!(ms?.mailboxId===cs.mailboxId&&['paused','error','complete_with_errors','complete'].includes(ms.status)))return {kind:'folder',mailbox:cs.mailboxId,folder:cs.folderKey};
+    return null;
+}
+let pendingBootResume=null,bootResumeBusy=false;
+function armBootResume(ms,cs){pendingBootResume=bootResumeIntent(ms,cs);}
+async function tryBootResume(){
+    const intent=pendingBootResume;
+    if(!intent||bootResumeBusy)return false;
+    if(state.busy){pendingBootResume=null;return false;}
+    const stillPending=()=>{
+        const current=bootResumeIntent(mailboxState(),crawlState());
+        return !!current&&current.kind===intent.kind&&current.mailbox===intent.mailbox&&current.folder===intent.folder;
+    };
+    if(!stillPending()){pendingBootResume=null;return false;}
+    if(!paired()||mailboxId()!==intent.mailbox||!selectedFolderCandidate()?.key||!navigator.locks?.request)return false;
+    if(intent.kind==='folder'&&!crawlMatchesPage(crawlState()))return false;
+    bootResumeBusy=true;
+    try{
+        return await navigator.locks.request('mvci-postmaster-visible-'+intent.mailbox,{ifAvailable:true},async lock=>{
+            if(!lock)return false;
+            if(state.busy||!stillPending()){pendingBootResume=null;return false;}
+            if(!paired()||mailboxId()!==intent.mailbox||!selectedFolderCandidate()?.key||(intent.kind==='folder'&&!crawlMatchesPage(crawlState())))return false;
+            pendingBootResume=null;
+            if(intent.kind==='mailbox')await runMailboxSync({fresh:false});
+            else await runFolderSync({fresh:false});
+            return true;
+        });
+    }catch(e){trace('boot_resume_error',{error:clean(e?.message||e)});return false;}
+    finally{bootResumeBusy=false;}
+}
+function startUiWatchdog(){if(uiWatchTimer)return;uiWatchTimer=setInterval(()=>{try{if(!uiHost?.isConnected||!document.getElementById(ROOT_ID))render();void tryBootResume()}catch(_){/* UI self-heal must never interrupt mail collection. */}},5000)}
 let state={open:false,busy:false,msg:'Ready. Mailbox sync indexes every discoverable Outlook mail folder without opening messages; messages you open yourself are body-captured automatically.',last:null,kind:'info'};
 function add(p,t,txt,c){const e=document.createElement(t);if(txt!=null)e.textContent=txt;if(c)e.className=c;p.appendChild(e);return e}
 let uiHost=null,uiRoot=null,uiMount=null,uiGuardInstalled=false;
@@ -750,11 +782,11 @@ function render(){
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');
         if(ms)add(b,'div',`Mail index: ${(!scopeOk?'SCOPE UNVERIFIED':ms.status==='complete'&&needsVerification?'VERIFY REQUIRED':String(ms.status||'pending').toUpperCase())} · ${mb.complete}/${mb.folders} folders · ${mb.indexed} indexed${mb.excluded?' | '+mb.excluded+' non-mail excluded':''}${mb.errors?` · ${mb.errors} errors`:''}`,'m');
         if(same&&cs&&['running','paused','error'].includes(cs.status))add(b,'div',`Current folder: ${cs.status.toUpperCase()} · ${cs.seen?.length||0} unique`,'m');
-        const mailbox=add(b,'button',scopeOk&&needsVerification&&ms?.status!=='running'?'VERIFY FOLDER INDEX':scopeOk&&retryNeeded&&ms?.status!=='running'?'RETRY MAIL ERRORS':scopeOk&&['paused','error','running','complete_with_errors'].includes(ms?.status)?(ms.status==='running'?'MAIL SYNC RUNNING':'RESUME MAIL SYNC'):'SYNC MAIL','a');
+        const mailbox=add(b,'button',scopeOk&&needsVerification&&ms?.status!=='running'?'VERIFY FOLDER INDEX':scopeOk&&retryNeeded&&ms?.status!=='running'?'RETRY MAIL ERRORS':scopeOk&&['paused','error','running','complete_with_errors'].includes(ms?.status)?(ms.status==='running'&&state.busy?'MAIL SYNC RUNNING':'RESUME MAIL SYNC'):'SYNC MAIL','a');
         mailbox.type='button';mailbox.dataset.pmAction='mailbox-sync';mailbox.disabled=state.busy||!paired();
         if(state.busy&&ms?.status==='running'){const mp=add(b,'button','PAUSE AFTER CURRENT BATCH','s');mp.type='button';mp.dataset.pmAction='mailbox-pause';mp.style.width='100%';mp.style.marginTop='8px'}
         const tools=add(b,'details');tools.style.marginTop='8px';const toolsTitle=add(tools,'summary','DIAGNOSTICS / CONNECTION','note');toolsTitle.style.cursor='pointer';toolsTitle.style.fontWeight='700';const toolBody=add(tools,'div');const nativeCount=currentFolderItemCount();add(toolBody,'div',`Source rows: ${state.last?.messages?.length||0}; credible: ${state.last?.assessment?.validRows||0}; native item count: ${nativeCount===null?'not exposed':nativeCount}`,'note');
-        const sync=add(toolBody,'button',same&&cs&&['paused','error','running'].includes(cs.status)?(cs.status==='running'?'FOLDER SYNC RUNNING':'RESUME CURRENT FOLDER'):'SYNC CURRENT FOLDER','s');sync.type='button';sync.dataset.pmAction='sync';sync.disabled=state.busy||!paired();sync.style.width='100%';sync.style.marginTop='8px';
+        const sync=add(toolBody,'button',same&&cs&&['paused','error','running'].includes(cs.status)?(cs.status==='running'&&state.busy?'FOLDER SYNC RUNNING':'RESUME CURRENT FOLDER'):'SYNC CURRENT FOLDER','s');sync.type='button';sync.dataset.pmAction='sync';sync.disabled=state.busy||!paired();sync.style.width='100%';sync.style.marginTop='8px';
         const conf=add(toolBody,'button','CONNECTION','s');conf.type='button';conf.dataset.pmAction='configure';conf.style.width='100%';conf.style.marginTop='8px';
         const upd=add(toolBody,'button','CHECK FOR UPDATE','s');upd.type='button';upd.dataset.pmAction='update';upd.style.width='100%';upd.style.marginTop='8px';
         add(toolBody,'div',passiveState+(passiveLastAt?' Last acknowledged: '+new Date(passiveLastAt).toLocaleString():''),'note');
@@ -766,6 +798,6 @@ function render(){
 async function configure(){try{const old=cfg();if(old.deviceId&&old.token){const a=prompt('Rebel Postmaster is paired. Type TEST, REPAIR, CLEAR, or leave blank to cancel.','TEST');if(a==null||!clean(a))return;const u=clean(a).toUpperCase();if(u==='TEST'){await verify();state.msg='Connection verified.';state.kind='success';render();return}if(u==='CLEAR'){GM_deleteValue(CFG_KEY);state.msg='Pairing cleared.';state.kind='info';render();return}if(u!=='REPAIR')return}const endpoint=prompt('Rebel Command telemetry endpoint',old.endpoint||DEFAULT_ENDPOINT);if(endpoint==null)return;const deviceId=prompt('Rebel Command device ID',old.deviceId||'');if(deviceId==null)return;const token=prompt('Private device token (stored only in Tampermonkey userscript storage)','');if(token==null)return;const next={endpoint:normalizeEndpoint(endpoint),deviceId:clean(deviceId),token:clean(token)};saveCfg(next);await verify();state.msg='Pairing saved and verified.';state.kind='success'}catch(e){state.msg=`Connection failed: ${clean(e?.message||e)}`;state.kind='error'}render()}
 state.last=snapshot();render();startOpenWatcher();startUiWatchdog();startPassiveWatcher();
 const aliasErrorState=mailboxState();if(!state.busy&&aliasErrorState?.status!=='running'&&requeueShortCompletedFolders(aliasErrorState)){void reportMailboxManifest(aliasErrorState).catch(e=>trace('coverage_manifest_report_failed',{error:clean(e?.message||e)}));}if(aliasErrorState?.status==='error'&&/multiple folders named/i.test(clean(aliasErrorState.lastError||'')))clearMailbox();
-const bootMailbox=mailboxState(),bootCrawl=crawlState();if(bootMailbox?.status==='complete'&&mailboxHasUnverifiedEmpty(bootMailbox)&&mailboxMatches(bootMailbox)){bootMailbox.status='complete_with_errors';bootMailbox.lastError='Zero-message folders require explicit empty-state evidence.';saveMailbox(bootMailbox);reportMailboxManifest(bootMailbox).catch(()=>{});}if(bootMailbox?.status==='running'&&mailboxMatches(bootMailbox))setTimeout(()=>runMailboxSync({fresh:false}),1800);else if(bootCrawl?.status==='running'&&crawlMatchesPage(bootCrawl))setTimeout(()=>runFolderSync({fresh:false}),1800);
+const bootMailbox=mailboxState(),bootCrawl=crawlState();if(bootMailbox?.status==='complete'&&mailboxHasUnverifiedEmpty(bootMailbox)&&mailboxMatches(bootMailbox)){bootMailbox.status='complete_with_errors';bootMailbox.lastError='Zero-message folders require explicit empty-state evidence.';saveMailbox(bootMailbox);reportMailboxManifest(bootMailbox).catch(()=>{});}armBootResume(bootMailbox,bootCrawl);setTimeout(()=>{void tryBootResume()},1800);
 window.MVCI_REBEL_POSTMASTER={version:VERSION,snapshot,stableSnapshot,parseOpenMessage,captureList,captureOpen,runFolderSync,pauseFolderSync,runMailboxSync,pauseMailboxSync,discoverMailboxFolders,mailboxManifestPayload,configure,crawlState,mailboxState,traceRows,traceExport,clearTrace,status:()=>({paired:paired(),folder:folderName(),messages:state.last?.messages?.length||0,quality:state.last?.assessment?.quality||'unknown',crawl:crawlState(),mailbox:mailboxState(),traceCount:traceRows().length,url:location.href})};
 })();
