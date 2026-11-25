@@ -1,4 +1,4 @@
-﻿
+
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const src=fs.readFileSync(path.join(__dirname,'../beta/rebel-postmaster.user.js'),'utf8');
@@ -35,7 +35,8 @@ test('status delivery failures are traced and do not stop a productive mailbox c
 test('actual orchestrator publishes after native terminal transitions and failed navigation',()=>{
  const a=src.slice(src.indexOf('async function runMailboxSync('),src.indexOf('function pauseMailboxSync('));
  assert.equal((a.match(/await reportMailboxProgress\(ms,target\)/g)||[]).length,2);
- assert.equal((a.match(/await reportMailboxProgress\(ms\)/g)||[]).length,2);
+ assert.equal((a.match(/await reportMailboxProgress\(ms\)/g)||[]).length,3);
+ assert.match(a,/if\(deferHiddenFolderRetry\(target\)\)\{ms\.updatedAt=.*?saveMailbox\(ms\);await reportMailboxProgress\(ms\);if\(!await waitForDeferredNativeView\(ms,target\)\)break;/);
 });
 
 

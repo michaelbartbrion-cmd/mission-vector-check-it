@@ -35,3 +35,21 @@ test('orchestrator uses bounded retry and only considers progress inside matchin
  assert.match(s,/if\(after&&crawlMatchesTarget\(after,target\)\)\{const partial=scopedPartialCheckpoint\(after,target\);if\(partial\)target\.crawlCheckpoint=partial;noteNewFolderProgress\(target,after\)/);
 });
 
+
+test('hidden native-source failure does not burn a retry or navigate until the same source is visible',async()=>{
+ const c={document:{visibilityState:'hidden'},mailboxAbort:false,state:{},render:()=>{},mailboxMatches:()=>true,targetMatchesPage:()=>true,waits:0};
+ c.wait=async()=>{c.waits++;c.document.visibilityState='visible'};
+ vm.createContext(c);
+ vm.runInContext(code('function hiddenNativeSourceError(','function pauseFolderSync(){'),c);
+ const target={status:'error',crawlAttempts:2,indexedCount:1413,lastError:'No credible message rows [view=hidden; roots=1; native rows=0; visible=0; credible=0; list busy=false]'};
+ assert.equal(c.hiddenNativeSourceError(target.lastError),true);
+ assert.equal(c.hiddenNativeSourceError(target.lastError.replace('hidden','visible')),false);
+ assert.equal(c.deferHiddenFolderRetry(target),true);
+ assert.equal(target.status,'pending');assert.equal(target.crawlAttempts,1);assert.equal(target.indexedCount,1413);
+ assert.equal(await c.waitForDeferredNativeView({},target),true);assert.equal(c.waits,1);
+ c.document.visibilityState='hidden';c.mailboxAbort=true;
+ assert.equal(await c.waitForDeferredNativeView({},target),false);assert.equal(c.waits,1);
+ c.mailboxAbort=false;c.document.visibilityState='visible';c.targetMatchesPage=()=>false;
+ await assert.rejects(c.waitForDeferredNativeView({},target),/scope changed/);
+ assert.match(s,/if\(deferHiddenFolderRetry\(target\)\)/);
+});
