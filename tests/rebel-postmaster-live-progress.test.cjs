@@ -38,3 +38,19 @@ test('actual orchestrator publishes after native terminal transitions and failed
  assert.equal((a.match(/await reportMailboxProgress\(ms\)/g)||[]).length,2);
 });
 
+
+test('terminal failed mailbox pass never advances last successful completion timestamp',async()=>{
+ const run=src.slice(src.indexOf('async function runMailboxSync('),src.indexOf('function pauseMailboxSync('));
+ async function terminal(status,previous){
+  const ms={mailboxId:'outlook:fixture',status:'running',lastSuccessAt:previous,folders:[{status,navAttempts:2,crawlAttempts:2,indexedCount:8}]};
+  const reports=[];
+  const ctx={state:{busy:false},paired:()=>true,mailboxId:()=>ms.mailboxId,mailboxState:()=>ms,mailboxMatches:()=>true,crawlState:()=>null,reconcileCompletedCrawl:()=>{},requeueShortCompletedFolders:()=>{},saveMailbox:()=>{},reportMailboxManifest:async m=>reports.push(JSON.parse(JSON.stringify(m))),mailboxSummary:m=>({folders:m.folders.length,complete:m.folders.filter(f=>f.status==='complete').length,errors:m.folders.filter(f=>f.status==='error').length,indexed:8}),canRetryFolder:()=>false,trace:()=>{},render:()=>{},clean:String,Date,MAX_MAILBOX_FOLDERS:120,mailboxAbort:false,crawlAbort:false};
+  vm.createContext(ctx);vm.runInContext(run,ctx);await ctx.runMailboxSync();
+  assert.equal(ctx.state.busy,false);return {ms,reports};
+ }
+ const previous='2026-11-23T21:42:29.110Z';
+ const failed=await terminal('error',previous);
+ assert.equal(failed.ms.status,'complete_with_errors');assert.equal(failed.ms.lastSuccessAt,previous);assert.equal(failed.reports.at(-1).lastSuccessAt,previous);
+ const firstFailure=await terminal('error',undefined);assert.equal(firstFailure.ms.lastSuccessAt,undefined);
+ const success=await terminal('complete',previous);assert.equal(success.ms.status,'complete');assert.equal(success.ms.lastSuccessAt,success.ms.updatedAt);assert.notEqual(success.ms.lastSuccessAt,previous);
+});
