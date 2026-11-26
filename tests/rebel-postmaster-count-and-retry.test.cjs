@@ -36,33 +36,27 @@ test('orchestrator uses bounded retry and only considers progress inside matchin
 });
 
 
-test('hidden native-source failure does not burn a retry or navigate until the same source is visible',async()=>{
- const c={document:{visibilityState:'hidden'},mailboxAbort:false,state:{},render:()=>{},mailboxMatches:()=>true,targetMatchesPage:()=>true,sourceAvailability:()=>({nativeRoots:1,credibleRows:0,listBusy:false}),waits:0};
- c.wait=async()=>{c.waits++;c.document.visibilityState='visible'};
- vm.createContext(c);
- vm.runInContext(code('function hiddenNativeSourceError(','function pauseFolderSync(){'),c);
- const target={status:'error',crawlAttempts:2,indexedCount:1413,lastError:'No credible message rows [view=hidden; roots=1; native rows=0; visible=0; credible=0; list busy=false]'};
+test('hidden native-source failure preserves progress and yields rather than monopolizing the collection lock',()=>{
+ const c={document:{visibilityState:'hidden'},mailboxAbort:false,state:{},render:()=>{},mailboxMatches:()=>true,selectedFolderCandidate:()=>({key:'inbox'}),sourceAvailability:()=>({nativeRoots:1,credibleRows:0,listBusy:false}),crawlState:()=>({seen:['x']}),arms:0};
+ c.armBootResume=()=>{c.arms++};
+ vm.createContext(c);vm.runInContext(code('function hiddenNativeSourceError(','function pauseFolderSync(){'),c);
+ const target={key:'inbox',status:'error',crawlAttempts:2,indexedCount:1413,lastError:'No credible message rows [view=hidden; roots=1; native rows=0; visible=0; credible=0; list busy=false]'};
+ const ms={status:'running',folders:[target]};
  assert.equal(c.hiddenNativeSourceError(target.lastError),true);
  assert.equal(c.hiddenNativeSourceError(target.lastError.replace('hidden','visible')),false);
  assert.equal(c.deferHiddenFolderRetry(target),true);
  assert.equal(target.status,'pending');assert.equal(target.crawlAttempts,1);assert.equal(target.indexedCount,1413);
- assert.equal(await c.waitForDeferredNativeView({},target),true);assert.equal(c.waits,1);
- c.document.visibilityState='hidden';c.mailboxAbort=true;
- assert.equal(await c.waitForDeferredNativeView({},target),false);assert.equal(c.waits,1);
- c.mailboxAbort=false;c.document.visibilityState='visible';c.targetMatchesPage=()=>false;
- await assert.rejects(c.waitForDeferredNativeView({},target),/scope changed/);
- assert.match(s,/if\(deferHiddenFolderRetry\(target\)\)/);
-});
-test('deferred same-folder crawl resumes when credible hidden native list returns without foregrounding Outlook',async()=>{
- const c={document:{visibilityState:'hidden'},mailboxAbort:false,state:{},render:()=>{},mailboxMatches:()=>true,targetMatchesPage:()=>true,waits:0};
- c.sourceAvailability=()=>({nativeRoots:1,credibleRows:c.waits?9:0,listBusy:false});
- c.wait=async()=>{c.waits++};
- vm.createContext(c);vm.runInContext(code('function hiddenNativeSourceError(','function pauseFolderSync(){'),c);
- assert.equal(await c.waitForDeferredNativeView({},{}),true);
- assert.equal(c.waits,1);assert.equal(c.document.visibilityState,'hidden');
- c.waits=0;c.sourceAvailability=()=>({nativeRoots:1,credibleRows:9,listBusy:true});
- c.wait=async()=>{c.waits++;c.targetMatchesPage=()=>false};
- await assert.rejects(c.waitForDeferredNativeView({},{}),/scope changed/);assert.equal(c.waits,1);
- const orchestration=code('async function runMailboxSync(','function pauseMailboxSync(');
- assert.match(orchestration,/if\(target\.status==='pending'&&hiddenNativeSourceError\(target\.lastError\)\)\{if\(!await waitForDeferredNativeView\(ms,target\)\)break;target\.lastError='';ms\.lastError='';saveMailbox\(ms\)\}if\(!targetMatchesPage/);
+ assert.equal(c.pendingDeferredTarget(ms),target);
+ assert.equal(c.yieldDeferredNativeView(ms,target),true);assert.equal(c.arms,1);
+ assert.equal(c.pendingDeferredTarget({...ms,status:'paused'}),null);
+ c.sourceAvailability=()=>({nativeRoots:1,credibleRows:9,listBusy:false});
+ assert.equal(c.deferredNativeViewReady(ms,target),true);
+ assert.equal(c.yieldDeferredNativeView(ms,target),false);assert.equal(c.arms,1);
+ c.sourceAvailability=()=>({nativeRoots:1,credibleRows:9,listBusy:true});
+ assert.equal(c.deferredNativeViewReady(ms,target),false);
+ c.document.visibilityState='visible';assert.equal(c.deferredNativeViewReady(ms,target),true);
+ c.selectedFolderCandidate=()=>({key:'other'});assert.equal(c.deferredNativeViewReady(ms,target),false);
+ c.selectedFolderCandidate=()=>({key:'inbox'});c.mailboxMatches=()=>false;assert.equal(c.deferredNativeViewReady(ms,target),false);
+ const run=code('async function runMailboxSync(','function pauseMailboxSync(');
+ assert.match(run,/if\(target\.status==='pending'&&hiddenNativeSourceError\(target\.lastError\)\)\{if\(mailboxAbort\)break;if\(yieldDeferredNativeView\(ms,target\)\)return;/);
 });

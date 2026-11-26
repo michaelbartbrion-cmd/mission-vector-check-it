@@ -36,7 +36,7 @@ test('actual orchestrator publishes after native terminal transitions and failed
  const a=src.slice(src.indexOf('async function runMailboxSync('),src.indexOf('function pauseMailboxSync('));
  assert.equal((a.match(/await reportMailboxProgress\(ms,target\)/g)||[]).length,2);
  assert.equal((a.match(/await reportMailboxProgress\(ms\)/g)||[]).length,3);
- assert.match(a,/if\(deferHiddenFolderRetry\(target\)\)\{ms\.updatedAt=.*?saveMailbox\(ms\);await reportMailboxProgress\(ms\);if\(!await waitForDeferredNativeView\(ms,target\)\)break;/);
+ assert.match(a,/if\(deferHiddenFolderRetry\(target\)\)\{ms\.updatedAt=.*?saveMailbox\(ms\);await reportMailboxProgress\(ms\);if\(mailboxAbort\)break;if\(yieldDeferredNativeView\(ms,target\)\)return;/);
 });
 
 
@@ -45,7 +45,7 @@ test('terminal failed mailbox pass never advances last successful completion tim
  async function terminal(status,previous){
   const ms={mailboxId:'outlook:fixture',status:'running',lastSuccessAt:previous,folders:[{status,navAttempts:2,crawlAttempts:2,indexedCount:8}]};
   const reports=[];
-  const ctx={state:{busy:false},paired:()=>true,mailboxId:()=>ms.mailboxId,mailboxState:()=>ms,mailboxMatches:()=>true,crawlState:()=>null,reconcileCompletedCrawl:()=>{},requeueShortCompletedFolders:()=>{},saveMailbox:()=>{},reportMailboxManifest:async m=>reports.push(JSON.parse(JSON.stringify(m))),mailboxSummary:m=>({folders:m.folders.length,complete:m.folders.filter(f=>f.status==='complete').length,errors:m.folders.filter(f=>f.status==='error').length,indexed:8}),canRetryFolder:()=>false,trace:()=>{},render:()=>{},clean:String,Date,MAX_MAILBOX_FOLDERS:120,mailboxAbort:false,crawlAbort:false};
+  const ctx={state:{busy:false},paired:()=>true,mailboxId:()=>ms.mailboxId,mailboxState:()=>ms,mailboxMatches:()=>true,crawlState:()=>null,reconcileCompletedCrawl:()=>{},requeueShortCompletedFolders:()=>{},saveMailbox:()=>{},reportMailboxManifest:async m=>reports.push(JSON.parse(JSON.stringify(m))),mailboxSummary:m=>({folders:m.folders.length,complete:m.folders.filter(f=>f.status==='complete').length,errors:m.folders.filter(f=>f.status==='error').length,indexed:8}),canRetryFolder:()=>false,pendingDeferredTarget:()=>null,trace:()=>{},render:()=>{},clean:String,Date,MAX_MAILBOX_FOLDERS:120,mailboxAbort:false,crawlAbort:false};
   vm.createContext(ctx);vm.runInContext(run,ctx);await ctx.runMailboxSync();
   assert.equal(ctx.state.busy,false);return {ms,reports};
  }
