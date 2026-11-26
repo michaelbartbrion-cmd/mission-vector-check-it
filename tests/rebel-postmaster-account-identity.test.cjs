@@ -49,7 +49,7 @@ test('unknown Outlook sign-in/loading page never fabricates a mailbox identity',
 });
 test('complete manifest clears stale last_error after genuine folder verification',()=>{
  const part=between('function mailboxManifestPayload(ms){','async function reportMailboxManifest(');
- const ctx={VERSION:'rebel-postmaster-1.2.35',MANIFEST_PROVIDER:'test',mailboxManifestFingerprint:()=> 'digest',mailboxSummary:ms=>({folders:ms.folders.length,complete:ms.folders.filter(f=>f.status==='complete').length,errors:ms.folders.filter(f=>f.status==='error').length,indexed:3})};
+ const ctx={VERSION:'rebel-postmaster-1.2.36',MANIFEST_PROVIDER:'test',mailboxManifestFingerprint:()=> 'digest',mailboxSummary:ms=>({folders:ms.folders.length,complete:ms.folders.filter(f=>f.status==='complete').length,errors:ms.folders.filter(f=>f.status==='error').length,indexed:3})};
  vm.createContext(ctx);vm.runInContext(part,ctx);
  const ms={mailboxId:'outlook:1yhbdbn',status:'complete',lastError:'Old network timeout',folders:[{status:'complete'}]};
  assert.equal(ctx.mailboxManifestPayload(ms).workEmailIngestionState.lastError,'');
@@ -60,5 +60,32 @@ test('Postmaster never presents the prior mailbox as complete when identity is u
  assert.match(source,/SCOPE UNVERIFIED/);
  assert.match(source,/VERIFY REQUIRED/);
  assert.match(source,/if\(!mailboxId\(\)\)throw new Error\('Outlook account identity not confirmed/);
- assert.match(source,/@version\s+1\.2\.35/);
+ assert.match(source,/@version\s+1\.2\.36/);
+});
+
+test('startup resumes interrupted exact mailbox only after the Outlook identity is ready',async()=>{
+ const start=source.indexOf('function bootResumeIntent('),end=source.indexOf('function startUiWatchdog()',start);
+ assert.ok(start>=0&&end>start,'Deferred startup recovery is missing');
+ function fixture({mailboxStatus='running',folderStatus='running'}={}){
+  let account='',folder='',ms={mailboxId:'a',status:mailboxStatus},cs={mailboxId:'a',folderKey:'inbox',status:folderStatus},locked=false;
+  const calls=[],traces=[],state={busy:false};
+  const ctx={state,paired:()=>true,mailboxId:()=>account,selectedFolderCandidate:()=>folder?{key:folder}:null,
+   mailboxState:()=>ms,crawlState:()=>cs,mailboxMatches:s=>!!s&&s.mailboxId===account,
+   crawlMatchesPage:s=>!!s&&s.mailboxId===account&&s.folderKey===folder,
+   navigator:{locks:{request:async(name,options,callback)=>{assert.equal(name,'mvci-postmaster-visible-a');assert.equal(options.ifAvailable,true);return callback(locked?null:{name})}}},
+   runMailboxSync:async opts=>{calls.push(['mailbox',opts.fresh]);ms.status='complete_with_errors';},
+   runFolderSync:async opts=>{calls.push(['folder',opts.fresh]);cs.status='complete';},trace:(...args)=>traces.push(args),clean:String};
+  vm.createContext(ctx);vm.runInContext(source.slice(start,end),ctx);
+  ctx.armBootResume(ms,cs);
+  return {ctx,calls,state,ms,cs,setScope:(a,f)=>{account=a;folder=f},setLocked:v=>{locked=v}};
+ }
+ const h=fixture();await h.ctx.tryBootResume();assert.equal(h.calls.length,0);
+ h.setScope('wrong','inbox');await h.ctx.tryBootResume();assert.equal(h.calls.length,0);
+ h.setScope('a','');await h.ctx.tryBootResume();assert.equal(h.calls.length,0);
+ h.setScope('a','inbox');h.setLocked(true);await h.ctx.tryBootResume();assert.equal(h.calls.length,0);
+ h.setLocked(false);await h.ctx.tryBootResume();await h.ctx.tryBootResume();assert.deepEqual(h.calls,[['mailbox',false]]);
+ const paused=fixture();paused.ms.status='paused';paused.setScope('a','inbox');await paused.ctx.tryBootResume();assert.equal(paused.calls.length,0);
+ const failed=fixture({mailboxStatus:'complete_with_errors'});failed.setScope('a','inbox');await failed.ctx.tryBootResume();assert.equal(failed.calls.length,0);
+ const manual=fixture();manual.setScope('a','inbox');manual.state.busy=true;await manual.ctx.tryBootResume();manual.state.busy=false;await manual.ctx.tryBootResume();assert.equal(manual.calls.length,0);
+ const f=fixture({mailboxStatus:'pending'});f.setScope('a','other');await f.ctx.tryBootResume();assert.equal(f.calls.length,0);f.setScope('a','inbox');await f.ctx.tryBootResume();assert.deepEqual(f.calls,[['folder',false]]);
 });

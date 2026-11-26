@@ -1,4 +1,4 @@
-﻿
+
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const src=fs.readFileSync(path.join(__dirname,'../beta/rebel-postmaster.user.js'),'utf8');
@@ -14,7 +14,7 @@ function fixture(opts={}){
   snapshot:()=>({messages:rows}),credibleMessageRow:m=>m._strongId===true,
   wait:async()=>{},paceIndexBatch:async()=>{pace++;change()},
   makeCapture:(messages,quality,notes)=>({messages,quality,notes,scope:{...scope}}),
-  request:async p=>{calls.push(p);return response},trace:()=>{},clean:String,openWatchBusy:false};
+  request:async p=>{calls.push(p);return response},trace:()=>{},clean:String,openWatchBusy:false,sourceAvailability:()=>({nativeRoots:1,credibleRows:rows.filter(m=>m._strongId).length}),hasExplicitEmptyFolderWitness:()=>false,hasNativeNonMailNotesView:()=>false,verify:async()=>({ok:true})};
  vm.createContext(ctx);vm.runInContext(src.slice(start,end),ctx);
  return{ctx,store,state,calls,scope,setScope:v=>{scope=v},setRows:v=>{rows=v},setMs:v=>{ms=v},setCs:v=>{cs=v},setChange:f=>{change=f},setResponse:v=>{response=v},setBusy:v=>{busy=v},setPaired:v=>{paired=v},paced:()=>pace};
 }
@@ -78,3 +78,28 @@ test('another tab owning the mailbox lock prevents the automatic upload',async()
  h.ctx.startPassiveWatcher();tick();await pending;assert.equal(h.calls.length,0);
 });
 
+
+
+test('idle presence uses an existing read-only bridge GET, without inventing mail progress or retry storms',async()=>{
+ const h=fixture();let gets=0;h.ctx.verify=async()=>{gets++;return {ok:true}};
+ const s=h.ctx.passiveScope();
+ assert.equal(await h.ctx.reportIdlePresence(s),true);assert.equal(gets,1);assert.equal(h.calls.length,0);
+ assert.equal(await h.ctx.reportIdlePresence(s),false);assert.equal(gets,1);
+ assert.equal(h.store.has('mvciPostmasterPassiveAckV1'),false);
+ const x=fixture();x.ctx.verify=async()=>{throw Error('offline')};
+ assert.equal(await x.ctx.reportIdlePresence(x.ctx.passiveScope()),false);
+ x.ctx.verify=async()=>{throw Error('must not retry immediately')};
+ assert.equal(await x.ctx.reportIdlePresence(x.ctx.passiveScope()),false);
+ const wrong=fixture();wrong.setRows([]);wrong.ctx.verify=async()=>{throw Error('no native evidence')};
+ assert.equal(await wrong.ctx.reportIdlePresence(wrong.ctx.passiveScope()),false);assert.equal(wrong.store.size,0);
+ const paused=fixture();paused.setMs({mailboxId:'a',status:'running'});assert.equal(await paused.ctx.reportIdlePresence(paused.ctx.passiveScope()),false);
+ const changed=fixture();const oldScope=changed.ctx.passiveScope();changed.setScope({mailbox:'b',key:'inbox',folder:'b:inbox'});assert.equal(await changed.ctx.reportIdlePresence(oldScope),false);
+});
+test('existing passive timer reports presence when the native list is unchanged, without an extra worker',async()=>{
+ const h=fixture();let tick,pending,gets=0;h.ctx.verify=async()=>{gets++;return {ok:true}};
+ h.ctx.setInterval=fn=>{tick=fn;return 1};
+ h.ctx.navigator={locks:{request:(_name,_opts,fn)=>{pending=Promise.resolve(fn({}));return pending}}};
+ h.ctx.startPassiveWatcher();tick();await pending;assert.equal(h.calls.length,1);assert.equal(gets,0);
+ tick();await pending;assert.equal(h.calls.length,1);assert.equal(gets,1);
+ tick();await pending;assert.equal(gets,1);
+});

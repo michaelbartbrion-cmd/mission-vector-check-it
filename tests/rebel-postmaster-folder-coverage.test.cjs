@@ -9,7 +9,7 @@ function harness(){
  let active=null,candidates=[],saved=0;
  const ctx={clean:x=>String(x||'').trim(),attr:(el,k)=>el?.[k]||'',selectedFolderCandidate:()=>active,
  folderCandidates:()=>candidates,mailboxMatches:ms=>!!ms&&ms.mailboxId==='mailbox-A',
- saveMailbox:()=>saved++};
+ crawlMatchesPage:()=>!!active,saveMailbox:()=>saved++};
  vm.createContext(ctx);vm.runInContext(source.slice(a,b),ctx);
  return {ctx,select:(key,label)=>{active={key,_el:{'aria-label':label}}},
  setCandidates:rows=>{candidates=rows.map(([key,label])=>({key,_el:{'aria-label':label}}))},saved:()=>saved};
