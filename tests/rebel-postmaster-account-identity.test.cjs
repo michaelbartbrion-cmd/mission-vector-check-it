@@ -60,7 +60,7 @@ test('Postmaster never presents the prior mailbox as complete when identity is u
  assert.match(source,/SCOPE UNVERIFIED/);
  assert.match(source,/VERIFY REQUIRED/);
  assert.match(source,/if\(!mailboxId\(\)\)throw new Error\('Outlook account identity not confirmed/);
- assert.match(source,/@version\s+1\.2\.36/);
+ assert.match(source,/@version\s+1\.2\.37/);
 });
 
 test('startup resumes interrupted exact mailbox only after the Outlook identity is ready',async()=>{

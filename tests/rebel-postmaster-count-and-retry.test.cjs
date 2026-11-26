@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const s=fs.readFileSync(path.join(__dirname,'../beta/rebel-postmaster.user.js'),'utf8');
 function code(a,b){const x=s.indexOf(a),y=s.indexOf(b,x+a.length);assert.ok(x>=0&&y>x);return s.slice(x,y)}
@@ -37,7 +37,7 @@ test('orchestrator uses bounded retry and only considers progress inside matchin
 
 
 test('hidden native-source failure does not burn a retry or navigate until the same source is visible',async()=>{
- const c={document:{visibilityState:'hidden'},mailboxAbort:false,state:{},render:()=>{},mailboxMatches:()=>true,targetMatchesPage:()=>true,waits:0};
+ const c={document:{visibilityState:'hidden'},mailboxAbort:false,state:{},render:()=>{},mailboxMatches:()=>true,targetMatchesPage:()=>true,sourceAvailability:()=>({nativeRoots:1,credibleRows:0,listBusy:false}),waits:0};
  c.wait=async()=>{c.waits++;c.document.visibilityState='visible'};
  vm.createContext(c);
  vm.runInContext(code('function hiddenNativeSourceError(','function pauseFolderSync(){'),c);
@@ -52,4 +52,17 @@ test('hidden native-source failure does not burn a retry or navigate until the s
  c.mailboxAbort=false;c.document.visibilityState='visible';c.targetMatchesPage=()=>false;
  await assert.rejects(c.waitForDeferredNativeView({},target),/scope changed/);
  assert.match(s,/if\(deferHiddenFolderRetry\(target\)\)/);
+});
+test('deferred same-folder crawl resumes when credible hidden native list returns without foregrounding Outlook',async()=>{
+ const c={document:{visibilityState:'hidden'},mailboxAbort:false,state:{},render:()=>{},mailboxMatches:()=>true,targetMatchesPage:()=>true,waits:0};
+ c.sourceAvailability=()=>({nativeRoots:1,credibleRows:c.waits?9:0,listBusy:false});
+ c.wait=async()=>{c.waits++};
+ vm.createContext(c);vm.runInContext(code('function hiddenNativeSourceError(','function pauseFolderSync(){'),c);
+ assert.equal(await c.waitForDeferredNativeView({},{}),true);
+ assert.equal(c.waits,1);assert.equal(c.document.visibilityState,'hidden');
+ c.waits=0;c.sourceAvailability=()=>({nativeRoots:1,credibleRows:9,listBusy:true});
+ c.wait=async()=>{c.waits++;c.targetMatchesPage=()=>false};
+ await assert.rejects(c.waitForDeferredNativeView({},{}),/scope changed/);assert.equal(c.waits,1);
+ const orchestration=code('async function runMailboxSync(','function pauseMailboxSync(');
+ assert.match(orchestration,/if\(target\.status==='pending'&&hiddenNativeSourceError\(target\.lastError\)\)\{if\(!await waitForDeferredNativeView\(ms,target\)\)break;target\.lastError='';ms\.lastError='';saveMailbox\(ms\)\}if\(!targetMatchesPage/);
 });

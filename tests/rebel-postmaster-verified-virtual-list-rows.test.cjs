@@ -64,3 +64,29 @@ test('non-message text alone does not certify a new mail item',()=>{
  const h=harness([row({id:'',text:'Account manager\nProfile settings',scroll:true})]);
  assert.equal(h.scan().length,0);
 });
+
+test('list sender address is an explicitly labeled field, never a display name or preview address',()=>{
+ const el=row({text:'recipient@example.com\nSubject Example\nContact other@example.com'});
+ const h=harness([el]);
+ assert.equal(h.parse(el,0).senderAddress,undefined);
+ el.attrs['data-sender-address']='sender@example.com';
+ assert.equal(h.parse(el,0).senderAddress,'sender@example.com');
+ el.attrs['data-sender-email']='conflict@example.com';
+ assert.equal(h.parse(el,0).senderAddress,undefined);
+});
+test('opened sender witness ignores body links and ambiguous header identity',()=>{
+ const h=harness([]);
+ const element=(label,text='')=>({attrs:{'aria-label':label},innerText:text,textContent:text,visible:true,contains:()=>false});
+ const header=element('From: Example Sender <sender@example.com>');
+ const bodyFrom=element('From: Other <other@example.com>');
+ const signature=element('Contact signature@example.com');
+ const body={contains:el=>[bodyFrom,signature].includes(el)};
+ const pane={attrs:{},querySelectorAll:()=>[header,bodyFrom,signature]};
+ const actual=h.openSenderWitness(pane,body,null);
+ assert.equal(actual.address,'sender@example.com');
+ assert.equal(actual.name,'Example Sender <sender@example.com>');
+ assert.equal(h.openSenderWitness(pane,pane,{senderName:'recipient@example.com'}).address,'');
+ assert.equal(h.openSenderWitness(pane,body,{senderAddress:'conflict@example.com'}).address,'');
+ assert.equal(h.openSenderWitness(pane,body,{senderAddress:'sender@example.com'}).address,'sender@example.com');
+ assert.doesNotMatch(source.slice(source.indexOf('function parseOpenMessage('),source.indexOf('function makeCapture(')),/pane\.querySelector\('a\[href\^="mailto:/);
+});
