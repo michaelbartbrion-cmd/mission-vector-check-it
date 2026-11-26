@@ -60,7 +60,7 @@ test('Postmaster never presents the prior mailbox as complete when identity is u
  assert.match(source,/SCOPE UNVERIFIED/);
  assert.match(source,/VERIFY REQUIRED/);
  assert.match(source,/if\(!mailboxId\(\)\)throw new Error\('Outlook account identity not confirmed/);
- assert.match(source,/@version\s+1\.2\.37/);
+ assert.match(source,/@version\s+1\.2\.38/);
 });
 
 test('startup resumes interrupted exact mailbox only after the Outlook identity is ready',async()=>{
@@ -69,7 +69,7 @@ test('startup resumes interrupted exact mailbox only after the Outlook identity 
  function fixture({mailboxStatus='running',folderStatus='running'}={}){
   let account='',folder='',ms={mailboxId:'a',status:mailboxStatus},cs={mailboxId:'a',folderKey:'inbox',status:folderStatus},locked=false;
   const calls=[],traces=[],state={busy:false};
-  const ctx={state,paired:()=>true,mailboxId:()=>account,selectedFolderCandidate:()=>folder?{key:folder}:null,
+  const ctx={state,document:{visibilityState:'visible'},pendingDeferredTarget:()=>null,sourceAvailability:()=>({nativeRoots:1,credibleRows:0,listBusy:false}),paired:()=>true,mailboxId:()=>account,selectedFolderCandidate:()=>folder?{key:folder}:null,
    mailboxState:()=>ms,crawlState:()=>cs,mailboxMatches:s=>!!s&&s.mailboxId===account,
    crawlMatchesPage:s=>!!s&&s.mailboxId===account&&s.folderKey===folder,
    navigator:{locks:{request:async(name,options,callback)=>{assert.equal(name,'mvci-postmaster-visible-a');assert.equal(options.ifAvailable,true);return callback(locked?null:{name})}}},
