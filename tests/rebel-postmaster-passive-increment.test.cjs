@@ -8,7 +8,7 @@ function fixture(opts={}){
  let scope={mailbox:'a',key:'inbox',folder:'a:inbox'},paired=true,busy=false,ms=null,cs=null,rows=[{_strongId:true,messageKey:'new-1',subject:'New'}],calls=[],pace=0;
  const store=new Map(),state={busy:false};
  let change=()=>{},response={workEmail:{accepted:true,messages:1}};
- const ctx={mailboxId:()=>scope.mailbox,currentFolderKey:()=>scope.key,folderId:()=>scope.folder,
+ const ctx={pendingDeferredTarget:m=>m?.status==='running'?m.folders?.find(f=>f.status==='pending'&&f.lastError==='hidden fixture')||null:null,mailboxId:()=>scope.mailbox,currentFolderKey:()=>scope.key,folderId:()=>scope.folder,
   paired:()=>paired,state,mailBusy:()=>busy,mailboxState:()=>ms,crawlState:()=>cs,
   GM_getValue:(k,d)=>store.get(k)||d,GM_setValue:(k,v)=>store.set(k,v),
   snapshot:()=>({messages:rows}),credibleMessageRow:m=>m._strongId===true,
@@ -102,4 +102,24 @@ test('existing passive timer reports presence when the native list is unchanged,
  h.ctx.startPassiveWatcher();tick();await pending;assert.equal(h.calls.length,1);assert.equal(gets,0);
  tick();await pending;assert.equal(h.calls.length,1);assert.equal(gets,1);
  tick();await pending;assert.equal(gets,1);
+});
+
+test('yielded collection reports real contact without counting progress or reading mail, only in the exact deferred scope',async()=>{
+ const h=fixture();let gets=0;h.ctx.verify=async()=>{gets++;return {ok:true}};
+ h.setMs({mailboxId:'a',status:'running',folders:[{key:'inbox',status:'pending',lastError:'hidden fixture'}]});
+ h.setCs({mailboxId:'a',status:'paused',folderKey:'inbox',seen:['previous']});
+ assert.equal(await h.ctx.collectPassiveVisible(),false);
+ assert.equal(await h.ctx.reportIdlePresence(h.ctx.passiveScope()),true);
+ assert.equal(gets,1);assert.equal(h.calls.length,0);
+ assert.equal(await h.ctx.reportIdlePresence(h.ctx.passiveScope()),false);
+ assert.equal(h.store.has('mvciPostmasterPassiveAckV1'),false);
+ const other=fixture();other.setMs({mailboxId:'a',status:'running',folders:[{key:'sent',status:'pending',lastError:'hidden fixture'}]});
+ other.ctx.verify=async()=>{throw Error('must not verify another folder')};
+ assert.equal(await other.ctx.reportIdlePresence(other.ctx.passiveScope()),false);
+ assert.equal(other.store.size,0);
+ const busy=fixture();busy.setMs({mailboxId:'a',status:'running',folders:[{key:'inbox',status:'pending',lastError:'hidden fixture'}]});
+ busy.setCs({mailboxId:'a',status:'running'});
+ assert.equal(await busy.ctx.reportIdlePresence(busy.ctx.passiveScope()),false);assert.equal(busy.store.size,0);
+ busy.setCs(null);busy.setRows([]);
+ assert.equal(await busy.ctx.reportIdlePresence(busy.ctx.passiveScope()),false);assert.equal(busy.store.size,0);
 });

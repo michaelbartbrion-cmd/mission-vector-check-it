@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Rebel Postmaster
 // @namespace    mission-vector-check-it-rebel-postmaster
-// @version      1.2.38
+// @version      1.2.39
 // @updateURL    https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @downloadURL  https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js
 // @description  Minimal read-only Outlook Web collector for Rebel Command with whole-mailbox indexing and automatic capture of messages the user opens.
@@ -22,7 +22,7 @@
 (function(){
 'use strict';
 if(window.top!==window.self||window.MVCI_REBEL_POSTMASTER)return;
-const VERSION='rebel-postmaster-1.2.38';
+const VERSION='rebel-postmaster-1.2.39';
 const DEFAULT_ENDPOINT='https://base44.app/api/apps/6aa6b7634a031657377d4fad/functions/telemetryBridge';
 const MANAGED_UPDATE_URL='https://raw.githubusercontent.com/michaelbartbrion-cmd/mission-vector-check-it/main/beta/rebel-postmaster.user.js';
 function openManagedUpdate(){
@@ -676,11 +676,21 @@ async function collectPassiveVisible(){
     }finally{if(sending)state.busy=false;passiveBusy=false;}
 }
 const PASSIVE_PRESENCE_KEY='mvciPostmasterPresenceAttemptV1',PASSIVE_PRESENCE_INTERVAL_MS=5*60000;
+function idlePresenceAllowed(s){
+    if(passiveAllowed(s))return true;
+    // A yielded crawl is waiting, not holding the collection lock. Permit
+    // contact verification only, from the same saved mailbox and folder.
+    // The existing watcher still acquires the per-mailbox lock first.
+    if(!paired()||state.busy||!passiveScopeSame(s)||mailBusy())return false;
+    const ms=mailboxState(),cs=crawlState(),target=pendingDeferredTarget(ms);
+    return ms?.mailboxId===s.mailbox&&target?.key===s.key&&
+        !(cs?.mailboxId===s.mailbox&&cs.status==='running');
+}
 async function reportIdlePresence(s){
-    if(!passiveAllowed(s)||passiveBusy||openWatchBusy)return false;
+    if(!idlePresenceAllowed(s)||passiveBusy||openWatchBusy)return false;
     const availability=sourceAvailability();
     if(!(availability.nativeRoots>0&&availability.credibleRows>0)&&!hasExplicitEmptyFolderWitness()&&!hasNativeNonMailNotesView())return false;
-    if(!passiveAllowed(s))return false;
+    if(!idlePresenceAllowed(s))return false;
     const now=Date.now(),prior=GM_getValue(PASSIVE_PRESENCE_KEY,{});
     if(prior?.mailbox===s.mailbox&&Number.isFinite(prior.at)&&now>=prior.at&&now-prior.at<PASSIVE_PRESENCE_INTERVAL_MS)return false;
     GM_setValue(PASSIVE_PRESENCE_KEY,{mailbox:s.mailbox,at:now});
@@ -869,7 +879,7 @@ function render(){
     state.last=snapshot();const r=ensureUi();r.replaceChildren();const cs=crawlState(),same=crawlMatchesPage(cs),ms=mailboxState(),mb=mailboxSummary(ms),scopeOk=mailboxMatches(ms),needsVerification=mailboxHasUnverifiedEmpty(ms),retryNeeded=mailboxNeedsRetry(ms);
     if(state.open){
         const p=add(r,'div',null,'p'),h=add(p,'div',null,'h'),title=add(h,'div');add(title,'b','REBEL POSTMASTER');
-        const sub=add(title,'div','v1.2.38 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
+        const sub=add(title,'div','v1.2.39 · read-only Outlook collector');sub.style.fontSize='10px';sub.style.opacity='.75';
         const close=add(h,'button','','orb header-orb');close.type='button';close.dataset.pmAction='close';close.title='Minimize Rebel Postmaster';close.setAttribute('aria-label','Minimize Rebel Postmaster');close.innerHTML=REBEL_SYMBOL_HTML;
         const b=add(p,'div',null,'b');
         add(b,'div',`Connection: ${paired()?'paired':'needed'} · Folder: ${folderName()}`,'note');
